@@ -74,7 +74,7 @@ export function OnboardingWizard() {
         position: "fixed",
         inset: 0,
         zIndex: 9999,
-        background: "rgba(0, 0, 0, 0.7)",
+        background: "color-mix(in oklch, var(--bg) 80%, transparent)",
         backdropFilter: "blur(6px)",
         display: "flex",
         alignItems: "center",
@@ -84,13 +84,13 @@ export function OnboardingWizard() {
     >
       <div
         style={{
-          background: "var(--bg)",
+          background: "var(--surface)",
           border: "1px solid var(--border)",
-          borderRadius: "var(--radius)",
+          borderRadius: "var(--radius-lg)",
           padding: 32,
           maxWidth: 480,
           width: "100%",
-          boxShadow: "0 20px 60px rgba(0, 0, 0, 0.5)",
+          boxShadow: "var(--shadow-lg)",
         }}
       >
         <div
@@ -108,12 +108,13 @@ export function OnboardingWizard() {
                 fontFamily: "var(--serif)",
                 fontSize: 20,
                 fontWeight: 600,
-                color: "var(--text-strong)",
+                letterSpacing: "-0.02em",
+                color: "var(--fg-strong)",
               }}
             >
               Bienvenue dans {"{{APP_NAME}}"}
             </div>
-            <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+            <div style={{ fontSize: 12, color: "var(--muted)" }}>
               {"{{DOMAIN_BRIEF}}"}
             </div>
           </div>
@@ -121,9 +122,9 @@ export function OnboardingWizard() {
         <label
           style={{
             display: "block",
-            fontSize: 13,
+            fontSize: 12,
             fontWeight: 500,
-            color: "var(--text)",
+            color: "var(--muted)",
             marginBottom: 6,
           }}
         >
@@ -143,7 +144,7 @@ export function OnboardingWizard() {
             alignItems: "center",
             gap: 8,
             fontSize: 13,
-            color: "var(--text)",
+            color: "var(--fg)",
             marginBottom: 20,
             cursor: "pointer",
           }}
@@ -152,6 +153,7 @@ export function OnboardingWizard() {
             type="checkbox"
             checked={isAdmin}
             onChange={(e) => setIsAdmin(e.target.checked)}
+            style={{ width: "auto" }}
           />
           Je suis administrateur de cette app
         </label>
@@ -159,7 +161,7 @@ export function OnboardingWizard() {
           <div
             style={{
               fontSize: 12,
-              color: "var(--red, crimson)",
+              color: "var(--red)",
               marginBottom: 12,
             }}
           >

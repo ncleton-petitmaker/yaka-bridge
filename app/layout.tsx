@@ -28,7 +28,7 @@ export default function RootLayout({
         />
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
-      <body>
+      <body style={{ background: "var(--bg)", color: "var(--fg)" }}>
         {children}
         <OnboardingWizard />
         <StorageGuard />

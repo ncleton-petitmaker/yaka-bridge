@@ -55,7 +55,7 @@ export function ConflictBanner() {
           gap: 8,
           padding: "6px 14px",
           background: "var(--amber-bg)",
-          color: "var(--amber)",
+          color: "var(--amber-fg)",
           border: "1px solid var(--amber-border)",
           borderRadius: 0,
           cursor: "pointer",
@@ -66,7 +66,7 @@ export function ConflictBanner() {
         }}
         title="Cliquer pour voir le détail"
       >
-        <span style={{ fontWeight: 700 }}>⚠</span>
+        <span aria-hidden style={{ fontWeight: 700 }}>!</span>
         {conflicts.length} fichier{conflicts.length > 1 ? "s" : ""} en conflit dans le
         dossier partagé. Cliquer pour résoudre.
       </button>
@@ -77,7 +77,8 @@ export function ConflictBanner() {
           style={{
             position: "fixed",
             inset: 0,
-            background: "rgba(0,0,0,0.5)",
+            background: "color-mix(in oklch, var(--bg) 70%, transparent)",
+            backdropFilter: "blur(4px)",
             zIndex: 1000,
             display: "flex",
             alignItems: "center",
@@ -88,14 +89,15 @@ export function ConflictBanner() {
           <div
             onClick={(e) => e.stopPropagation()}
             style={{
-              background: "var(--bg-panel)",
+              background: "var(--surface)",
               border: "1px solid var(--border)",
-              borderRadius: "var(--radius)",
+              borderRadius: "var(--radius-lg)",
               padding: 20,
               maxWidth: 720,
               width: "100%",
               maxHeight: "80vh",
               overflowY: "auto",
+              boxShadow: "var(--shadow-lg)",
             }}
           >
             <div
@@ -106,16 +108,18 @@ export function ConflictBanner() {
                 marginBottom: 12,
               }}
             >
-              <h2
+              <h3
                 style={{
-                  fontSize: 16,
+                  fontFamily: "var(--serif)",
+                  fontSize: 17,
                   fontWeight: 600,
-                  color: "var(--text-strong)",
+                  letterSpacing: "-0.02em",
+                  color: "var(--fg-strong)",
                   margin: 0,
                 }}
               >
                 Conflits de synchronisation détectés
-              </h2>
+              </h3>
               <button
                 onClick={() => setOpen(false)}
                 className="ghost"
@@ -124,7 +128,7 @@ export function ConflictBanner() {
                 Fermer
               </button>
             </div>
-            <p style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.55 }}>
+            <p style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.55 }}>
               Le sync engine (OneDrive, Dropbox, etc.) a créé ces fichiers parce que
               deux personnes ont modifié la même ressource en même temps. Comparez les
               versions, gardez la bonne, supprimez le doublon. <strong>Ne supprimez
@@ -145,7 +149,7 @@ export function ConflictBanner() {
                   key={c.path}
                   style={{
                     padding: "8px 12px",
-                    background: "var(--bg-subtle)",
+                    background: "var(--subtle)",
                     border: "1px solid var(--border-soft)",
                     borderRadius: "var(--radius-sm)",
                     fontSize: 12,
@@ -155,7 +159,7 @@ export function ConflictBanner() {
                     style={{
                       fontFamily: "var(--mono)",
                       fontSize: 11,
-                      color: "var(--text-strong)",
+                      color: "var(--fg-strong)",
                       wordBreak: "break-all",
                     }}
                   >
@@ -164,8 +168,9 @@ export function ConflictBanner() {
                   <div
                     style={{
                       fontSize: 11,
-                      color: "var(--text-muted)",
+                      color: "var(--muted)",
                       marginTop: 2,
+                      fontVariantNumeric: "tabular-nums",
                     }}
                   >
                     {(c.size / 1024).toFixed(1)} Ko · modifié{" "}

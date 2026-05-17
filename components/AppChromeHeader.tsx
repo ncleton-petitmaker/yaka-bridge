@@ -72,18 +72,7 @@ export function AppChromeHeader({ user: userProp }: { user?: string }) {
   return (
     <>
       <ConflictBanner />
-      <header
-        className="app-chrome-header"
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 12,
-          padding: "4px 14px",
-          borderBottom: "1px solid var(--border)",
-          height: 40,
-          background: "var(--bg)",
-        }}
-      >
+      <header className="app-chrome-header">
         <Link
           href="/"
           style={{
@@ -101,16 +90,17 @@ export function AppChromeHeader({ user: userProp }: { user?: string }) {
               fontFamily: "var(--serif)",
               fontWeight: 600,
               fontSize: 14,
-              color: "var(--text-strong)",
+              letterSpacing: "-0.01em",
+              color: "var(--fg-strong)",
             }}
           >
             {"{{APP_NAME}}"}
           </span>
-          <span style={{ color: "var(--text-muted)", fontSize: 12 }}>·</span>
+          <span style={{ color: "var(--muted)", fontSize: 12 }}>·</span>
           <span
             style={{
               fontSize: 11,
-              color: "var(--text-muted)",
+              color: "var(--muted)",
               fontWeight: 400,
             }}
           >
@@ -136,8 +126,6 @@ export function AppChromeHeader({ user: userProp }: { user?: string }) {
                 className={`chat-header-tab${active ? " active" : ""}`}
                 style={{
                   textDecoration: "none",
-                  color: active ? "var(--text-strong)" : "var(--text-muted)",
-                  borderBottom: active ? "2px solid var(--text)" : "2px solid transparent",
                   padding: "8px 0",
                   fontSize: 13,
                   fontWeight: 500,
@@ -153,28 +141,10 @@ export function AppChromeHeader({ user: userProp }: { user?: string }) {
 
         <div style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
           <span
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-              padding: "4px 10px",
-              borderRadius: 999,
-              background: "var(--bg-subtle)",
-              border: "1px solid var(--border)",
-              fontSize: 12,
-              color: "var(--text)",
-            }}
+            className="pill ok"
+            style={{ cursor: "default" }}
           >
-            <span
-              aria-hidden
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: 999,
-                background: "var(--green)",
-                display: "inline-block",
-              }}
-            />
+            <span className="dot" aria-hidden />
             {userLabel}
             {profile.isAdmin && (
               <span
@@ -183,10 +153,8 @@ export function AppChromeHeader({ user: userProp }: { user?: string }) {
                   fontWeight: 600,
                   textTransform: "uppercase",
                   letterSpacing: "0.06em",
-                  color: "var(--accent-strong)",
-                  background: "var(--accent-tint)",
-                  padding: "1px 5px",
-                  borderRadius: "var(--radius-sm)",
+                  color: "var(--muted)",
+                  fontFamily: "var(--mono)",
                   marginLeft: 2,
                 }}
               >
@@ -198,7 +166,7 @@ export function AppChromeHeader({ user: userProp }: { user?: string }) {
             type="button"
             onClick={toggleTheme}
             aria-label={theme === "dark" ? "Passer en mode clair" : "Passer en mode sombre"}
-            className="ghost"
+            className="ghost icon-btn"
             style={{
               display: "inline-flex",
               alignItems: "center",
@@ -206,11 +174,7 @@ export function AppChromeHeader({ user: userProp }: { user?: string }) {
               width: 28,
               height: 28,
               padding: 0,
-              borderRadius: "var(--radius-sm)",
-              background: "transparent",
-              border: "1px solid var(--border)",
-              color: "var(--text-muted)",
-              cursor: "pointer",
+              color: "var(--muted)",
             }}
           >
             <Icon name="sun-moon" size={14} />

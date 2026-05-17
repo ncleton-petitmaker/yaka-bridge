@@ -1,22 +1,31 @@
 import Link from "next/link";
-import { Mark } from "@/components/Mark";
+import { AppChromeHeader } from "@/components/AppChromeHeader";
 import { Icon } from "@/components/Icon";
 
 /**
- * Page d'accueil 2-colonnes, héritée du pattern oif-eval :
- * - aside : brand + liste des sections (génériques par défaut)
- * - main : hero serif + CTA principal + cards de stats
+ * Page d'accueil — mini-showcase TeamFactory.
  *
- * L'agent ui-page-generator de la factory enrichit `navItems` et `stats` selon
- * le brief métier. Les valeurs ici sont des placeholders neutres.
+ * Layout : header global + main centré avec :
+ *  - Hero serif "{{APP_NAME}}" + sous-titre `--muted`
+ *  - Grille de 3 object-cards (auto-fill, minmax(220px, 1fr))
+ *  - Demo des 5 status pills (1 par tint family)
+ *  - 1 seul bouton primary `--accent` + 1 bouton ghost border
+ *
+ * L'agent ui-page-generator personnalise les cards selon le brief métier
+ * (clé `home.cards` dans template.config.json). Les valeurs ici sont
+ * des placeholders neutres.
+ *
+ * IMPORTANT — TeamFactory invariant : aucun hex hardcodé, accent rationné
+ * à ≤2 uses (1 primary CTA + 1 brand mark active). Status via tints
+ * sémantiques (.pill.ok/.info/.running/.warn/.error).
  */
-const navItems: {
+const homeCards: {
   href: string;
   label: string;
   description: string;
   icon: Parameters<typeof Icon>[0]["name"];
 }[] = [
-  // AGENT-SLOT: home-nav-items — l'agent ui-page-generator remplit ces entrées.
+  // AGENT-SLOT: home-cards — l'agent ui-page-generator remplit selon le brief.
   {
     href: "/runs",
     label: "Runs",
@@ -37,180 +46,138 @@ const navItems: {
   },
 ];
 
-const stats: { label: string; value: string }[] = [
-  // AGENT-SLOT: home-stats — l'agent ui-page-generator remplit selon le métier.
-  { label: "{{STAT_1_LABEL}}", value: "—" },
-  { label: "{{STAT_2_LABEL}}", value: "—" },
-  { label: "{{STAT_3_LABEL}}", value: "—" },
-];
-
 export default function HomePage() {
   return (
     <div className="app">
-      <div className="entry">
-        <aside className="entry-side">
-          <div className="entry-brand" style={{ marginBottom: 8 }}>
-            <Mark size={36} />
-            <div className="entry-brand-text">
-              <h1 className="entry-brand-title">{"{{APP_NAME}}"}</h1>
-              <span className="entry-brand-subtitle">
-                {"{{DOMAIN_BRIEF}}"}
-              </span>
-            </div>
-          </div>
-
-          <div
+      <AppChromeHeader />
+      <main
+        style={{
+          overflowY: "auto",
+          padding: "40px 32px",
+          background: "var(--bg)",
+        }}
+      >
+        <div style={{ maxWidth: 920, margin: "0 auto" }}>
+          {/* Hero */}
+          <h1
             style={{
-              fontSize: 11,
-              letterSpacing: "0.08em",
-              textTransform: "uppercase",
-              color: "var(--text-muted)",
-              fontWeight: 500,
-              marginTop: 8,
-              marginBottom: 4,
+              fontFamily: "var(--serif)",
+              fontWeight: 600,
+              fontSize: 36,
+              letterSpacing: "-0.02em",
+              color: "var(--fg-strong)",
+              margin: 0,
+              marginBottom: 12,
             }}
           >
-            Sections
+            {"{{APP_NAME}}"}
+          </h1>
+          <p
+            style={{
+              fontSize: 14,
+              color: "var(--muted)",
+              lineHeight: 1.6,
+              maxWidth: 640,
+              marginBottom: 28,
+            }}
+          >
+            {"{{DOMAIN_BRIEF}}"}
+          </p>
+
+          {/* CTA row — 1 primary accent + 1 ghost border */}
+          <div style={{ display: "flex", gap: 8, marginBottom: 36 }}>
+            <Link href="/runs" style={{ textDecoration: "none" }}>
+              <button className="primary" style={{ padding: "8px 16px", fontSize: 13 }}>
+                Nouveau run
+              </button>
+            </Link>
+            <Link href="/dashboard" style={{ textDecoration: "none" }}>
+              <button className="ghost" style={{ padding: "8px 16px", fontSize: 13 }}>
+                Voir le dashboard
+              </button>
+            </Link>
           </div>
-          <nav style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            {navItems.map((item) => (
+
+          {/* Object cards grid */}
+          <div
+            style={{
+              display: "grid",
+              gap: 14,
+              gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+              marginBottom: 36,
+            }}
+          >
+            {homeCards.map((c) => (
               <Link
-                key={item.href}
-                href={item.href}
-                className="settings-nav-item"
-                style={{ textDecoration: "none" }}
+                key={c.href}
+                href={c.href}
+                className="object-card"
+                style={{ textDecoration: "none", color: "inherit", padding: 14 }}
               >
-                <Icon name={item.icon} size={16} />
-                <span>
-                  <strong>{item.label}</strong>
-                  <small>{item.description}</small>
-                </span>
-              </Link>
-            ))}
-          </nav>
-        </aside>
-
-        <main
-          style={{
-            padding: 48,
-            overflowY: "auto",
-            background: "var(--bg)",
-          }}
-        >
-          <div style={{ maxWidth: 720 }}>
-            <h2
-              style={{
-                fontFamily: "var(--serif)",
-                fontWeight: 600,
-                fontSize: 36,
-                letterSpacing: "-0.02em",
-                color: "var(--text-strong)",
-                marginBottom: 12,
-              }}
-            >
-              {"{{APP_NAME}}"}
-            </h2>
-            <p
-              style={{
-                fontSize: 15,
-                color: "var(--text-muted)",
-                lineHeight: 1.6,
-                marginBottom: 32,
-              }}
-            >
-              {"{{DOMAIN_BRIEF}}"}
-            </p>
-
-            <div
-              className="pane"
-              style={{
-                padding: 24,
-                marginBottom: 24,
-                display: "flex",
-                alignItems: "center",
-                gap: 20,
-                flexWrap: "wrap",
-              }}
-            >
-              <div style={{ flex: "1 1 280px", minWidth: 0 }}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    marginBottom: 10,
+                    color: "var(--muted)",
+                  }}
+                >
+                  <Icon name={c.icon} size={16} />
+                </div>
                 <div
                   style={{
                     fontFamily: "var(--serif)",
                     fontWeight: 600,
-                    fontSize: 18,
-                    color: "var(--text-strong)",
+                    fontSize: 15,
+                    color: "var(--fg-strong)",
                     marginBottom: 4,
                   }}
                 >
-                  Démarrer
+                  {c.label}
                 </div>
-                <div style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.5 }}>
-                  {/* AGENT-SLOT: home-cta-description */}
-                  Lancez un nouveau run pour explorer ce que cette app peut faire.
+                <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.45 }}>
+                  {c.description}
                 </div>
-              </div>
-              <Link href="/runs" style={{ textDecoration: "none" }}>
-                <button
-                  className="primary"
-                  style={{ padding: "8px 16px", fontSize: 14, cursor: "pointer" }}
-                >
-                  Nouveau run
-                </button>
               </Link>
-            </div>
-
-            {stats.length > 0 && (
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-                  gap: 12,
-                }}
-              >
-                {stats.map((s) => (
-                  <Stat key={s.label} label={s.label} value={s.value} />
-                ))}
-              </div>
-            )}
+            ))}
           </div>
-        </main>
-      </div>
-    </div>
-  );
-}
 
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div
-      className="pane"
-      style={{
-        padding: 16,
-        display: "flex",
-        flexDirection: "column",
-        gap: 4,
-      }}
-    >
-      <div
-        style={{
-          fontSize: 11,
-          letterSpacing: "0.08em",
-          textTransform: "uppercase",
-          color: "var(--text-muted)",
-          fontWeight: 500,
-        }}
-      >
-        {label}
-      </div>
-      <div
-        style={{
-          fontFamily: "var(--serif)",
-          fontWeight: 600,
-          fontSize: 22,
-          color: "var(--text-strong)",
-        }}
-      >
-        {value}
-      </div>
+          {/* Status pills demo — 1 per tint family (purple uses the pulse) */}
+          <div
+            style={{
+              borderTop: "1px solid var(--border-soft)",
+              paddingTop: 20,
+            }}
+          >
+            <div className="eyebrow" style={{ marginBottom: 10 }}>
+              États
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              <span className="pill ok">
+                <span className="dot" />
+                terminé
+              </span>
+              <span className="pill info">
+                <span className="dot" />
+                info
+              </span>
+              <span className="pill running">
+                <span className="dot" />
+                en cours
+              </span>
+              <span className="pill warn">
+                <span className="dot" />
+                en attente
+              </span>
+              <span className="pill error">
+                <span className="dot" />
+                erreur
+              </span>
+            </div>
+          </div>
+        </div>
+      </main>
     </div>
   );
 }

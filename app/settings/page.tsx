@@ -186,8 +186,8 @@ export default function SettingsPage() {
                 ou autre section métier si le brief le demande. */}
 
             {saving && <p style={{ fontSize: 13, color: "var(--text-muted)" }}>Enregistrement…</p>}
-            {info && <p style={{ fontSize: 13, color: "var(--green, green)" }}>{info}</p>}
-            {error && <p style={{ fontSize: 13, color: "var(--red, crimson)" }}>{error}</p>}
+            {info && <p style={{ fontSize: 13, color: "var(--green-fg)" }}>{info}</p>}
+            {error && <p style={{ fontSize: 13, color: "var(--red-fg)" }}>{error}</p>}
           </div>
         )}
       </main>

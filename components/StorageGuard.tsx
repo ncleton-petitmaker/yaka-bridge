@@ -101,7 +101,7 @@ export function StorageGuard() {
         position: "fixed",
         inset: 0,
         zIndex: 9998,
-        background: "rgba(0, 0, 0, 0.65)",
+        background: "color-mix(in oklch, var(--bg) 75%, transparent)",
         backdropFilter: "blur(4px)",
         display: "flex",
         alignItems: "center",
@@ -111,29 +111,32 @@ export function StorageGuard() {
     >
       <div
         style={{
-          background: "var(--bg)",
+          background: "var(--surface)",
           border: "1px solid var(--border)",
-          borderRadius: "var(--radius)",
+          borderRadius: "var(--radius-lg)",
           padding: 28,
           maxWidth: 560,
           width: "100%",
-          boxShadow: "0 20px 60px rgba(0, 0, 0, 0.4)",
+          boxShadow: "var(--shadow-lg)",
         }}
       >
-        <div
+        <h3
           style={{
+            fontFamily: "var(--serif)",
             fontSize: 18,
             fontWeight: 600,
-            color: "var(--text-strong)",
+            letterSpacing: "-0.02em",
+            color: "var(--fg-strong)",
+            margin: 0,
             marginBottom: 8,
           }}
         >
           Configuration de stockage requise
-        </div>
+        </h3>
         <div
           style={{
             fontSize: 13,
-            color: "var(--text-muted)",
+            color: "var(--muted)",
             marginBottom: 16,
             lineHeight: 1.6,
           }}
@@ -144,9 +147,9 @@ export function StorageGuard() {
         <div
           style={{
             fontSize: 12,
-            color: "var(--text)",
-            background: "var(--accent-tint)",
-            border: "1px solid color-mix(in srgb, var(--accent) 30%, var(--border))",
+            color: "var(--amber-fg)",
+            background: "var(--amber-bg)",
+            border: "1px solid var(--amber-border)",
             borderRadius: "var(--radius-sm)",
             padding: 12,
             marginBottom: 18,
@@ -164,11 +167,10 @@ export function StorageGuard() {
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
           <a
             href="/settings"
-            className="primary"
+            className="btn primary"
             style={{
               fontSize: 13,
               padding: "8px 16px",
-              borderRadius: "var(--radius-sm)",
               textDecoration: "none",
               fontWeight: 500,
             }}

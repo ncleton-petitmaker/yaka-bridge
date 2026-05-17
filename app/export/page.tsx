@@ -108,7 +108,7 @@ export default function ExportPage() {
           </div>
 
           {error && (
-            <p style={{ fontSize: 12, color: "var(--red, crimson)" }}>{error}</p>
+            <p style={{ fontSize: 12, color: "var(--red-fg)" }}>{error}</p>
           )}
         </section>
       </main>

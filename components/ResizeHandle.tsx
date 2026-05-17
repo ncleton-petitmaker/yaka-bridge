@@ -21,23 +21,20 @@ export function ResizeHandle({
         flexShrink: 0,
         width: isH ? 6 : "100%",
         height: isH ? "100%" : 6,
-        background: "var(--bg)",
+        background: "transparent",
         cursor: isH ? "col-resize" : "row-resize",
-        transition: "background 120ms ease",
       }}
       className="app-resize-handle"
     >
-      {/* trait visible au centre */}
+      {/* 1px hairline at center — gets stronger on hover via globals.css */}
       <span
         style={{
           position: "absolute",
           inset: isH ? "0 50% 0 50%" : "50% 0 50% 0",
           width: isH ? 1 : "auto",
           height: isH ? "auto" : 1,
-          background: "var(--border)",
           transform: isH ? "translateX(-50%)" : "translateY(-50%)",
           pointerEvents: "none",
-          transition: "background 120ms ease",
         }}
       />
     </PanelResizeHandle>

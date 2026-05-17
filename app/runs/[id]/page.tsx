@@ -35,14 +35,14 @@ export default function RunDetailPage({ params }: { params: { id: string } }) {
   return (
     <main style={{ maxWidth: 960, margin: "0 auto", padding: "32px 24px" }}>
       <header style={{ marginBottom: 16 }}>
-        <Link href="/runs" style={{ fontSize: 13, color: "#666" }}>
+        <Link href="/runs" style={{ fontSize: 13, color: "var(--muted)" }}>
           ← Runs
         </Link>
         <h1 style={{ fontSize: 22, fontWeight: 600, marginTop: 8 }}>
           Run {params.id.slice(0, 8)}…
         </h1>
         {run && (
-          <div style={{ fontSize: 13, color: "#666", marginTop: 4 }}>
+          <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 4 }}>
             statut : <strong>{run.status}</strong> · tag : {run.tag ?? "—"} ·
             démarré : {new Date(run.startedAt).toLocaleTimeString()}
             {" · "}
@@ -58,27 +58,29 @@ export default function RunDetailPage({ params }: { params: { id: string } }) {
       </header>
 
       {error && (
-        <div style={{ color: "crimson", fontSize: 13, marginBottom: 12 }}>{error}</div>
+        <div style={{ color: "var(--red-fg)", fontSize: 13, marginBottom: 12 }}>
+          {error}
+        </div>
       )}
 
       <section
         style={{
-          border: "1px solid var(--border, #e4e4e4)",
-          borderRadius: 8,
+          border: "1px solid var(--border)",
+          borderRadius: "var(--radius-sm)",
           padding: 12,
-          fontFamily: "ui-monospace, monospace",
+          fontFamily: "var(--mono)",
           fontSize: 12,
           maxHeight: 600,
           overflow: "auto",
-          background: "#fafafa",
+          background: "var(--subtle)",
         }}
       >
         {events.length === 0 ? (
-          <p style={{ color: "#999" }}>En attente d'events…</p>
+          <p style={{ color: "var(--soft)" }}>En attente d&apos;events…</p>
         ) : (
           events.map((ev, i) => (
             <div key={i} style={{ marginBottom: 4 }}>
-              <span style={{ color: "#888" }}>
+              <span style={{ color: "var(--soft)" }}>
                 {new Date(ev.ts).toLocaleTimeString()} [{ev.kind}]
               </span>{" "}
               <span>{ev.text ?? ev.status ?? ev.error ?? ""}</span>

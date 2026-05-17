@@ -119,7 +119,7 @@ export default function LogsPage() {
         {loading ? (
           <p>Chargement…</p>
         ) : error ? (
-          <p style={{ color: "var(--red, crimson)" }}>{error}</p>
+          <p style={{ color: "var(--red-fg)" }}>{error}</p>
         ) : events.length === 0 ? (
           <p style={{ color: "var(--text-muted)", fontSize: 14 }}>Aucun événement.</p>
         ) : (
@@ -153,10 +153,10 @@ export default function LogsPage() {
                       padding: 8,
                       color:
                         ev.result === "success"
-                          ? "var(--green, green)"
+                          ? "var(--green-fg)"
                           : ev.result === "denied"
-                          ? "var(--amber, orange)"
-                          : "var(--red, crimson)",
+                          ? "var(--amber-fg)"
+                          : "var(--red-fg)",
                     }}
                   >
                     {ev.result}

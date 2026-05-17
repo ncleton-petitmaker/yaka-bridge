@@ -53,7 +53,7 @@ export default function SkillsPage() {
   return (
     <main style={{ maxWidth: 1100, margin: "0 auto", padding: "32px 24px" }}>
       <header style={{ marginBottom: 16 }}>
-        <Link href="/" style={{ fontSize: 13, color: "#666" }}>
+        <Link href="/" style={{ fontSize: 13, color: "var(--muted)" }}>
           ← Accueil
         </Link>
         <h1 style={{ fontSize: 22, fontWeight: 600, marginTop: 8 }}>Skills</h1>
@@ -62,7 +62,7 @@ export default function SkillsPage() {
       <div style={{ display: "grid", gridTemplateColumns: "240px 1fr", gap: 16 }}>
         <aside>
           {skills.length === 0 ? (
-            <p style={{ fontSize: 13, color: "#666" }}>
+            <p style={{ fontSize: 13, color: "var(--muted)" }}>
               Aucun skill. Pose un fichier `.skill.md` dans
               <code> skills-template/_global/</code> et relance `npm run deploy-data`.
             </p>
@@ -81,10 +81,12 @@ export default function SkillsPage() {
                       width: "100%",
                       textAlign: "left",
                       padding: "8px 10px",
-                      border: "1px solid var(--border, #e4e4e4)",
-                      borderRadius: 6,
+                      border: "1px solid var(--border)",
+                      borderRadius: "var(--radius-sm)",
                       background:
-                        selected?.filename === s.filename ? "#f0f0f0" : "transparent",
+                        selected?.filename === s.filename
+                          ? "var(--subtle)"
+                          : "transparent",
                       cursor: "pointer",
                       fontSize: 13,
                     }}
@@ -106,24 +108,30 @@ export default function SkillsPage() {
                 rows={28}
                 style={{
                   width: "100%",
-                  fontFamily: "ui-monospace, monospace",
+                  fontFamily: "var(--mono)",
                   fontSize: 13,
                   padding: 12,
-                  border: "1px solid var(--border, #e4e4e4)",
-                  borderRadius: 6,
+                  border: "1px solid var(--border)",
+                  borderRadius: "var(--radius-sm)",
+                  background: "var(--surface)",
+                  color: "var(--fg)",
                 }}
               />
               <div style={{ marginTop: 10, display: "flex", gap: 8, alignItems: "center" }}>
                 <button onClick={onSave} disabled={saving}>
                   {saving ? "Enregistrement…" : "Enregistrer"}
                 </button>
-                {info && <span style={{ color: "green", fontSize: 13 }}>{info}</span>}
-                {error && <span style={{ color: "crimson", fontSize: 13 }}>{error}</span>}
+                {info && (
+                  <span style={{ color: "var(--green-fg)", fontSize: 13 }}>{info}</span>
+                )}
+                {error && (
+                  <span style={{ color: "var(--red-fg)", fontSize: 13 }}>{error}</span>
+                )}
               </div>
             </>
           ) : (
-            <p style={{ color: "#666", fontSize: 14 }}>
-              Sélectionne un skill à gauche pour l'éditer.
+            <p style={{ color: "var(--muted)", fontSize: 14 }}>
+              Sélectionne un skill à gauche pour l&apos;éditer.
             </p>
           )}
         </section>

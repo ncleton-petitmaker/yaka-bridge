@@ -87,6 +87,33 @@ Tu lis **toujours** `${outputDir}/server/types.ts` avant de générer la moindre
 
 ## Méthodologie (REFONTE shell-first 2026-05-17)
 
+### CONVENTIONS DESIGN SYSTEM (TeamFactory — invariant absolu)
+
+Toute UI domain DOIT respecter les conventions TeamFactory :
+
+1. **Aucun hex hardcodé** dans les composants. Tous les styles passent par
+   `var(--token)` ou `color-mix(in oklch, var(--accent) X%, transparent)`.
+2. **Tokens disponibles** :
+   - Surfaces : `--bg` (cream paper), `--surface` (white card), `--subtle` (hover/inset rows), `--bg-muted` (deeper inset)
+   - Bordures : `--border` (1px hairline default), `--border-strong` (hover/active), `--border-soft` (sub-divider)
+   - Texte : `--fg` (body), `--fg-strong` (heading), `--muted` (meta), `--soft` (tertiary), `--faint` (placeholder). Aliases `--text/--text-strong/--text-muted/--text-soft/--text-faint` exposés pour rétro-compat ; **prefer canonical names** dans le nouveau code.
+   - Accent (rationné ≤2 uses/screen) : `--accent` (primary CTA + brand + 1 running row), `--accent-strong` (hover), `--accent-soft` (focus ring 3px)
+   - Status tints (jamais l'accent) : `--green-fg/-bg/-border` (success), `--blue-fg/-bg/-border` (info), `--purple-fg/-bg/-border` (running/active + pulse), `--red-fg/-bg/-border` (error), `--amber-fg/-bg/-border` (awaiting input)
+3. **Radius** : 6px (sm = pill chip / button), 10px (md = card / pane), 14px (lg = drawer / modal), 999px (full pill)
+4. **Shadow** : `--shadow-xs/sm/md/lg`, jamais drop-shadow custom
+5. **Type** :
+   - h1/h2 avec `font-family: var(--serif)` (Source Serif Pro), font-weight 600, letter-spacing -0.02em
+   - Body avec system sans, 13.5px base, line-height 1.5
+   - Mono `--mono` uniquement pour IDs, paths, sha, tabular-nums sur les chiffres
+6. **Motion** : `transition: ... 120ms ease`, animation `pulse` réservée à l'état "running" (1 seule row à la fois max)
+7. **Pills pour state, cards pour objects** :
+   - Status badge = `border-radius: 999px`, tint pill (status family fg/bg/border)
+   - Card object = `background: var(--surface)`, `border: 1px solid var(--border)`, `border-radius: var(--radius-md)`, `box-shadow: var(--shadow-xs)`. Hover : `translateY(-1px) + --shadow-sm + --border-strong`.
+8. **Tables** : `background: var(--surface)`, header `background: var(--subtle)`, row hover `background: var(--subtle)`, selected row `background: color-mix(in oklch, var(--accent) 8%, transparent)` (max 1 row à la fois).
+9. **3-panels** : ResizeHandle invisible (1px border-color), hover `--border-strong`. Panel sidebar `background: var(--surface)`, center `--bg`, droit `--surface`.
+
+**Test conformité** : avant de finir, grep ton output pour `#[0-9a-f]{3,6}` — toute occurrence (hors commentaire `/* ... */`) est un FAIL.
+
 ### Étape 1 — Vérifier prérequis + lire le shell
 
 1. `test -d ${outputDir}` → sinon erreur.
