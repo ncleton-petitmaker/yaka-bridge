@@ -428,13 +428,22 @@ async function spawnAgent(agent, brief, outputDir, opts) {
   }
 
   try {
-    // claude --agent <name> --print < prompt
+    // R.3 fix : passer le prompt en positional arg (pas shell, donc safe).
+    // `claude [options] [command] [prompt]` accepte le prompt directement.
+    // --print pour mode non-interactif, --add-dir pour autoriser write dans outputDir,
+    // --dangerously-skip-permissions pour bypass les prompts interactifs.
     const result = await runCmd(
       "claude",
-      ["--agent", agent.name, "--print"],
+      [
+        "--agent", agent.name,
+        "--print",
+        "--add-dir", outputDir,
+        "--dangerously-skip-permissions",
+        prompt,
+      ],
       {
         cwd: outputDir,
-        stdio: ["pipe", "pipe", "pipe"],
+        stdio: ["ignore", "pipe", "pipe"],
         timeoutMs: AGENT_TIMEOUT_MS,
       }
     );
