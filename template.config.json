@@ -1,0 +1,82 @@
+{
+  "templateVersion": "1.0.0",
+  "templateName": "claude-electron-app",
+  "description": "Template Electron + Hono daemon + Next.js + Claude Code subprocess + skills YAML. Sert de base aux apps métier produites par la factory.",
+  "placeholders": [
+    {
+      "key": "APP_NAME",
+      "description": "Display name (utilisé dans Dock, menus, titres, builds DMG/NSIS).",
+      "example": "Marcelle-Calibre",
+      "required": true
+    },
+    {
+      "key": "APP_ID",
+      "description": "Reverse-domain bundle ID Electron / appId electron-builder.",
+      "example": "fr.petitmaker.marcelle-calibre",
+      "required": true
+    },
+    {
+      "key": "NEXT_PORT",
+      "description": "Port du sidecar Next.js (UI).",
+      "example": "3200",
+      "required": true
+    },
+    {
+      "key": "DAEMON_PORT",
+      "description": "Port du sidecar Hono (daemon).",
+      "example": "7556",
+      "required": true
+    },
+    {
+      "key": "DATA_DIR_NAME",
+      "description": "Nom du dossier userData Electron (Library/Application Support/<DATA_DIR_NAME>).",
+      "example": "Marcelle-Calibre",
+      "required": true
+    },
+    {
+      "key": "ENTITY_NAME",
+      "description": "Entité métier principale, lowercase singular (utilisée par la factory pour scaffolder app/<entities>/).",
+      "example": "batch",
+      "required": true
+    },
+    {
+      "key": "ENTITY_NAME_PLURAL",
+      "description": "Pluriel de l'entité métier (utilisé pour les paths app/<entities>/).",
+      "example": "batches",
+      "required": true
+    },
+    {
+      "key": "DOMAIN_BRIEF",
+      "description": "1-2 phrases qui décrivent ce que fait l'app. Apparait dans package.json `description` et app/layout.tsx `metadata.description`.",
+      "example": "Calibre Marcelle (bot EHPAD) en lançant des batches de questions sur Maestro + API HTTP, indexe les résultats par commit Git.",
+      "required": true
+    }
+  ],
+  "computed": [
+    {
+      "key": "APP_NAME_KEBAB",
+      "from": "APP_NAME",
+      "transform": "kebab-case",
+      "description": "Slug kebab-case de APP_NAME (utilisé dans package.json `name` et chemins web)."
+    },
+    {
+      "key": "APP_NAME_KEBAB_UPPER",
+      "from": "APP_NAME",
+      "transform": "upper-snake-case",
+      "description": "Slug UPPER_SNAKE_CASE de APP_NAME (utilisé comme préfixe des env vars)."
+    },
+    {
+      "key": "DATA_DIR_ENV_VAR",
+      "from": "APP_NAME_KEBAB_UPPER",
+      "transform": "suffix:_DATA_DIR",
+      "description": "Nom de la variable d'env qui contient le path du dataDir runtime (ex: CALIBRE_DATA_DIR)."
+    },
+    {
+      "key": "VERSION",
+      "value": "0.0.1",
+      "description": "Version initiale de l'app. Mise à 0.0.1 par défaut, à bumper avant pack."
+    }
+  ],
+  "fileExtensions": [".ts", ".tsx", ".js", ".cjs", ".mjs", ".json", ".md", ".yaml", ".yml", ".css", ".html"],
+  "ignorePaths": [".git", "node_modules", ".next", "dist", "release", "data", "vendor", "release"]
+}
