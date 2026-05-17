@@ -637,17 +637,53 @@ function setupMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
-// IPC : ouvre un dialog OS pour choisir un dossier. Renvoie le chemin absolu ou null.
-ipcMain.handle("select-directory", async (_event, opts) => {
+// IPC : ouvre un dialog OS pour choisir un dossier. Pattern OIF-eval —
+// l'utilisateur choisit la racine, l'app crée automatiquement les
+// sous-dossiers requis (`opts.subdirs: string[]`) pour que la page
+// Settings n'oblige pas à les saisir un par un.
+//
+// Retour :
+//   { ok: true, path }              — succès, `path` est le dossier choisi
+//   { ok: false, cancelled: true }  — utilisateur annulé
+//   { ok: false, error }            — erreur (mkdir, etc.)
+ipcMain.handle("select-directory", async (_event, opts = {}) => {
   const win = BrowserWindow.getFocusedWindow() ?? mainWindow;
-  if (!win) return null;
-  const result = await dialog.showOpenDialog(win, {
-    title: opts?.title || "Choisir un dossier",
-    defaultPath: opts?.defaultPath,
-    properties: ["openDirectory", "createDirectory"],
-  });
-  if (result.canceled || result.filePaths.length === 0) return null;
-  return result.filePaths[0];
+  if (!win) return { ok: false, error: "pas de fenêtre active" };
+  try {
+    const result = await dialog.showOpenDialog(win, {
+      title: opts.title || "Choisir un dossier",
+      defaultPath: opts.defaultPath || app.getPath("documents"),
+      properties: ["openDirectory", "createDirectory", "treatPackageAsDirectory"],
+      buttonLabel: opts.buttonLabel || "Sélectionner",
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+      return { ok: false, cancelled: true };
+    }
+    const dirPath = result.filePaths[0];
+    if (opts.createIfMissing !== false) {
+      try {
+        fs.mkdirSync(dirPath, { recursive: true });
+      } catch (err) {
+        return { ok: false, error: err?.message ?? String(err) };
+      }
+    }
+    // Sous-dossiers auto (path traversal et absolus rejetés).
+    if (Array.isArray(opts.subdirs) && opts.subdirs.length > 0) {
+      for (const sub of opts.subdirs) {
+        if (typeof sub !== "string" || !sub) continue;
+        if (sub.includes("..") || path.isAbsolute(sub)) continue;
+        try {
+          fs.mkdirSync(path.join(dirPath, sub), { recursive: true });
+        } catch {
+          /* ignore les sous-dossiers qui plantent — l'utilisateur peut
+             corriger via la suite */
+        }
+      }
+    }
+    return { ok: true, path: dirPath };
+  } catch (err) {
+    return { ok: false, error: err?.message ?? String(err) };
+  }
 });
 
 // IPC : ouvre un fichier avec l'application native du système (Word, Excel, etc).

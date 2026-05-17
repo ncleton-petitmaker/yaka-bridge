@@ -30,13 +30,16 @@ export interface AppConfig {
    * Liste des dossiers requis pour que l'app soit opérationnelle. Si non vide,
    * `<StorageGuard>` bloque l'UI tant que chacune des clés référencées (par
    * exemple "inputDir", "outputDir") n'est pas remplie. Chaque entrée :
-   *   { key: string, label: string }
+   *   { key: string, label: string, subdirs?: string[] }
    * `key` désigne un champ de cette interface AppConfig que l'utilisateur doit
-   * configurer dans /settings ; `label` est ce qui s'affiche dans l'overlay.
+   * configurer dans /settings ; `label` est ce qui s'affiche dans l'overlay ;
+   * `subdirs` (optionnel) liste les sous-dossiers créés automatiquement sous
+   * la racine choisie via le picker natif Electron (pattern OIF-eval —
+   * l'utilisateur choisit la racine, l'app crée le squelette).
    *
    * Vide par défaut : pas d'overlay bloquant.
    */
-  requiredDirs?: Array<{ key: string; label: string }>;
+  requiredDirs?: Array<{ key: string; label: string; subdirs?: string[] }>;
   lastUpdated?: string;
 }
 

@@ -163,6 +163,19 @@ suggestions — un PR qui les viole doit être refusé.
   l'écran suivant". Si tu te retrouves à dessiner un Hero + 1 CTA →
   c'est UX-R1, supprime l'écran et redirige.
 
+**UX-R5 · Storage picker natif obligatoire dans /settings**
+- Tu n'écris JAMAIS un input texte nu pour un chemin de dossier dans
+  `/settings`. Tu utilises `<DirField>` (déjà fourni par le template)
+  qui ajoute un bouton "Parcourir" (picker natif via
+  `selectDirectory()` de `lib/electron.ts`) + un bouton "Ouvrir"
+  (`revealFile()`).
+- Pour chaque dossier requis du métier, tu déclares un seul `requiredDirs[i]`
+  avec `{ key, label, subdirs }`. Pattern : une racine,
+  `subdirs: ["batches", "questions", …]` créés automatiquement par
+  Electron via `opts.subdirs` du IPC `select-directory`.
+- L'app NE DOIT PAS exiger que l'utilisateur saisisse 3-4 chemins distincts
+  s'ils peuvent tous vivre sous une seule racine choisie une fois.
+
 ### Étape 1 — Vérifier prérequis + lire le shell
 
 1. `test -d ${outputDir}` → sinon erreur.

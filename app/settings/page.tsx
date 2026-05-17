@@ -2,10 +2,17 @@
 
 import { useEffect, useState } from "react";
 import { AppChromeHeader } from "@/components/AppChromeHeader";
+import { isElectron, openFile, revealFile, selectDirectory } from "@/lib/electron";
 
 interface RequiredDirSpec {
   key: string;
   label: string;
+  /**
+   * Sous-dossiers créés automatiquement quand l'utilisateur choisit la
+   * racine via le picker natif. Pattern OIF-eval — le storage est
+   * "self-organizing", l'utilisateur ne touche pas aux sous-dossiers.
+   */
+  subdirs?: string[];
 }
 
 interface AppConfigShape {
@@ -139,20 +146,19 @@ export default function SettingsPage() {
 
             {/* Section : Stockage */}
             <Section title="Stockage">
-              <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 12 }}>
+              <p style={{ fontSize: 12, color: "var(--muted)", marginBottom: 12 }}>
                 Chemins de dossiers que l&apos;app peut lire/écrire. Ces dossiers
-                sont autorisés à Claude Code via <code>--add-dir</code>.
+                sont autorisés à Claude Code via <code>--add-dir</code>. Clique
+                sur <strong>Parcourir</strong> pour ouvrir un sélecteur natif —
+                les sous-dossiers nécessaires sont créés automatiquement.
               </p>
               {dirsToShow.map((spec) => (
-                <Field key={spec.key} label={spec.label}>
-                  <input
-                    type="text"
-                    defaultValue={(config[spec.key] as string | undefined) ?? ""}
-                    onBlur={(e) => save({ [spec.key]: e.target.value || undefined })}
-                    style={{ width: "100%" }}
-                    placeholder={`/chemin/vers/${spec.key}`}
-                  />
-                </Field>
+                <DirField
+                  key={spec.key}
+                  spec={spec}
+                  value={(config[spec.key] as string | undefined) ?? ""}
+                  onSave={(v) => save({ [spec.key]: v || undefined })}
+                />
               ))}
             </Section>
 
@@ -186,7 +192,7 @@ export default function SettingsPage() {
                 ou autre section métier si le brief le demande. */}
 
             {saving && <p style={{ fontSize: 13, color: "var(--text-muted)" }}>Enregistrement…</p>}
-            {info && <p style={{ fontSize: 13, color: "var(--green-fg)" }}>{info}</p>}
+            {info && <p style={{ fontSize: 13, color: "var(--green, green)" }}>{info}</p>}
             {error && <p style={{ fontSize: 13, color: "var(--red-fg)" }}>{error}</p>}
           </div>
         )}
@@ -226,8 +232,132 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      <span style={{ fontSize: 13, fontWeight: 500, color: "var(--text)" }}>{label}</span>
+      <span style={{ fontSize: 13, fontWeight: 500, color: "var(--fg)" }}>{label}</span>
       {children}
     </label>
+  );
+}
+
+/**
+ * Champ dossier avec picker natif (Electron) + bouton "Ouvrir" pour révéler
+ * dans le Finder/Explorer. Tombe sur un input texte simple en mode browser
+ * pur (préview Next sans Electron).
+ *
+ * Pattern OIF-eval — l'utilisateur choisit la racine, les sous-dossiers
+ * (`spec.subdirs`) sont créés automatiquement.
+ */
+function DirField({
+  spec,
+  value,
+  onSave,
+}: {
+  spec: RequiredDirSpec;
+  value: string;
+  onSave: (path: string) => void;
+}) {
+  const [draft, setDraft] = useState(value);
+  const [picking, setPicking] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const inEl = isElectron();
+
+  useEffect(() => {
+    setDraft(value);
+  }, [value]);
+
+  async function browse() {
+    setPicking(true);
+    setErr(null);
+    try {
+      const r = await selectDirectory({
+        title: `Choisir : ${spec.label}`,
+        defaultPath: draft || undefined,
+        subdirs: spec.subdirs,
+      });
+      if (r.ok) {
+        setDraft(r.path);
+        onSave(r.path);
+      } else if ("cancelled" in r && r.cancelled) {
+        /* utilisateur annulé — silencieux */
+      } else if ("unavailable" in r && r.unavailable) {
+        setErr("Picker natif indispo (pas en Electron).");
+      } else if ("error" in r) {
+        setErr(r.error);
+      }
+    } finally {
+      setPicking(false);
+    }
+  }
+
+  return (
+    <Field label={spec.label}>
+      <div style={{ display: "flex", gap: 6, alignItems: "stretch" }}>
+        <input
+          type="text"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => {
+            if (draft !== value) onSave(draft);
+          }}
+          placeholder={`/chemin/vers/${spec.key}`}
+          style={{
+            flex: 1,
+            padding: "6px 8px",
+            border: "1px solid var(--border)",
+            borderRadius: "var(--radius-sm, 6px)",
+            background: "var(--surface)",
+            color: "var(--fg)",
+            fontSize: 13,
+            fontFamily: "var(--mono)",
+          }}
+        />
+        <button
+          type="button"
+          onClick={browse}
+          disabled={picking}
+          style={{
+            padding: "6px 12px",
+            fontSize: 12,
+            cursor: picking ? "wait" : "pointer",
+            whiteSpace: "nowrap",
+          }}
+          title={
+            inEl
+              ? "Ouvrir le sélecteur natif"
+              : "Picker indispo hors Electron — colle le chemin à la main"
+          }
+        >
+          {picking ? "…" : "Parcourir"}
+        </button>
+        {draft && (
+          <button
+            type="button"
+            onClick={() => revealFile(draft)}
+            disabled={!inEl}
+            style={{
+              padding: "6px 10px",
+              fontSize: 12,
+              cursor: inEl ? "pointer" : "not-allowed",
+              whiteSpace: "nowrap",
+            }}
+            title="Révéler dans le Finder / Explorer"
+          >
+            Ouvrir
+          </button>
+        )}
+      </div>
+      {spec.subdirs && spec.subdirs.length > 0 && (
+        <p
+          style={{
+            fontSize: 11,
+            color: "var(--muted)",
+            margin: "2px 0 0",
+            fontFamily: "var(--mono)",
+          }}
+        >
+          ↳ sous-dossiers auto : {spec.subdirs.join(", ")}
+        </p>
+      )}
+      {err && <span style={{ fontSize: 11, color: "var(--red-fg)" }}>{err}</span>}
+    </Field>
   );
 }

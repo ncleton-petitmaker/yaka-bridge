@@ -133,6 +133,34 @@ Aucun parcours utilisateur ne doit avoir une étape "intermédiaire" qui ne
 fait que rediriger ou afficher un CTA vers la vraie action. Si la seule
 action sur un écran est "passer à l'écran suivant", on supprime l'écran.
 
+#### UX-R5 · Storage picker natif (pattern OIF-eval)
+Toute app scaffoldée doit exposer dans `/settings` un **sélecteur natif de
+dossier** pour chaque chemin requis, **pas un input texte**. Pattern
+OIF-eval : l'utilisateur choisit la racine, l'app crée automatiquement les
+sous-dossiers requis.
+
+1. `electron/main.cjs` expose `ipcMain.handle("select-directory", ...)`
+   qui retourne `{ ok, path | cancelled | error }` et accepte `opts.subdirs:
+   string[]` pour créer les sous-dossiers automatiquement (path traversal
+   et chemins absolus rejetés).
+2. `lib/electron.ts` (invariant) expose `selectDirectory(opts)` typé +
+   `isElectron()` + `revealFile(absPath)` ; tombe sur
+   `{ ok: false, unavailable: true }` hors Electron.
+3. `app/settings/page.tsx` utilise `<DirField>` pour chaque entrée de
+   `config.requiredDirs` : input texte (édition manuelle possible) + bouton
+   **Parcourir** (picker natif) + bouton **Ouvrir** (reveal in Finder).
+   Sous-dossiers requis affichés en dessous (mono, gris) avec la mention
+   "↳ sous-dossiers auto : a, b, c".
+4. `server/app-config.ts` : type `requiredDirs: Array<{ key, label,
+   subdirs?: string[] }>`. L'agent `domain-modeler` ou `app-scaffolder`
+   remplit ce tableau dans `DEFAULT_CONFIG` selon les besoins du métier
+   (ex marcelle-calibre : `[{ key: "dataDir", label: "Dossier de
+   données", subdirs: ["batches", "questions", "samples", ".claude"] }]`).
+
+Ne pas exposer un champ texte sans bouton Parcourir. Ne pas demander à
+l'utilisateur de saisir 3 sous-dossiers à la main si une racine + subdirs
+auto fait l'affaire.
+
 ---
 
 ## 2. Domain-specific (ajoutés par l'app)
