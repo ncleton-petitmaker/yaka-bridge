@@ -74,7 +74,7 @@ export function AppChromeHeader({ user: userProp }: { user?: string }) {
       <ConflictBanner />
       <header className="app-chrome-header">
         <Link
-          href="/"
+          href="/runs"
           style={{
             display: "inline-flex",
             alignItems: "center",

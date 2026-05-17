@@ -50,7 +50,8 @@ desktop "Electron + daemon Hono + subprocess + skills".
   `RunStatus`, `ChatRequest`. **Étendu (jamais réécrit) par l'app métier.**
 
 ### 1.3 Next.js — UI invariante
-- `app/layout.tsx`, `app/globals.css`, `app/page.tsx` (home + nav).
+- `app/layout.tsx`, `app/globals.css`, `app/page.tsx` (redirect serveur vers
+  `/runs` — pas de landing intermédiaire, voir §1.4 Règles UX).
 - `app/runs/page.tsx`, `app/runs/[id]/page.tsx` — liste + détail SSE des
   runs Claude (pattern de référence pour `app/<entities>/`).
 - `app/skills/page.tsx` — éditeur skills YAML.
@@ -81,6 +82,56 @@ desktop "Electron + daemon Hono + subprocess + skills".
 `electron/`, 7 scripts, infra config. Tout cela est **immuable** côté factory ;
 les agents ne le touchent pas (sauf placeholders rebrandés via
 `init-from-template.mjs`).
+
+### 1.6 Règles UX invariantes (toute app scaffoldée doit les respecter)
+
+Ces règles s'imposent à `ui-page-generator`, `runner-author`, et tout agent
+qui produit de l'UI ou de l'API d'orchestration. Elles ne sont pas
+négociables — un brief métier qui demanderait l'inverse doit être interprété
+comme une demande à clarifier, pas une dérogation.
+
+#### UX-R1 · Pas de landing intermédiaire
+La route `/` est **toujours** un `redirect("/runs")` (server component). On
+n'introduit aucun écran "Hero + cliquez pour démarrer" entre l'ouverture de
+l'app et l'interface de travail. Si une app veut une vraie home agrégée,
+elle crée une route dédiée (`/home`, `/overview`) — jamais sur `/`.
+
+#### UX-R2 · Tout run/batch long doit être stoppable à tout moment
+Toute opération asynchrone (batch, run Claude Code, calibration, export
+long…) DOIT :
+1. Exposer un endpoint `POST /api/<entité>/:id/cancel` côté daemon (déjà
+   présent pour `runs` et `batches` ; ajouter pour toute nouvelle entité
+   longue) qui interrompt proprement le worker (kill subprocess, abort
+   stream, marque `status=cancelled`).
+2. Afficher un bouton "Annuler" / "Stopper" **visible en permanence** dans
+   l'UI tant que `status === "running"` — pas caché derrière un menu, pas
+   désactivé en attendant un event SSE. Le clic envoie le POST, met
+   l'état local en "cancelling…", et laisse le SSE confirmer par
+   `batch_done`/`run_done` avec status final.
+3. Le bouton DOIT être présent à la fois sur la liste (sidebar/table) et
+   sur la vue détail (page `/runs/[id]`, drawer, panel center quand un
+   run est en cours).
+
+#### UX-R3 · Live progress toujours visible
+Pendant l'exécution d'un run/batch :
+1. Le centre de l'UI affiche **toujours** le stream live (events SSE,
+   barre de progression, ligne par étape ou question, dernier message).
+   Aucun écran statique "le batch tourne, revenez plus tard".
+2. Si l'utilisateur navigue ailleurs puis revient sur la page, le stream
+   reprend automatiquement (re-souscription SSE via `subscribeXxx` du
+   `lib/client.ts`).
+3. Si un `LiveScreenshotPanel` ou équivalent existe pour le domaine
+   (capture d'app pilotée, preview render…), il s'affiche en
+   panel-right systématiquement pendant le run — pas seulement à la
+   fin.
+4. Les events SSE qui doivent être streamés au minimum : `<entity>_start`,
+   `<step>_done` (un par étape granulaire), `<entity>_done`, `error`.
+   Pas de "tout d'un coup à la fin".
+
+#### UX-R4 · Pas de double-clic mort
+Aucun parcours utilisateur ne doit avoir une étape "intermédiaire" qui ne
+fait que rediriger ou afficher un CTA vers la vraie action. Si la seule
+action sur un écran est "passer à l'écran suivant", on supprime l'écran.
 
 ---
 
@@ -338,7 +389,8 @@ Par agent, fichiers produits dans l'app cible :
 - `components/<Entity>Drawer.tsx`
 - `components/<Entity>Form.tsx`
 - `app/settings/page.tsx` (édité pour ajouter les inputs `AppConfig` étendus)
-- `app/page.tsx` (édité pour ajouter le nav vers les nouvelles pages)
+- `app/page.tsx` : NE PAS toucher — c'est un redirect serveur invariant
+  vers `/runs`. La nav passe par `<AppChromeHeader />` (tabs domain).
 
 ### `skill-author`
 - `skills-template/_global/<slug>.skill.md` (3-5 fichiers)

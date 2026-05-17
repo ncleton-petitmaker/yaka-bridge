@@ -19,7 +19,8 @@ Tu interviens **après** `domain-modeler` (qui a produit `server/types.ts`) et *
 - `app/layout.tsx` wrappe `{children}` avec `<OnboardingWizard />` + `<StorageGuard />` + theme-init script
 - `components/AppChromeHeader.tsx` avec tabs configurables, theme switcher, profile chip, ConflictBanner
 - `components/PanelLayout3.tsx` : 3-panels resizable VSCode-like avec keyboard shortcuts Cmd+B/J
-- Pages `app/runs/page.tsx`, `app/dashboard/page.tsx`, `app/propositions/page.tsx`, `app/settings/page.tsx`, `app/export/page.tsx`, `app/logs/page.tsx`, `app/page.tsx` — toutes ont déjà la structure correcte avec des **slots commentés** `{/* AGENT-SLOT: panel-left */}` ou des composants placeholders `<PlaceholderXxx />`.
+- Pages `app/runs/page.tsx`, `app/dashboard/page.tsx`, `app/propositions/page.tsx`, `app/settings/page.tsx`, `app/export/page.tsx`, `app/logs/page.tsx` — toutes ont déjà la structure correcte avec des **slots commentés** `{/* AGENT-SLOT: panel-left */}` ou des composants placeholders `<PlaceholderXxx />`.
+- `app/page.tsx` (racine `/`) est un **redirect serveur vers `/runs`** — pas de landing intermédiaire. La surface de travail est `/runs` directement (form de lancement + stream live).
 
 **Ton job** = remplir ces slots, **PAS** recréer la structure. Tu ne touches PAS à `<PanelLayout3>`, `<PanelGroup>`, `<Panel>`, `<ResizeHandle>`, `<AppChromeHeader>`, `<OnboardingWizard>`, `<StorageGuard>`, `<ConflictBanner>` — ces composants sont des invariants.
 
@@ -41,7 +42,7 @@ Tu interviens **après** `domain-modeler` (qui a produit `server/types.ts`) et *
 - `components/PanelLayout3.tsx`, `components/ResizeHandle.tsx`, `components/AppChromeHeader.tsx` (sauf TABS), `components/OnboardingWizard.tsx`, `components/StorageGuard.tsx`, `components/ConflictBanner.tsx`, `components/Icon.tsx`, `components/Mark.tsx`, `components/ClaudeMark.tsx`, `components/ProgressBar.tsx`, `components/StreamingPanel.tsx`, `components/DiffViewer.tsx`, `components/SkillEditor.tsx`, `components/CostsDashboard.tsx`, `components/CalibrageSection.tsx` (sauf si brief mentionne explicitement de le retirer)
 - `app/layout.tsx` (NE TOUCHE JAMAIS — il wrappe OnboardingWizard + StorageGuard, c'est invariant)
 - `app/globals.css`, `tailwind.config.ts` — design tokens invariants
-- `app/page.tsx` (landing) : juste remplacer le placeholder `{{APP_NAME}}` si présent et le placeholder `{{DOMAIN_BRIEF}}` ; ne PAS refaire la structure
+- `app/page.tsx` (racine `/`) : INVARIANT — c'est un redirect serveur `redirect("/runs")`. **Ne PAS réintroduire de landing**. Si une app métier veut une vraie home/overview, créer une route dédiée (ex `/home`) et changer la cible du redirect — jamais remettre un écran intermédiaire avec un CTA "cliquer pour démarrer"
 - `app/settings/page.tsx`, `app/propositions/page.tsx`, `app/logs/page.tsx`, `app/export/page.tsx` : laisser tels quels SAUF si brief mentionne un besoin spécifique pour cette page
 - `server/types.ts`, `server/*-runner.ts`, `server/*-driver.ts`, `server/index.ts` (→ autres agents)
 - `skills-template/**` (→ skill-author)
@@ -113,6 +114,54 @@ Toute UI domain DOIT respecter les conventions TeamFactory :
 9. **3-panels** : ResizeHandle invisible (1px border-color), hover `--border-strong`. Panel sidebar `background: var(--surface)`, center `--bg`, droit `--surface`.
 
 **Test conformité** : avant de finir, grep ton output pour `#[0-9a-f]{3,6}` — toute occurrence (hors commentaire `/* ... */`) est un FAIL.
+
+### CONVENTIONS UX OPÉRATIONNELLES (invariants — voir `docs/factory-invariants.md` §1.6)
+
+Ces règles s'appliquent à toute page que tu produis. Ce ne sont pas des
+suggestions — un PR qui les viole doit être refusé.
+
+**UX-R1 · Pas de landing intermédiaire**
+- `app/page.tsx` est un `redirect("/runs")` côté serveur. Tu n'y touches pas
+  et tu ne ré-introduis pas de Hero/CTA sur `/`.
+- Si le brief demande une "page d'accueil", crée `/home` ou `/overview` —
+  jamais sur `/`.
+
+**UX-R2 · Tout run/batch long doit être stoppable à tout moment**
+- Dans `app/runs/page.tsx`, `app/<entities>/[id]/page.tsx`, et le drawer
+  detail : si `status === "running"`, **un bouton "Annuler" / "Stopper" est
+  visible en permanence**. Pas désactivé en attendant un event, pas caché
+  derrière un menu, pas seulement sur la page détail.
+- Il appelle `cancelRun(id)` / `cancelBatch(id)` / `cancel<Entity>(id)` du
+  `lib/client.ts`. Si la fonction n'existe pas pour ton entité, tu
+  l'ajoutes (POST `/api/<entité>/:id/cancel`).
+- L'état local passe en "cancelling…" au clic, le SSE confirme par
+  `<entity>_done` avec status `cancelled` ou `failed`.
+- Le bouton est présent **à la fois** dans la sidebar liste (au survol d'un
+  run actif) et dans le panel center / drawer du run actif.
+
+**UX-R3 · Live progress toujours visible pendant un run**
+- Pendant qu'un run/batch tourne, le panel center montre **toujours** le
+  stream live (events SSE, progress bar, ligne-par-étape, dernier message).
+  Aucun "le batch tourne, revenez plus tard".
+- Tu utilises systématiquement le pattern `<EntityStreamPanel>` (variante
+  de `StreamingPanel` du template) avec :
+    - barre de progression (% complété, "N / total")
+    - liste live des étapes/questions avec leur status (icône + tint)
+    - dernier event SSE en bas, auto-scroll
+    - re-subscription automatique au retour sur la page (le SSE reprend là
+      où il en est)
+- Si le domaine a un artefact visuel intermédiaire (capture d'écran d'app
+  pilotée, render preview, plot live…), tu ajoutes un `<LiveXxxPanel>` en
+  panel-right qui se rafraîchit à chaque event pertinent. Il s'affiche
+  pendant le run, pas seulement à la fin.
+- Events SSE minimum à streamer (à coordonner avec `runner-author`) :
+  `<entity>_start`, `<step>_done` (un par étape granulaire),
+  `<entity>_done`, `error`. Pas de "tout d'un coup à la fin".
+
+**UX-R4 · Pas de double-clic mort**
+- Aucun écran ne doit avoir comme seule action "cliquer pour passer à
+  l'écran suivant". Si tu te retrouves à dessiner un Hero + 1 CTA →
+  c'est UX-R1, supprime l'écran et redirige.
 
 ### Étape 1 — Vérifier prérequis + lire le shell
 

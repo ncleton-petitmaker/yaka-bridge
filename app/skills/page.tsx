@@ -53,8 +53,8 @@ export default function SkillsPage() {
   return (
     <main style={{ maxWidth: 1100, margin: "0 auto", padding: "32px 24px" }}>
       <header style={{ marginBottom: 16 }}>
-        <Link href="/" style={{ fontSize: 13, color: "var(--muted)" }}>
-          ← Accueil
+        <Link href="/runs" style={{ fontSize: 13, color: "var(--muted)" }}>
+          ← Retour
         </Link>
         <h1 style={{ fontSize: 22, fontWeight: 600, marginTop: 8 }}>Skills</h1>
       </header>
