@@ -1,0 +1,141 @@
+{
+  "name": "oif-eval",
+  "version": "0.5.74",
+  "private": true,
+  "description": "Outil d'évaluation IA des candidatures FAE 7e (OIF). Daemon Node + UI Next.js qui orchestrent Claude Code en local pour évaluer les dossiers de candidature au Fonds La Francophonie avec Elles.",
+  "engines": {
+    "node": ">=24"
+  },
+  "main": "electron/main.cjs",
+  "build": {
+    "appId": "fr.petitmaker.oif-eval",
+    "productName": "OIF-Eval",
+    "directories": {
+      "output": "release"
+    },
+    "asar": true,
+    "asarUnpack": [
+      "**/*.node",
+      "dist/**",
+      ".next/standalone/**",
+      "skills-template/**",
+      "data-template/**",
+      "vendor/pdfjs/**",
+      "electron/mcp-xlsx.cjs",
+      "node_modules/@modelcontextprotocol/**",
+      "node_modules/exceljs/**",
+      "node_modules/mammoth/**",
+      "node_modules/jszip/**",
+      "node_modules/archiver/**",
+      "node_modules/saxes/**",
+      "node_modules/xmldom-ts/**",
+      "node_modules/fast-csv/**",
+      "node_modules/unzipper/**",
+      "node_modules/@xmldom/**",
+      "node_modules/argparse/**",
+      "node_modules/sax/**",
+      "node_modules/lop/**",
+      "node_modules/option/**",
+      "node_modules/underscore/**",
+      "node_modules/dingbat-to-unicode/**",
+      "node_modules/base64-js/**"
+    ],
+    "afterPack": "scripts/electron-builder-after-pack.cjs",
+    "files": [
+      "electron/**/*",
+      "dist/**/*",
+      ".next/standalone/**/*",
+      "public/**/*",
+      "skills-template/**/*",
+      "data-template/**/*",
+      "vendor/pdfjs/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": ".next/standalone/.next/static",
+        "to": "static",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "public/icon.icns",
+      "target": [
+        "dmg"
+      ]
+    },
+    "win": {
+      "icon": "public/icon-512.png",
+      "target": [
+        "nsis"
+      ],
+      "artifactName": "OIF-Eval-Setup-${version}.exe"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowElevation": false,
+      "allowToChangeInstallationDirectory": false,
+      "deleteAppDataOnUninstall": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "runAfterFinish": true
+    },
+    "linux": {
+      "icon": "public/icon-512.png"
+    }
+  },
+  "scripts": {
+    "postinstall": "node scripts/postinstall.js",
+    "dev": "concurrently -n daemon,next -c blue,green \"tsx watch server/index.ts\" \"next dev -p 3100\"",
+    "build": "next build",
+    "start:daemon": "tsx server/index.ts",
+    "start:next": "next start -p 3100",
+    "start": "node scripts/start.js",
+    "typecheck": "tsc --noEmit",
+    "calibrer": "tsx scripts/calibrer.ts",
+    "deploy-data": "node scripts/postinstall.js",
+    "lint": "next lint",
+    "rebrand-electron": "node scripts/rebrand-electron.mjs",
+    "electron": "node scripts/rebrand-electron.mjs && electron electron/main.cjs",
+    "electron:pack:mac": "node scripts/prepare-pack.mjs && electron-builder --mac",
+    "electron:pack:win": "node scripts/prepare-pack.mjs && electron-builder --win --x64 --config.npmRebuild=false"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "pdfjs-dist": "^5.7.284"
+  },
+  "devDependencies": {
+    "@hono/node-server": "^1.13.7",
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/diff": "^7.0.2",
+    "@types/node": "^20.17.10",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "autoprefixer": "^10.4.20",
+    "better-sqlite3": "^11.7.0",
+    "concurrently": "^9.1.0",
+    "diff": "^9.0.0",
+    "electron": "^42.0.0",
+    "electron-builder": "^26.8.1",
+    "exceljs": "^4.4.0",
+    "hono": "^4.6.14",
+    "jszip": "^3.10.1",
+    "mammoth": "^1.12.0",
+    "next": "^16.0.0",
+    "pdf-lib": "^1.17.1",
+    "playwright": "^1.59.1",
+    "postcss": "^8.4.49",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-resizable-panels": "^2.1.9",
+    "tailwindcss": "^3.4.17",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "yaml": "^2.6.1",
+    "zod": "^3.24.1"
+  }
+}

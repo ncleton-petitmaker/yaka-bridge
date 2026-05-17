@@ -1,0 +1,60 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Next.js
+.next/
+out/
+next-env.d.ts
+
+# Production
+build/
+dist/
+
+# Viewer PDF.js téléchargé au build (cf. scripts/vendor-pdfjs.mjs)
+vendor/pdfjs/
+
+# Données candidatures (sensibles, ne JAMAIS commit)
+data/
+!data-template/
+!data-template/**
+
+# Évaluations sortantes (sensibles)
+evaluations/
+
+# Cache local
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+.cache/
+
+# Env
+.env
+.env*.local
+.env.production
+
+# IDE
+.vscode/
+.idea/
+
+# Claude Code (worktrees locaux éphémères)
+.claude/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Lockfiles : on garde celui de npm
+package-lock.json.bak
+
+# TypeScript
+*.tsbuildinfo
+release/
