@@ -26,6 +26,17 @@ export interface AppConfig {
   isAdmin?: boolean;
   /** Nombre max de runs Claude en parallèle. Défaut : 5. */
   maxConcurrentRuns?: number;
+  /**
+   * Liste des dossiers requis pour que l'app soit opérationnelle. Si non vide,
+   * `<StorageGuard>` bloque l'UI tant que chacune des clés référencées (par
+   * exemple "inputDir", "outputDir") n'est pas remplie. Chaque entrée :
+   *   { key: string, label: string }
+   * `key` désigne un champ de cette interface AppConfig que l'utilisateur doit
+   * configurer dans /settings ; `label` est ce qui s'affiche dans l'overlay.
+   *
+   * Vide par défaut : pas d'overlay bloquant.
+   */
+  requiredDirs?: Array<{ key: string; label: string }>;
   lastUpdated?: string;
 }
 

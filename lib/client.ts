@@ -186,4 +186,33 @@ export async function listAuditLogs(opts: {
   return await r.json();
 }
 
+// ============================================================================
+// Conflict copies (sync engine detection)
+// ============================================================================
+
+/**
+ * Représente un fichier "conflict copy" créé par un sync engine (OneDrive,
+ * Dropbox, etc.) quand deux utilisateurs modifient la même ressource. Détectés
+ * dans le dossier partagé pour avertir l'utilisateur via ConflictBanner.
+ */
+export interface ConflictFile {
+  path: string;
+  size: number;
+  mtime: string;
+}
+
+/**
+ * Liste les conflict copies détectées dans le dossier partagé synchronisé.
+ * Si l'app n'a pas de dossier partagé configuré, l'API renvoie [].
+ */
+export async function listConflictCopies(path?: string): Promise<ConflictFile[]> {
+  const url = path
+    ? `/api/storage/conflicts?path=${encodeURIComponent(path)}`
+    : "/api/storage/conflicts";
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`GET /api/storage/conflicts ${r.status}`);
+  const j = (await r.json()) as { conflicts: ConflictFile[] };
+  return j.conflicts;
+}
+
 export { _parseSseFrame as parseSseFrame };

@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { OnboardingWizard } from "@/components/OnboardingWizard";
+import { StorageGuard } from "@/components/StorageGuard";
 
 export const metadata: Metadata = {
   title: "{{APP_NAME}}",
@@ -21,12 +23,16 @@ export default function RootLayout({
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link
-          href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap"
+          href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Source+Serif+Pro:ital,wght@0,400;0,600;1,400&display=swap"
           rel="stylesheet"
         />
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
-      <body>{children}</body>
+      <body>
+        {children}
+        <OnboardingWizard />
+        <StorageGuard />
+      </body>
     </html>
   );
 }

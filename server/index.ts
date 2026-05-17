@@ -1,9 +1,9 @@
 /**
  * Daemon générique : Hono + spawn Claude Code + SSE.
  *
- * Port par défaut : 7456 (override via env `{{DATA_DIR_ENV_VAR}}_DAEMON_PORT`
- * ou — historiquement — `FAE_DAEMON_PORT`). Pour le template on garde un nom
- * d'env neutre qui sera remplacé au scaffolding.
+ * Port par défaut : 7456 (override via env `{{DATA_DIR_ENV_VAR}}_DAEMON_PORT`).
+ * Pour le template on garde un nom d'env neutre qui sera remplacé au
+ * scaffolding.
  *
  * Routes exposées :
  *   GET    /api/health
@@ -397,6 +397,29 @@ app.get("/api/audit/stats", (c) => {
 app.get("/api/audit/integrity", (c) => {
   const cfg = loadAppConfig(DATA_DIR);
   return c.json(verifyAuditLogIntegrity(DATA_DIR, cfg.auditLogDir));
+});
+
+// ---------------------------------------------------------------------------
+// /api/storage : stubs neutres pour ConflictBanner + StorageGuard
+// ---------------------------------------------------------------------------
+// Les apps métier surchargent ces routes si elles utilisent un dossier partagé
+// synchronisé (OneDrive/Dropbox) avec détection de conflict copies. Par défaut
+// le template renvoie une liste vide, ce qui désactive simplement le banner.
+app.get("/api/storage/conflicts", (c) => {
+  return c.json({ conflicts: [] });
+});
+
+// ---------------------------------------------------------------------------
+// /api/onboarding-status : stub. Permet à un wizard d'onboarding de savoir
+// si l'app vient d'être installée. Par défaut on déclare l'onboarding terminé
+// dès qu'un currentUser est posé dans la config.
+// ---------------------------------------------------------------------------
+app.get("/api/onboarding-status", (c) => {
+  const cfg = loadAppConfig(DATA_DIR);
+  return c.json({
+    done: Boolean(cfg.currentUser),
+    currentUser: cfg.currentUser ?? null,
+  });
 });
 
 // ---------------------------------------------------------------------------
