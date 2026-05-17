@@ -94,7 +94,7 @@ export function resetClaudeBinCache(): void {
 export interface BuildArgsOptions {
   /** Liste de dossiers que Claude est autorisé à lire/écrire au-delà du cwd */
   addDirs?: string[];
-  /** Outils whitelistés. Par défaut whitelist sécuritaire. */
+  /** Outils whitelistés. Par défaut whitelist sécuritaire (Read/Write/Glob/Skill). */
   allowedTools?: string[];
   /** Modèle, par défaut "default" (héritage du compte) */
   model?: string;
@@ -103,21 +103,25 @@ export interface BuildArgsOptions {
   /** Chemin du fichier de config MCP à passer via --mcp-config. Si fourni,
    *  expose les servers MCP déclarés dedans à Claude Code. */
   mcpConfig?: string;
+  /** Nombre max de tours Claude (circuit breaker). Défaut : 30. */
+  maxTurns?: number;
 }
 
-// Pour les évaluations FAE : on retire Task (sub-agents inutiles, multiplient
-// les coûts) et Grep (pas de regex utile sur PDFs). Glob conservé pour qu'à
-// minima Claude puisse lister un dossier si la pré-liste du prompt est obsolète.
-// `mcp__office__read_xlsx` : tool MCP exposée par notre server local
-// electron/mcp-xlsx.cjs, permet à Claude de lire les .xlsx binaires sans Bash.
-const DEFAULT_ALLOWED_TOOLS = [
-  "Read",
-  "Write",
-  "Glob",
-  "Skill",
-  "mcp__office__read_xlsx",
-  "mcp__office__read_docx",
-];
+/**
+ * Whitelist d'outils par défaut, conservative. Le caller peut override via
+ * `opts.allowedTools`. On exclut Task (sub-agents → coût démultiplié) et Bash
+ * (sécurité). Grep/Glob sont rarement utiles mais peu coûteux.
+ */
+const DEFAULT_ALLOWED_TOOLS = ["Read", "Write", "Glob", "Skill"];
+
+/**
+ * Nom de la variable d'environnement utilisée pour résoudre le `dataDir` :
+ * c'est elle qui contient le path racine d'écriture (skills, audit-log, etc.).
+ * Le template injecte le nom à scaffolding via le placeholder
+ * `{{DATA_DIR_ENV_VAR}}` (ex : "CALIBRE_DATA_DIR"). À l'exécution, fallback
+ * sur `./data` relatif au cwd si la variable n'est pas définie.
+ */
+const DATA_DIR_ENV_VAR = "{{DATA_DIR_ENV_VAR}}";
 
 export function buildClaudeArgs(opts: BuildArgsOptions = {}): string[] {
   const args = [
@@ -127,14 +131,13 @@ export function buildClaudeArgs(opts: BuildArgsOptions = {}): string[] {
     "--include-partial-messages",
     // --effort low : Sonnet 4.6 défaut = high, donc thinking adaptatif très long
     // (5-10 min de thinking_delta par tour, runs imprévisibles). low garantit
-    // une latence prévisible sans perte notable de qualité sur extraction
-    // structurée. Kill-switch complémentaire via env CLAUDE_CODE_DISABLE_THINKING=1
-    // dans le spawn (cf. server/runs.ts).
+    // une latence prévisible. Kill-switch complémentaire via env
+    // CLAUDE_CODE_DISABLE_THINKING=1 dans le spawn (cf. server/runs.ts).
     "--effort", "low",
-    // Circuit breaker : pour une évaluation FAE (Read 5-8 PDFs + 2 skills +
-    // Write 1 JSON), 25 tours suffisent. Si Claude dépasse 30, c'est qu'il
-    // boucle sur une erreur de schema → on stoppe pour limiter le gaspillage.
-    "--max-turns", "30",
+    // Circuit breaker : si Claude dépasse 30 tours, c'est qu'il boucle sur
+    // une erreur → on stoppe pour limiter le gaspillage. À ajuster selon le
+    // domaine (extraction structurée typique : 5-15 tours).
+    "--max-turns", opts.maxTurns ? String(opts.maxTurns) : "30",
   ];
 
   if (opts.model && opts.model !== "default") {
@@ -150,21 +153,22 @@ export function buildClaudeArgs(opts: BuildArgsOptions = {}): string[] {
     args.push("--add-dir", ...opts.addDirs);
   }
 
-  // bypassPermissions par défaut : sans ça, l'écriture du JSON d'évaluation
-  // vers un chemin réseau (NAS UNC, Volumes/.../OIF/evaluations/) déclenche
-  // une demande d'approbation interactive que Claude Code ne peut pas afficher
-  // dans le contexte d'un run automatisé. L'app contrôle déjà le path de sortie
-  // (validé par --add-dir + hook PostToolUse de schema), donc l'écriture
-  // automatique est sûre.
+  // bypassPermissions par défaut : sans ça, certaines écritures (chemins
+  // réseau, volumes montés, etc.) déclenchent une demande d'approbation
+  // interactive que Claude Code ne peut pas afficher dans le contexte d'un
+  // run automatisé. La défense en profondeur repose sur :
+  //   - `--add-dir` (whitelist Claude CLI)
+  //   - `permissions.deny` dans `.claude/settings.json`
+  //   - hook PreToolUse `restrict-write-paths.mjs`
   args.push("--permission-mode", opts.permissionMode ?? "bypassPermissions");
 
-  // MCP : on active automatiquement le server xlsx-reader si la config a été
-  // générée au boot du daemon (DATA_DIR/.claude/mcp.json). Permet à Claude
-  // d'utiliser la tool mcp__office__read_xlsx pour parser les budgets Excel
-  // sans Bash ni Python. opts.mcpConfig peut override le path.
+  // MCP : activé automatiquement si une config a été générée à `<dataDir>/.claude/mcp.json`.
+  // opts.mcpConfig peut override le path. La détection du dataDir suit l'env
+  // var injectée par scaffolding (DATA_DIR_ENV_VAR) avec fallback `./data`.
   const fsSync = require("node:fs") as typeof import("node:fs");
   const pathSync = require("node:path") as typeof import("node:path");
-  const dataDir = process.env.FAE_DATA_DIR ?? pathSync.resolve(process.cwd(), "data");
+  const dataDir =
+    process.env[DATA_DIR_ENV_VAR] ?? pathSync.resolve(process.cwd(), "data");
   const defaultMcpConfig = pathSync.resolve(dataDir, ".claude", "mcp.json");
   const mcpConfig = opts.mcpConfig ?? (fsSync.existsSync(defaultMcpConfig) ? defaultMcpConfig : null);
   if (mcpConfig) {

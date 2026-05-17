@@ -30,14 +30,6 @@ step("Bundle server (esbuild)", () => {
   execSync("node scripts/build-server.mjs", { cwd: ROOT, stdio: "inherit" });
 });
 
-step("Bundle MCP xlsx server (esbuild)", () => {
-  execSync("node scripts/build-mcp.mjs", { cwd: ROOT, stdio: "inherit" });
-});
-
-step("Vendor pdf.js viewer (Mozilla prebuilt zip)", () => {
-  execSync("node scripts/vendor-pdfjs.mjs", { cwd: ROOT, stdio: "inherit" });
-});
-
 step("Build Next.js (output standalone)", () => {
   execSync("npx next build", { cwd: ROOT, stdio: "inherit" });
 });

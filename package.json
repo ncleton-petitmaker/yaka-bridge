@@ -35,23 +35,17 @@
       {
         "from": ".next/standalone/.next/static",
         "to": "static",
-        "filter": [
-          "**/*"
-        ]
+        "filter": ["**/*"]
       }
     ],
     "mac": {
       "category": "public.app-category.productivity",
       "icon": "public/icon.icns",
-      "target": [
-        "dmg"
-      ]
+      "target": ["dmg"]
     },
     "win": {
       "icon": "public/icon-512.png",
-      "target": [
-        "nsis"
-      ],
+      "target": ["nsis"],
       "artifactName": "{{APP_NAME}}-Setup-${version}.exe"
     },
     "nsis": {
@@ -82,9 +76,7 @@
     "electron:pack:mac": "node scripts/prepare-pack.mjs && electron-builder --mac",
     "electron:pack:win": "node scripts/prepare-pack.mjs && electron-builder --win --x64 --config.npmRebuild=false"
   },
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@hono/node-server": "^1.13.7",
     "@types/node": "^20.17.10",
@@ -92,16 +84,14 @@
     "@types/react-dom": "^18.3.5",
     "autoprefixer": "^10.4.20",
     "concurrently": "^9.1.0",
-    "diff": "^9.0.0",
-    "@types/diff": "^7.0.2",
     "electron": "^42.0.0",
     "electron-builder": "^26.8.1",
+    "esbuild": "^0.24.2",
     "hono": "^4.6.14",
     "next": "^16.0.0",
     "postcss": "^8.4.49",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-resizable-panels": "^2.1.9",
     "tailwindcss": "^3.4.17",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",

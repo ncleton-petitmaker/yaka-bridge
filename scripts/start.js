@@ -1,15 +1,14 @@
 #!/usr/bin/env node
 /**
  * Lance daemon + Next.js puis ouvre le navigateur.
- * Cible : double-clic sur Lancer-OIF-Eval.command (Mac) ou .bat (Windows).
- * Aucune interaction utilisateur attendue.
+ * Mode bundle prod sans Electron (script de fallback).
  */
 import { spawn } from "node:child_process";
 import { setTimeout as wait } from "node:timers/promises";
 import { platform } from "node:os";
 
-const NEXT_PORT = process.env.FAE_NEXT_PORT ?? "3100";
-const DAEMON_PORT = process.env.FAE_DAEMON_PORT ?? "7456";
+const NEXT_PORT = process.env["{{APP_NAME_KEBAB_UPPER}}_NEXT_PORT"] ?? "{{NEXT_PORT}}";
+const DAEMON_PORT = process.env["{{APP_NAME_KEBAB_UPPER}}_DAEMON_PORT"] ?? "{{DAEMON_PORT}}";
 
 function logChild(name, child) {
   child.stdout.on("data", (b) => process.stdout.write(`[${name}] ${b}`));
@@ -28,10 +27,20 @@ async function openBrowser(url) {
 }
 
 async function main() {
-  const daemon = spawn("npm", ["run", "start:daemon"], { env: { ...process.env, FAE_DAEMON_PORT: DAEMON_PORT } });
+  const daemon = spawn("npm", ["run", "start:daemon"], {
+    env: {
+      ...process.env,
+      ["{{APP_NAME_KEBAB_UPPER}}_DAEMON_PORT"]: DAEMON_PORT,
+    },
+  });
   logChild("daemon", daemon);
 
-  const next = spawn("npm", ["run", "start:next"], { env: { ...process.env, FAE_NEXT_PORT: NEXT_PORT } });
+  const next = spawn("npm", ["run", "start:next"], {
+    env: {
+      ...process.env,
+      ["{{APP_NAME_KEBAB_UPPER}}_NEXT_PORT"]: NEXT_PORT,
+    },
+  });
   logChild("next", next);
 
   // attendre que Next.js boote (timing approximatif, à durcir avec un poll HTTP)

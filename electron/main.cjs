@@ -1,13 +1,20 @@
 /**
- * Electron main process pour OIF-Eval.
+ * Electron main process pour {{APP_NAME}}.
+ *
  * Lance le daemon Hono et Next.js en sidecar, charge l'UI dans une BrowserWindow.
  *
  * Mode dev (npm run electron) : utilise next dev + tsx pour le daemon.
- * Mode pack (futur) : utilise next start + daemon compilé.
+ * Mode pack : utilise next start + daemon compilé.
  *
  * Note : on est en CommonJS (.cjs) parce qu'Electron + ESM est encore capricieux
- * sur certaines versions selon le setup. Les sidecars (Hono + Next) tournent
- * en ESM normalement, c'est juste le main process qui est en CJS.
+ * sur certaines versions selon le setup. Les sidecars (Hono + Next) tournent en
+ * ESM normalement, c'est juste le main process qui est en CJS.
+ *
+ * Variables d'environnement (toutes optionnelles, défauts ci-dessous) :
+ *   {{APP_NAME_KEBAB_UPPER}}_NEXT_PORT     port du sidecar Next.js
+ *   {{APP_NAME_KEBAB_UPPER}}_DAEMON_PORT   port du sidecar Hono daemon
+ *   {{DATA_DIR_ENV_VAR}}                   dossier de données (userData/)
+ *   {{APP_NAME_KEBAB_UPPER}}_DEVTOOLS=1    ouvre les DevTools en dev
  */
 const { app, BrowserWindow, Menu, shell, ipcMain, dialog, clipboard } = require("electron");
 const { spawn, spawnSync } = require("node:child_process");
@@ -20,8 +27,8 @@ const IS_DEV = !app.isPackaged;
 // Nom affiché dans le Dock macOS, la menu bar et les notifications.
 // À faire AVANT app.whenReady() pour que le menu "appMenu" prenne ce nom,
 // et AVANT le premier app.getPath("userData") pour que le dossier userData
-// soit calculé sous le bon nom ("OIF-Eval/" plutôt que "Electron/").
-app.setName("OIF-Eval");
+// soit calculé sous le bon nom ("{{APP_NAME}}/" plutôt que "Electron/").
+app.setName("{{APP_NAME}}");
 
 // File logging : userData/logs/. Capture les sorties des sidecars + console main +
 // uncaughtException, pour qu'ils soient récupérables dans le bundle de diagnostic
@@ -87,9 +94,9 @@ if (process.platform === "darwin") {
   }
 }
 
-const NEXT_PORT = Number(process.env.FAE_NEXT_PORT || 3100);
-const DAEMON_PORT = Number(process.env.FAE_DAEMON_PORT || 7456);
-const TARGET_URL = `http://localhost:${NEXT_PORT}/evaluation`;
+const NEXT_PORT = Number(process.env["{{APP_NAME_KEBAB_UPPER}}_NEXT_PORT"] || {{NEXT_PORT}});
+const DAEMON_PORT = Number(process.env["{{APP_NAME_KEBAB_UPPER}}_DAEMON_PORT"] || {{DAEMON_PORT}});
+const TARGET_URL = `http://localhost:${NEXT_PORT}/`;
 
 let mainWindow = null;
 let daemonProc = null;
@@ -111,13 +118,13 @@ function logChild(name, child) {
 // ---------- Auth persistante ----------
 
 function authFilePath() {
-  return path.join(app.getPath("userData"), "oif-auth.json");
+  return path.join(app.getPath("userData"), "claude-auth.json");
 }
-function readOifAuth() {
+function readClaudeAuth() {
   try { return JSON.parse(fs.readFileSync(authFilePath(), "utf8")); } catch { return {}; }
 }
 function saveOifAuth(partial) {
-  const cur = readOifAuth();
+  const cur = readClaudeAuth();
   fs.mkdirSync(path.dirname(authFilePath()), { recursive: true });
   fs.writeFileSync(authFilePath(), JSON.stringify({ ...cur, ...partial }, null, 2));
 }
@@ -199,7 +206,7 @@ function checkClaudeCredentialsExist() {
 }
 
 function checkClaudeAuth() {
-  const a = readOifAuth();
+  const a = readClaudeAuth();
   if (a.claudeOAuthToken) return true;
   return checkClaudeCredentialsExist();
 }
@@ -276,7 +283,7 @@ function writeClaudeOnboardingSkip() {
 // ----------
 
 function sidecarEnv() {
-  const auth = readOifAuth();
+  const auth = readClaudeAuth();
   // CLAUDE_CODE_OAUTH_TOKEN attend le token brut (sk-ant-oat01-...), pas un JSON.
   // On extrait accessToken si claudeOAuthToken est un JSON, sinon on l'utilise tel quel.
   let rawToken = null;
@@ -290,9 +297,9 @@ function sidecarEnv() {
   }
   return {
     ...process.env,
-    FAE_DAEMON_PORT: String(DAEMON_PORT),
-    OIF_LOG_DIR: LOG_DIR,
-    OIF_APP_VERSION: app.getVersion(),
+    "{{APP_NAME_KEBAB_UPPER}}_DAEMON_PORT": String(DAEMON_PORT),
+    "{{APP_NAME_KEBAB_UPPER}}_LOG_DIR": LOG_DIR,
+    "{{APP_NAME_KEBAB_UPPER}}_APP_VERSION": app.getVersion(),
     ...(rawToken ? { CLAUDE_CODE_OAUTH_TOKEN: rawToken } : {}),
   };
 }
@@ -330,26 +337,13 @@ function spawnSidecars() {
     : appRoot;
   const nodeBin = process.execPath;
   const userDataDir = path.join(app.getPath("userData"), "data");
-  // En mode packagé, on utilise le bundle dist/mcp-xlsx.cjs produit par
-  // scripts/build-mcp.mjs (esbuild). Tout est inliné : @modelcontextprotocol/sdk
-  // ESM imports, exceljs, mammoth. Évite les résolutions node_modules fragiles
-  // dans app.asar.unpacked/ sous electron.exe + ELECTRON_RUN_AS_NODE=1.
-  // Fallback sur la source si le bundle est absent (dev local).
-  const mcpXlsxBundle = path.join(unpackedRoot, "dist", "mcp-xlsx.cjs");
-  const mcpXlsxSource = path.join(unpackedRoot, "electron", "mcp-xlsx.cjs");
-  const mcpXlsxPath = fs.existsSync(mcpXlsxBundle) ? mcpXlsxBundle : mcpXlsxSource;
-  // Viewer PDF.js : Mozilla prebuilt vendoré dans vendor/pdfjs/, déployé via
-  // asarUnpack. Le daemon le sert sous /pdfjs/* (cf. server/index.ts).
-  const pdfjsDir = path.join(unpackedRoot, "vendor", "pdfjs");
   const nodeEnv = {
     ...sidecarEnv(),
     ELECTRON_RUN_AS_NODE: "1",
     NODE_ENV: "production",
-    FAE_DATA_DIR: userDataDir,
+    "{{DATA_DIR_ENV_VAR}}": userDataDir,
     PORT: String(NEXT_PORT),
     HOSTNAME: "127.0.0.1",
-    OIF_MCP_XLSX: mcpXlsxPath,
-    OIF_PDFJS_DIR: pdfjsDir,
   };
 
   console.log(`[main] appRoot: ${appRoot}`);
@@ -450,8 +444,9 @@ async function waitForUrl(url, timeoutMs = 60000) {
   throw new Error(`timeout en attendant ${url}`);
 }
 
-// Charge le logo OIF (drapeau Francophonie) embedded en data URI au build time.
-const FLAG_PATH = path.join(__dirname, "..", "public", "francophonie-flag.svg");
+// Charge un logo optionnel embedded en data URI. Si public/app-icon.svg
+// existe, on l'utilise pour les écrans de boot / wizard. Sinon, fallback vide.
+const FLAG_PATH = path.join(__dirname, "..", "public", "app-icon.svg");
 const FLAG_DATA_URI = (() => {
   try {
     const svg = fs.readFileSync(FLAG_PATH, "utf8");
@@ -490,7 +485,7 @@ const WIN_INSTALL_SCREENSHOTS = {
 // Splash inline minimaliste : affiché immédiatement à la création de la fenêtre,
 // remplacé par la vraie page une fois que Next.js a fini de démarrer.
 const SPLASH_HTML = `<!DOCTYPE html>
-<html lang="fr"><head><meta charset="UTF-8"><title>OIF-Eval</title>
+<html lang="fr"><head><meta charset="UTF-8"><title>{{APP_NAME}}</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; }
@@ -533,8 +528,8 @@ const SPLASH_HTML = `<!DOCTYPE html>
 </style></head>
 <body>
   <div class="wrap">
-    ${FLAG_DATA_URI ? `<img class="logo" src="${FLAG_DATA_URI}" alt="OIF"/>` : ""}
-    <div class="brand">OIF-Eval</div>
+    ${FLAG_DATA_URI ? `<img class="logo" src="${FLAG_DATA_URI}" alt="App"/>` : ""}
+    <div class="brand">{{APP_NAME}}</div>
     <div class="sub">Organisation Internationale de la Francophonie</div>
     <div class="status">Démarrage en cours…</div>
     <div class="bar"></div>
@@ -557,7 +552,7 @@ function createSplashWindow() {
     alwaysOnTop: false, // pas alwaysOnTop : sinon il passe devant les dialogs
     resizable: false,
     skipTaskbar: false,
-    title: "OIF-Eval",
+    title: "{{APP_NAME}}",
     backgroundColor: "#ffffff",
     show: true, // critique : show:true direct pour que la fenêtre apparaisse
     webPreferences: {
@@ -577,7 +572,7 @@ function createWindow() {
     height: 900,
     minWidth: 1100,
     minHeight: 700,
-    title: "OIF-Eval",
+    title: "{{APP_NAME}}",
     backgroundColor: "#ffffff",
     show: false, // affiché manuellement quand Next a chargé, pour swap propre avec splash
     webPreferences: {
@@ -588,7 +583,7 @@ function createWindow() {
     },
   });
 
-  if (IS_DEV && process.env.FAE_DEVTOOLS === "1") {
+  if (IS_DEV && process.env["{{APP_NAME_KEBAB_UPPER}}_DEVTOOLS"] === "1") {
     mainWindow.webContents.openDevTools({ mode: "detach" });
   }
 
@@ -606,20 +601,20 @@ function setupMenu() {
     ...(isMac
       ? [
           {
-            // Force le label "OIF-Eval" même en dev où role:'appMenu' afficherait "Electron"
-            label: "OIF-Eval",
+            // Force le label "{{APP_NAME}}" même en dev où role:'appMenu' afficherait "Electron"
+            label: "{{APP_NAME}}",
             submenu: [
-              { label: "À propos de OIF-Eval", role: "about" },
+              { label: "À propos de {{APP_NAME}}", role: "about" },
               { type: "separator" },
               { label: "Préférences…", accelerator: "Cmd+,", enabled: false },
               { type: "separator" },
               { role: "services", submenu: [] },
               { type: "separator" },
-              { label: "Masquer OIF-Eval", accelerator: "Cmd+H", role: "hide" },
+              { label: "Masquer {{APP_NAME}}", accelerator: "Cmd+H", role: "hide" },
               { label: "Masquer les autres", accelerator: "Cmd+Alt+H", role: "hideOthers" },
               { label: "Afficher tout", role: "unhide" },
               { type: "separator" },
-              { label: "Quitter OIF-Eval", accelerator: "Cmd+Q", role: "quit" },
+              { label: "Quitter {{APP_NAME}}", accelerator: "Cmd+Q", role: "quit" },
             ],
           },
         ]
@@ -1018,16 +1013,16 @@ async function showClaudeMissingDialog() {
 <body>
 <div class="wrap">
   <header>
-    <img class="logo" src="${FLAG_DATA_URI}" alt="OIF"/>
+    <img class="logo" src="${FLAG_DATA_URI}" alt="App"/>
     <div>
-      <div class="eyebrow">OIF-Eval · Première étape</div>
+      <div class="eyebrow">{{APP_NAME}} · Première étape</div>
       <h1>Installer Claude Code</h1>
     </div>
   </header>
 
   <main>
     <p class="lead">
-      OIF-Eval s'appuie sur Claude Code (Anthropic) pour analyser les dossiers candidats.
+      {{APP_NAME}} s'appuie sur Claude Code (Anthropic) pour analyser les dossiers candidats.
       Suivez les étapes ci-dessous pour le mettre en place. Comptez moins d'une minute.
     </p>
 
@@ -1096,7 +1091,7 @@ async function showClaudeMissingDialog() {
     <div class="step">
       <span class="num">6</span>
       <h3>Choisir la méthode de connexion</h3>
-      <p>Sélectionnez la première option <strong>Claude account with subscription</strong> (compte Pro, Max, Team ou Enterprise OIF) puis Entrée.</p>
+      <p>Sélectionnez la première option <strong>Claude account with subscription</strong> (compte Pro, Max, Team ou Enterprise) puis Entrée.</p>
       <figure class="shot">
         <img src="${WIN_INSTALL_SCREENSHOTS.loginMethod}" alt="Choix de la méthode de connexion">
       </figure>
@@ -1105,7 +1100,7 @@ async function showClaudeMissingDialog() {
     <div class="step">
       <span class="num">7</span>
       <h3>Se connecter dans le navigateur</h3>
-      <p>Une page Claude.ai s'ouvre dans votre navigateur. Connectez-vous avec votre compte Claude.ai OIF (Google ou e-mail).</p>
+      <p>Une page Claude.ai s'ouvre dans votre navigateur. Connectez-vous avec votre compte Claude.ai (Google ou e-mail).</p>
       <figure class="shot">
         <img src="${WIN_INSTALL_SCREENSHOTS.seConnecter}" alt="Se connecter">
       </figure>
@@ -1159,7 +1154,7 @@ async function showClaudeMissingDialog() {
     <div class="step">
       <span class="num">✓</span>
       <h3>Claude Code est installé</h3>
-      <p>Une fois Claude Code installé et connecté, cliquez sur <strong>Installer OIF-Eval</strong> ci-dessous pour finaliser le démarrage.</p>
+      <p>Une fois Claude Code installé et connecté, cliquez sur <strong>Installer {{APP_NAME}}</strong> ci-dessous pour finaliser le démarrage.</p>
     </div>
         `
         : `
@@ -1178,8 +1173,8 @@ async function showClaudeMissingDialog() {
 
     <div class="step">
       <span class="num">3</span>
-      <h3>Se connecter au compte OIF</h3>
-      <p>Tapez <code>claude</code> puis Entrée. Une page web s'ouvre, connectez-vous avec le compte Claude.ai (Pro/Max/Team) fourni par l'OIF.</p>
+      <h3>Se connecter à Claude</h3>
+      <p>Tapez <code>claude</code> puis Entrée. Une page web s'ouvre, connectez-vous avec votre compte Claude.ai (Pro/Max/Team).</p>
     </div>
         `
     }
@@ -1192,7 +1187,7 @@ async function showClaudeMissingDialog() {
     <button id="prev">← Précédent</button>
     <button id="copy" class="primary">Copier la commande</button>
     <button id="next" class="primary">Suivant →</button>
-    <button id="retry" class="primary" style="display:none;">Installer OIF-Eval</button>
+    <button id="retry" class="primary" style="display:none;">Installer {{APP_NAME}}</button>
   </footer>
 </div>
 
@@ -1281,7 +1276,7 @@ async function showClaudeMissingDialog() {
       width: 860,
       height: 880,
       frame: true,
-      title: "OIF-Eval - Installer Claude Code",
+      title: "{{APP_NAME}} - Installer Claude Code",
       backgroundColor: "#faf9f7",
       modal: false,
       resizable: true,
@@ -1298,7 +1293,7 @@ async function showClaudeMissingDialog() {
     dialogWindow.setMenuBarVisibility(false);
     // Écrit le HTML en fichier temp + loadFile : data:URL se cassait au-delà
     // de ~2 Mo (les 11 captures embedded font dépasser la limite Chromium).
-    const tmpDir = path.join(app.getPath("temp"), "oif-eval");
+    const tmpDir = path.join(app.getPath("temp"), "{{APP_NAME_KEBAB}}");
     try {
       fs.mkdirSync(tmpDir, { recursive: true });
     } catch {}
@@ -1588,7 +1583,7 @@ async function showSetupWindow({ needsInstall, needsAuth }) {
       minimizable: false,
       maximizable: false,
       center: true,
-      title: "Configuration OIF-Eval",
+      title: "Configuration {{APP_NAME}}",
       backgroundColor: "#faf9f7",
       show: true,
       webPreferences: {
@@ -1602,7 +1597,7 @@ async function showSetupWindow({ needsInstall, needsAuth }) {
 
     // ── HTML de la fenêtre ──
     const html = `<!DOCTYPE html>
-<html lang="fr"><head><meta charset="UTF-8"><title>Configuration OIF-Eval</title>
+<html lang="fr"><head><meta charset="UTF-8"><title>Configuration {{APP_NAME}}</title>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
@@ -1692,7 +1687,7 @@ button:hover { opacity: .88; }
 <header>
   <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='10' fill='%23c96442'/%3E%3Ctext x='20' y='27' font-family='system-ui' font-size='20' font-weight='700' fill='white' text-anchor='middle'%3EO%3C/text%3E%3C/svg%3E" alt="">
   <div class="titles">
-    <span class="eyebrow">OIF-Eval</span>
+    <span class="eyebrow">{{APP_NAME}}</span>
     <h1>Configuration initiale</h1>
   </div>
 </header>
@@ -1778,7 +1773,7 @@ button:hover { opacity: .88; }
     <div class="step" id="step-done">
       <div class="step-icon pending" id="icon-done">3</div>
       <div class="step-body">
-        <div class="step-title muted" id="title-done">OIF-Eval prêt</div>
+        <div class="step-title muted" id="title-done">{{APP_NAME}} prêt</div>
         <div class="step-desc" id="desc-done">L'application va démarrer automatiquement.</div>
       </div>
     </div>
@@ -1939,7 +1934,7 @@ window.__oifState = function(s) {
   }
   if (s.phase === 'done') {
     setIcon('icon-done', 'done', String.fromCodePoint(0x2713));
-    setText('title-done', 'OIF-Eval demarre...');
+    setText('title-done', '{{APP_NAME}} demarre...');
     document.getElementById('btn-cancel').style.display = 'none';
   }
 };
@@ -2047,7 +2042,7 @@ window.__oifState = function(s) {
           const authWin = new BrowserWindow({
             width: 520,
             height: 700,
-            title: "Connexion Claude Code - OIF-Eval",
+            title: "Connexion Claude Code - {{APP_NAME}}",
             backgroundColor: "#ffffff",
             webPreferences: {
               nodeIntegration: false,
@@ -2267,9 +2262,9 @@ app.whenReady().then(async () => {
           margin-top: 8px; }
         button:hover { opacity: 0.9; }
       </style></head><body>
-        <h1>OIF-Eval prend plus de temps que prévu</h1>
+        <h1>{{APP_NAME}} prend plus de temps que prévu</h1>
         <p>Le démarrage interne n'a pas répondu en 60 secondes. Cela arrive si l'antivirus de votre poste scanne l'app à fond au premier lancement. Réessayez, c'est souvent plus rapide la deuxième fois.</p>
-        <p>Si le problème persiste, consultez les logs dans <code>%APPDATA%\\OIF-Eval\\logs</code> ou écrivez à Nicolas Cléton (nicolas.cleton@petitmaker.fr) avec le bundle de diagnostic.</p>
+        <p>Si le problème persiste, consultez les logs dans <code>%APPDATA%\\{{APP_NAME}}\\logs</code> (Win) ou <code>~/Library/Logs/{{APP_NAME}}/</code> (Mac).</p>
         <button onclick="location.reload()">Réessayer</button>
       </body></html>`;
       mainWindow.loadURL(`data:text/html;charset=utf-8;base64,${Buffer.from(errHtml).toString("base64")}`);

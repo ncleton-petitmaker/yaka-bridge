@@ -1,5 +1,5 @@
 /**
- * Journal de traçabilité OIF-Eval.
+ * Journal de traçabilité chaîné (SHA-256).
  *
  * Format : un fichier JSONL par utilisateur par jour
  *   audit-log/<user_slug>/YYYY-MM-DD.jsonl
@@ -8,15 +8,8 @@
  * sur sa journée). Pas de race d'append concurrent entre utilisateurs ou
  * machines, car deux daemons n'écrivent jamais dans le même fichier.
  *
- * L'OIF étant une OIG, le RGPD ne s'applique pas stricto sensu : ce journal
- * sert à la traçabilité interne, pas à la conformité réglementaire.
- *
- * Compatibilité ascendante : l'ancien fichier mono `audit-log.jsonl` à la
- * racine du dossier est encore lu en lecture (legacy), mais plus jamais
- * écrit. Pour migration manuelle, voir `migrateLegacyLog` plus bas.
- *
- * À NE JAMAIS LOGGER ICI : mots de passe, tokens, contenu intégral des
- * dossiers candidats, prompts IA bruts. On référence par identifiant.
+ * À NE JAMAIS LOGGER ICI : mots de passe, tokens, secrets, prompts IA bruts.
+ * On référence par identifiant uniquement.
  */
 import {
   existsSync,

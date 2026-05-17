@@ -1,46 +1,39 @@
 /**
- * Lecture et écriture persistante de la config app dans data/.claude/app-config.json
- * Pour l'instant : juste le modèle Claude Code à utiliser pour les runs.
+ * Lecture et écriture persistante de la config app dans `<dataDir>/.claude/app-config.json`.
+ *
+ * Le template ne fixe que les champs structurels (modèle, user, paths
+ * autorisés en écriture). Les apps métier étendent ce type avec leurs propres
+ * settings en redéfinissant ce fichier ou en ajoutant un sous-module.
  */
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 
 export interface AppConfig {
+  /** Modèle Claude Code à utiliser (alias "sonnet"/"opus"/"haiku" ou ID complet). */
   model: string;
-  /** Dossier qui contient les sous-dossiers candidates à évaluer. Si vide, on scanne data/candidatures-* */
+  /**
+   * Dossier(s) supplémentaires que Claude est autorisé à lire/écrire au-delà
+   * de `dataDir`. Listés à la fois dans `--add-dir` côté Claude CLI et dans
+   * la whitelist du hook restrict-write-paths.
+   */
   inputDir?: string;
-  /** Dossier où écrire les évaluations JSON. Si vide, on écrit dans data/evaluations/ */
   outputDir?: string;
-  /** Dossier partagé sur serveur OIF qui contient _global/, _perso/, _propositions/.
-   *  Si vide, fallback sur data/.claude/skills/ local. */
-  sharedSkillsDir?: string;
-  /** Identité de l'utilisatrice connectée (Alice, Bob, etc.) */
-  currentUser?: string;
-  /** Rôle admin : peut promouvoir/rejeter les propositions et éditer les skills globaux */
-  isAdmin?: boolean;
-  /** Si true et l'admin est connecté : auto-promotion immédiate des nouvelles propositions de règles */
-  autoApprove?: boolean;
-  /** Si true : après éligibilité positive, lance automatiquement la notation sans attendre un clic */
-  autoNotation?: boolean;
-  /** Dossier où le journal RGPD audit-log.jsonl est centralisé (serveur partagé OIF).
-   *  Si vide, fallback sur data/.claude/ local au poste. */
+  /** Dossier où le journal d'audit chaîné est écrit. */
   auditLogDir?: string;
-  /** Mode de partage : "shared" = via dossier synchronisé (OneDrive/SMB/Dropbox),
-   *  "manual" = autonome, échange par packs ZIP. Si vide, on infère depuis sharedSkillsDir. */
-  storageMode?: "shared" | "manual";
-  /** Nombre max d'évaluations en parallèle côté daemon (config admin, s'applique à tous via le NAS partagé). Défaut : 5. */
-  maxConcurrentEvaluations?: number;
+  /** Identité de l'utilisateur connecté (slugifié côté audit-log). */
+  currentUser?: string;
+  /** Rôle admin (autorisé à modifier les skills globaux par exemple). */
+  isAdmin?: boolean;
+  /** Nombre max de runs Claude en parallèle. Défaut : 5. */
+  maxConcurrentRuns?: number;
   lastUpdated?: string;
 }
 
 const DEFAULT_CONFIG: AppConfig = {
-  // Alias "sonnet" : Claude Code CLI résout automatiquement vers la dernière
-  // version de la famille Sonnet (4.6 aujourd'hui, 4.7/4.8/5.0 plus tard sans
-  // modification du code). Meilleur rapport qualité/coût pour les 296 dossiers
-  // - équivalent à un évaluateur humain expert d'après les calibrages 6e
-  // (cf docs/METHODOLOGIE-CALIBRAGE.md).
+  // Alias "sonnet" : Claude Code CLI résout vers la dernière version Sonnet.
+  // Pour épingler une version, utiliser un ID complet (ex "claude-sonnet-4-6").
   model: "sonnet",
-  maxConcurrentEvaluations: 5,
+  maxConcurrentRuns: 5,
 };
 
 export function configPath(dataDir: string): string {
@@ -73,47 +66,28 @@ export function saveAppConfig(dataDir: string, partial: Partial<AppConfig>): App
 }
 
 /**
- * Liste des modèles disponibles côté UI.
- * On garde "default" qui laisse Claude CLI choisir selon sa config locale.
+ * Liste des modèles disponibles côté UI. À adapter par l'app si besoin.
  */
 export const AVAILABLE_MODELS = [
   {
     id: "sonnet",
     label: "Sonnet (dernière version)",
     description:
-      "Recommandé. Met automatiquement à jour vers la version la plus récente de Sonnet (4.6 aujourd'hui, futures versions automatiquement). Équilibre qualité/coût, équivalent à un évaluateur humain expert.",
+      "Recommandé. Met automatiquement à jour vers la version la plus récente de Sonnet. Équilibre qualité/coût.",
   },
   {
     id: "opus",
     label: "Opus (dernière version)",
-    description:
-      "Meilleure qualité, plus lent et coûteux. Met automatiquement à jour vers la dernière version d'Opus.",
+    description: "Meilleure qualité, plus lent et coûteux. Met à jour vers la dernière version d'Opus.",
   },
   {
     id: "haiku",
     label: "Haiku (dernière version)",
-    description:
-      "Rapide et économique, qualité réduite. Met automatiquement à jour vers la dernière version de Haiku.",
+    description: "Rapide et économique, qualité réduite.",
   },
   {
     id: "default",
     label: "Par défaut (config CLI)",
-    description:
-      "Utilise le modèle configuré dans claude config (souvent Opus pour Pro/Max).",
-  },
-  {
-    id: "claude-opus-4-7",
-    label: "Opus 4.7 (version épinglée)",
-    description: "Version Opus 4.7 spécifiquement. Ne se met pas à jour automatiquement. ~$2.50 par dossier.",
-  },
-  {
-    id: "claude-sonnet-4-6",
-    label: "Sonnet 4.6 (version épinglée)",
-    description: "Version Sonnet 4.6 spécifiquement. Ne se met pas à jour automatiquement. ~$0.50 par dossier.",
-  },
-  {
-    id: "claude-haiku-4-5",
-    label: "Haiku 4.5 (version épinglée)",
-    description: "Version Haiku 4.5 spécifiquement. Ne se met pas à jour automatiquement. ~$0.10 par dossier.",
+    description: "Utilise le modèle configuré dans `claude config`.",
   },
 ] as const;

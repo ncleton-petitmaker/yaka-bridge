@@ -1,6 +1,12 @@
 /**
  * CRUD skills perso/global/propositions.
- * Tout vit dans data/.claude/skills/ (déployé depuis skills-template/).
+ * Tout vit dans `<dataDir>/.claude/skills/` (déployé depuis `skills-template/`).
+ *
+ * Layout :
+ *   _global/                     skills par défaut versionnés avec l'app
+ *   _perso/<user-slug>/          surcharges personnelles
+ *   _propositions/               propositions en review
+ *   _snapshots/                  snapshots pris avant promotion (revert)
  */
 import { readdirSync, readFileSync, existsSync, statSync, writeFileSync } from "node:fs";
 import { resolve, join, basename } from "node:path";
@@ -8,7 +14,7 @@ import { parse as yamlParse } from "yaml";
 
 export interface SkillEntry {
   scope: "global" | "perso" | "proposition";
-  owner?: string;            // pour perso et proposition
+  owner?: string;
   filename: string;
   path: string;
   frontmatter: Record<string, unknown>;
@@ -24,16 +30,17 @@ export interface PropositionEntry extends SkillEntry {
   date?: string;
   affecte?: string;
   statut?: "en_attente" | "promu" | "rejete";
-  dossier_declencheur?: string;
   raison?: string;
 }
 
-function parseSkillFile(path: string, raw: string) {
-  // Frontmatter YAML entre --- et ---
+function parseSkillFile(_path: string, raw: string) {
   const match = raw.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
   if (!match) return { frontmatter: {}, body: raw };
   try {
-    return { frontmatter: (yamlParse(match[1]) ?? {}) as Record<string, unknown>, body: match[2] };
+    return {
+      frontmatter: (yamlParse(match[1]) ?? {}) as Record<string, unknown>,
+      body: match[2],
+    };
   } catch {
     return { frontmatter: {}, body: match[2] };
   }
@@ -47,82 +54,24 @@ function safeReaddir(p: string): string[] {
   }
 }
 
-/** Racine du dossier des skills : sharedSkillsDir (serveur partagé) ou data/.claude/skills/ */
 export function skillsRoot(dataDir: string, sharedSkillsDir?: string): string {
   return sharedSkillsDir
     ? resolve(sharedSkillsDir)
     : resolve(dataDir, ".claude", "skills");
 }
 
-/**
- * Résout le dossier "skills global" actif :
- * - Si campaigns/<activeId>/skills/ existe → utilise (nouveau layout)
- * - Sinon fallback _global/ (ancien layout, compat)
- */
 export function activeGlobalSkillsDir(
   dataDir: string,
   sharedSkillsDir?: string
 ): string {
-  const root = skillsRoot(dataDir, sharedSkillsDir);
-  const idxPath = resolve(root, "campaigns", "_index.json");
-  if (existsSync(idxPath)) {
-    try {
-      const idx = JSON.parse(readFileSync(idxPath, "utf8")) as {
-        activeId?: string;
-      };
-      if (idx.activeId) {
-        const newDir = resolve(root, "campaigns", idx.activeId, "skills");
-        if (existsSync(newDir)) return newDir;
-      }
-    } catch {
-      // ignore
-    }
-  }
-  return resolve(root, "_global");
+  return resolve(skillsRoot(dataDir, sharedSkillsDir), "_global");
 }
 
 export function activePropositionsDir(
   dataDir: string,
   sharedSkillsDir?: string
 ): string {
-  const root = skillsRoot(dataDir, sharedSkillsDir);
-  const idxPath = resolve(root, "campaigns", "_index.json");
-  if (existsSync(idxPath)) {
-    try {
-      const idx = JSON.parse(readFileSync(idxPath, "utf8")) as {
-        activeId?: string;
-      };
-      if (idx.activeId) {
-        const newDir = resolve(root, "campaigns", idx.activeId, "propositions");
-        if (existsSync(newDir)) return newDir;
-      }
-    } catch {
-      // ignore
-    }
-  }
-  return resolve(root, "_propositions");
-}
-
-export function activeSnapshotsDir(
-  dataDir: string,
-  sharedSkillsDir?: string
-): string {
-  const root = skillsRoot(dataDir, sharedSkillsDir);
-  const idxPath = resolve(root, "campaigns", "_index.json");
-  if (existsSync(idxPath)) {
-    try {
-      const idx = JSON.parse(readFileSync(idxPath, "utf8")) as {
-        activeId?: string;
-      };
-      if (idx.activeId) {
-        const newDir = resolve(root, "campaigns", idx.activeId, "snapshots");
-        if (existsSync(newDir)) return newDir;
-      }
-    } catch {
-      // ignore
-    }
-  }
-  return resolve(root, "_snapshots");
+  return resolve(skillsRoot(dataDir, sharedSkillsDir), "_propositions");
 }
 
 export function listGlobalSkills(dataDir: string, sharedSkillsDir?: string): SkillEntry[] {
@@ -177,7 +126,6 @@ export function listPropositions(
         date: fm.date as string | undefined,
         affecte: fm.affecte as string | undefined,
         statut: (fm.statut as "en_attente" | "promu" | "rejete") ?? "en_attente",
-        dossier_declencheur: fm.dossier_declencheur as string | undefined,
         raison: fm.raison as string | undefined,
       };
     })
@@ -209,63 +157,24 @@ export function slugifyUser(user: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
-export function updatePropositionStatus(
+/**
+ * Écrit le contenu d'un skill global. Utilisé par PUT /api/skills/:slug.
+ */
+export function writeGlobalSkill(
   dataDir: string,
   filename: string,
-  newStatus: "promu" | "rejete",
-  admin: string,
-  commentaire: string,
+  content: string,
   sharedSkillsDir?: string
-): PropositionEntry | null {
-  const path = resolve(activePropositionsDir(dataDir, sharedSkillsDir), filename);
-  if (!existsSync(path)) return null;
-  const raw = readFileSync(path, "utf8");
-  const { frontmatter, body } = parseSkillFile(path, raw);
-  frontmatter.statut = newStatus;
-  if (newStatus === "promu") {
-    frontmatter.promu_le = new Date().toISOString();
-    frontmatter.promu_par = admin;
-  } else {
-    frontmatter.rejete_le = new Date().toISOString();
-    frontmatter.rejete_par = admin;
+): SkillEntry {
+  if (!filename.endsWith(".md")) {
+    throw new Error("Le filename doit terminer par .md");
   }
-  if (commentaire) frontmatter.commentaire_admin = commentaire;
-  // Réécrit le fichier avec le frontmatter mis à jour
-  const yamlOut = Object.entries(frontmatter)
-    .map(([k, v]) => `${k}: ${typeof v === "string" ? JSON.stringify(v) : JSON.stringify(v)}`)
-    .join("\n");
-  const out = `---\n${yamlOut}\n---\n${body}`;
-  writeFileSync(path, out, "utf8");
-
-  // Journalise
-  const histPath = resolve(
-    sharedSkillsDir ? resolve(sharedSkillsDir) : resolve(dataDir, ".claude"),
-    "_historique.jsonl"
-  );
-  const line = JSON.stringify({
-    date: new Date().toISOString(),
-    action: newStatus === "promu" ? "promouvoir" : "rejeter",
-    proposition_id: filename,
-    admin,
-    commentaire_admin: commentaire,
-  }) + "\n";
-  try {
-    if (existsSync(histPath)) {
-      const cur = readFileSync(histPath, "utf8");
-      writeFileSync(histPath, cur + line, "utf8");
-    } else {
-      writeFileSync(histPath, line, "utf8");
-    }
-  } catch {}
-
-  return {
-    ...loadSkill(path, "proposition"),
-    scope: "proposition",
-    auteur: frontmatter.auteur as string | undefined,
-    date: frontmatter.date as string | undefined,
-    affecte: frontmatter.affecte as string | undefined,
-    statut: newStatus,
-    dossier_declencheur: frontmatter.dossier_declencheur as string | undefined,
-    raison: frontmatter.raison as string | undefined,
-  };
+  const dir = activeGlobalSkillsDir(dataDir, sharedSkillsDir);
+  const path = resolve(dir, filename);
+  // Anti path-traversal : on s'assure que le path normalisé reste sous `dir`.
+  if (!path.startsWith(dir + "/") && path !== dir) {
+    throw new Error("Path skill hors du dossier autorisé");
+  }
+  writeFileSync(path, content, "utf8");
+  return loadSkill(path, "global");
 }

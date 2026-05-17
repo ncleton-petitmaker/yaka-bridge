@@ -1,36 +1,29 @@
 /**
- * Persistance des events des runs liés à une évaluation de dossier.
- * Format : 1 event par ligne JSON dans data/evaluations/<id>.events.jsonl
+ * Persistance des events des runs sur disque.
+ *
+ * Format : un event par ligne JSON dans
+ *   `<dataDir>/runs/<tag>.events.jsonl`
+ *
+ * Le `tag` est libre : peut être un ID de run, un slug métier, etc.
+ * Le caller (cf. server/runs.ts) décide quoi utiliser comme tag pour persister
+ * les events. Sans tag, les events restent uniquement en mémoire.
+ *
  * Utilisé pour replay l'historique du travail de Claude après redémarrage.
  */
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import type { AgentEvent } from "./types.js";
 
-/**
- * Extrait le dossier_id depuis un prompt d'évaluation.
- * Supporte 2 formats :
- *   1. Slash command : `/evaluer <id>` (depuis le chat / UI)
- *   2. Prompt expansé : `# Évaluation FAE 7e - dossier <id>` (depuis batch endpoint)
- */
-export function extractDossierId(prompt: string): string | null {
-  const slash = prompt.match(/^\s*\/evaluer(?:-eligibilite|-notation)?\s+([A-Za-z0-9_\-]+)/);
-  if (slash) return slash[1];
-  const expanded = prompt.match(/^#\s*Évaluation\s+FAE\s+\S+\s+-\s+dossier\s+([A-Za-z0-9_\-]+)/m);
-  if (expanded) return expanded[1];
-  return null;
-}
-
-function eventsPath(dataDir: string, dossierId: string): string {
-  return resolve(dataDir, "evaluations", `${dossierId}.events.jsonl`);
+function eventsPath(dataDir: string, tag: string): string {
+  return resolve(dataDir, "runs", `${tag}.events.jsonl`);
 }
 
 export function saveRunEvents(
   dataDir: string,
-  dossierId: string,
+  tag: string,
   events: AgentEvent[]
 ): void {
-  const p = eventsPath(dataDir, dossierId);
+  const p = eventsPath(dataDir, tag);
   mkdirSync(dirname(p), { recursive: true });
   const lines = events.map((ev) => JSON.stringify(ev)).join("\n");
   writeFileSync(p, lines + "\n", "utf8");
@@ -64,7 +57,11 @@ export function extractCostFromEvents(events: AgentEvent[]): RunCostSummary | nu
 
   type Snap = { i: number; o: number; cr: number; c5m: number; c1h: number };
   const seen = new Map<string, Snap>();
-  let input = 0, output = 0, cr = 0, c5m = 0, c1h = 0;
+  let input = 0,
+    output = 0,
+    cr = 0,
+    c5m = 0,
+    c1h = 0;
   let model = "";
 
   for (const ev of events) {
@@ -74,9 +71,19 @@ export function extractCostFromEvents(events: AgentEvent[]): RunCostSummary | nu
     if (mid) {
       const prev = seen.get(mid);
       if (prev) {
-        input -= prev.i; output -= prev.o; cr -= prev.cr; c5m -= prev.c5m; c1h -= prev.c1h;
+        input -= prev.i;
+        output -= prev.o;
+        cr -= prev.cr;
+        c5m -= prev.c5m;
+        c1h -= prev.c1h;
       }
-      seen.set(mid, { i: u.input_tokens, o: u.output_tokens, cr: u.cache_read, c5m: u.cache_create_5m, c1h: u.cache_create_1h });
+      seen.set(mid, {
+        i: u.input_tokens,
+        o: u.output_tokens,
+        cr: u.cache_read,
+        c5m: u.cache_create_5m,
+        c1h: u.cache_create_1h,
+      });
     }
     input += u.input_tokens;
     output += u.output_tokens;
@@ -96,15 +103,14 @@ export function extractCostFromEvents(events: AgentEvent[]): RunCostSummary | nu
   };
 }
 
-export function loadRunEvents(dataDir: string, dossierId: string): AgentEvent[] {
-  const p = eventsPath(dataDir, dossierId);
+export function loadRunEvents(dataDir: string, tag: string): AgentEvent[] {
+  const p = eventsPath(dataDir, tag);
   return loadRunEventsFromPath(p);
 }
 
 /**
  * Charge les events depuis un chemin .events.jsonl arbitraire. Utile quand
- * on lit les events depuis un outputDir distant (NAS partagé) plutôt que
- * depuis DATA_DIR/evaluations.
+ * on veut lire les events depuis un dossier custom plutôt que `<dataDir>/runs/`.
  */
 export function loadRunEventsFromPath(path: string): AgentEvent[] {
   if (!existsSync(path)) return [];

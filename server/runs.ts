@@ -6,7 +6,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { findClaudeBin, buildClaudeArgs, type BuildArgsOptions } from "./agents.js";
 import { StreamParser } from "./parse-stream.js";
-import { extractDossierId, saveRunEvents } from "./run-history.js";
+import { saveRunEvents } from "./run-history.js";
 import {
   computeCostUsd,
   emptyTotals,
@@ -50,6 +50,11 @@ export interface StartRunOptions extends BuildArgsOptions {
   prompt: string;
   /** Dossier de travail du subprocess */
   cwd: string;
+  /**
+   * Tag libre. Si fourni, les events seront persistés dans
+   * `<cwd>/runs/<tag>.events.jsonl` à la fin du run (succès, échec ou annulation).
+   */
+  tag?: string;
 }
 
 export function getRun(id: string): RunRecord | null {
@@ -64,6 +69,7 @@ export function getRun(id: string): RunRecord | null {
     exitCode: r.exitCode,
     cwd: r.cwd,
     events: r.events,
+    tag: r.tag,
   };
 }
 
@@ -93,6 +99,7 @@ export function listRuns(): RunRecord[] {
     exitCode: r.exitCode,
     cwd: r.cwd,
     events: r.events,
+    tag: r.tag,
   }));
 }
 
@@ -260,13 +267,14 @@ function setStatus(run: ActiveRun, status: RunStatus, exitCode?: number | null) 
   if (status === "succeeded" || status === "failed" || status === "cancelled") {
     run.endedAt = Date.now();
     run.exitCode = exitCode ?? null;
-    // Persiste les events sur disque pour les runs liés à un dossier
-    const dossierId = extractDossierId(run.prompt);
-    if (dossierId) {
+    // Persiste les events sur disque si un tag a été fourni par le caller.
+    // Sinon les events restent uniquement en mémoire (utile pour les runs
+    // éphémères qu'on n'a pas besoin de rejouer après redémarrage).
+    if (run.tag) {
       try {
-        saveRunEvents(run.cwd, dossierId, run.events);
+        saveRunEvents(run.cwd, run.tag, run.events);
       } catch (err) {
-        console.warn(`[runs] échec sauvegarde events ${dossierId}:`, (err as Error).message);
+        console.warn(`[runs] échec sauvegarde events ${run.tag}:`, (err as Error).message);
       }
     }
     run.resolveDone?.();
@@ -297,6 +305,7 @@ export function startRun(opts: StartRunOptions): RunRecord {
     startedAt: Date.now(),
     cwd: opts.cwd,
     events: [],
+    tag: opts.tag,
     listeners: new Set(),
     parser,
     done,

@@ -85,23 +85,25 @@ export interface RunRecord {
   cwd: string;
   /** Liste des events accumulés (pour replay sur reconnexion SSE) */
   events: AgentEvent[];
+  /**
+   * Tag libre fourni par le caller, utilisé comme nom de fichier pour
+   * persister les events sur disque (`<dataDir>/runs/<tag>.events.jsonl`).
+   * Si absent, les events ne sont pas persistés.
+   */
+  tag?: string;
 }
 
 export interface ChatRequest {
-  /** Prompt utilisateur (en plus de l'invocation de skill via slash) */
+  /** Prompt à envoyer à Claude Code via stdin */
   message: string;
-  /** Slash command à exécuter, ex : "/evaluer 0042-AZUR-Dev-Congo" */
-  slashCommand?: string;
   /** Profil utilisateur connecté (pour charger ses skills perso) */
   user?: string;
-  /** Modèle à utiliser, par défaut sonnet */
+  /** Modèle à utiliser, par défaut "sonnet" */
   model?: string;
   /** Dossier de travail (cwd du subprocess), relatif à data/ */
   workdir?: string;
-  /** Cadre du chat. Restreint les addDirs et injecte un briefing mission. */
-  scope?:
-    | { type: "dossier"; id: string }
-    | { type: "campaign"; id: string };
+  /** Tag libre pour la persistance des events (cf. RunRecord.tag) */
+  tag?: string;
 }
 
 export interface ChatRunCreated {
