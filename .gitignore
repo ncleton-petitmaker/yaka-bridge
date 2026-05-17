@@ -41,6 +41,10 @@ evaluations/
 
 # Claude Code (worktrees locaux éphémères)
 .claude/
+# ... mais on versionne les agents factory (essentiels pour scaffolder)
+!.claude/
+!.claude/agents/
+!.claude/agents/**
 *.swp
 *.swo
 
