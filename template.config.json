@@ -78,5 +78,16 @@
     }
   ],
   "fileExtensions": [".ts", ".tsx", ".js", ".cjs", ".mjs", ".json", ".md", ".yaml", ".yml", ".css", ".html"],
-  "ignorePaths": [".git", "node_modules", ".next", "dist", "release", "data", "vendor", "release"]
+  "ignorePaths": [".git", "node_modules", ".next", "dist", "release", "data", "vendor", "release"],
+  "shell": {
+    "description": "Configuration du shell UX restauré depuis oif-eval. Les agents (notamment ui-page-generator) lisent ces clés pour scaffolder les pages.",
+    "nav_tabs": {
+      "description": "Onglets affichés dans AppChromeHeader. Chaque entrée { href, label, adminOnly? }. Tableau vide par défaut : l'agent ui-page-generator l'enrichit selon les entités métier.",
+      "default": []
+    },
+    "required_dirs": {
+      "description": "Dossiers obligatoires que l'utilisateur doit configurer avant d'utiliser l'app. Chaque entrée { key, label } où `key` est un champ de AppConfig (ex 'inputDir', 'outputDir'). Tableau vide par défaut : pas de StorageGuard bloquant.",
+      "default": []
+    }
+  }
 }

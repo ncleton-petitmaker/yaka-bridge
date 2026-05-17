@@ -290,6 +290,38 @@ Statuts possibles : `"ok"`, `"partial"` (typecheck KO mais fichiers écrits), `"
 - **AbortSignal partout** — pas de subprocess non interruptible.
 - **Idempotence** : si `server/index.ts` contient déjà la route (recherche par signature `app.post("/api/<entities>"`), skip l'ajout au lieu de dupliquer.
 
+## Convention StreamingPanel (REFONTE shell-first 2026-05-17)
+
+Le `StreamingPanel.tsx` du template (composant invariant ui-page-generator) attend des events au format `AgentEvent` (défini dans `server/types.ts`, kind = `status | text_delta | thinking_delta | tool_use_start | tool_use_input | tool_use_end | tool_result | message_start | message_stop | result | usage | error | stderr | rate_limit | raw`).
+
+**Ton runner DOIT émettre exactement ce format** (via le pattern listeners SSE de `runs.ts`). Pour un domain où le subprocess n'est pas Claude CLI, tu **MAPS** les events natifs vers `AgentEvent` :
+
+### Mapping Maestro → AgentEvent
+- stdout `Launch app "<id>"` → `{ kind: "status", status: "running", text: "Launch app <id>", ts: Date.now() }`
+- stdout `COMPLETED` ou `Test PASSED` → `{ kind: "status", status: "completed", text: "step done" }`
+- stdout `FAILED` ou erreur → `{ kind: "error", error: "..." }`
+- screenshot pris (file path détecté) → `{ kind: "raw", raw: { type: "screenshot", path: "..." } }`
+- end-of-flow → `{ kind: "result", result: { success: true, durationMs: ... } }`
+
+### Mapping HTTP API → AgentEvent
+- request envoyée → `{ kind: "status", status: "requesting" }`
+- response headers reçues → `{ kind: "message_start" }`
+- response body chunk → `{ kind: "text_delta", text: "..." }`
+- response complete → `{ kind: "result", result: { success: r.ok, output: bodyPreview, durationMs: ... } }`
+- response error (timeout, 5xx) → `{ kind: "error", error: r.statusText }`
+
+### Mapping CLI custom → AgentEvent
+- spawn ok → `{ kind: "status", status: "running" }`
+- stdout chunk (ligne par ligne) → `{ kind: "text_delta", text: line }`
+- stderr → `{ kind: "stderr", text: line }`
+- exit code 0 → `{ kind: "result", result: { success: true } }`
+- exit code !== 0 → `{ kind: "error", error: `exit ${code}` }`
+
+### Plusieurs items en boucle (e.g. Marcelle = N questions)
+Chaque item ouvre/ferme son propre run (UUID unique géré par `runs.ts` invariant). Le runner agrège les events `question_done` au niveau du batch et émet un `batch_done` final. Le `<<Entity>StreamPanel>` côté UI consomme ces events typés en plus de l'AgentEvent générique (discriminated union dans `server/types.ts`, défini par domain-modeler).
+
+---
+
 ## Gotchas (issus du retour d'expérience Marcelle)
 
 - **Maestro + accents** : `flowName` doit être ASCII (`stripAccents` obligatoire avant écriture YAML).

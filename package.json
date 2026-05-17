@@ -35,17 +35,23 @@
       {
         "from": ".next/standalone/.next/static",
         "to": "static",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "mac": {
       "category": "public.app-category.productivity",
       "icon": "public/icon.icns",
-      "target": ["dmg"]
+      "target": [
+        "dmg"
+      ]
     },
     "win": {
       "icon": "public/icon-512.png",
-      "target": ["nsis"],
+      "target": [
+        "nsis"
+      ],
       "artifactName": "{{APP_NAME}}-Setup-${version}.exe"
     },
     "nsis": {
@@ -76,7 +82,9 @@
     "electron:pack:mac": "node scripts/prepare-pack.mjs && electron-builder --mac",
     "electron:pack:win": "node scripts/prepare-pack.mjs && electron-builder --win --x64 --config.npmRebuild=false"
   },
-  "dependencies": {},
+  "dependencies": {
+    "react-resizable-panels": "^2.1.9"
+  },
   "devDependencies": {
     "@hono/node-server": "^1.13.7",
     "@types/node": "^20.17.10",

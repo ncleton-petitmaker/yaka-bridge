@@ -1,7 +1,12 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
+import { AppChromeHeader } from "@/components/AppChromeHeader";
+
+interface RequiredDirSpec {
+  key: string;
+  label: string;
+}
 
 interface AppConfigShape {
   model: string;
@@ -11,6 +16,8 @@ interface AppConfigShape {
   inputDir?: string;
   outputDir?: string;
   auditLogDir?: string;
+  requiredDirs?: RequiredDirSpec[];
+  [k: string]: unknown;
 }
 
 interface AvailableModel {
@@ -19,6 +26,13 @@ interface AvailableModel {
   description: string;
 }
 
+/**
+ * Page paramètres : sections séparées en cards, hérité d'oif-eval.
+ * - Profil (utilisateur courant, rôle admin)
+ * - Stockage (dossiers requis lus dynamiquement depuis `requiredDirs`)
+ * - Modèle Claude Code + concurrence
+ * - AGENT-SLOT: settings-section-calibrage (vide dans le template)
+ */
 export default function SettingsPage() {
   const [config, setConfig] = useState<AppConfigShape | null>(null);
   const [models, setModels] = useState<AvailableModel[]>([]);
@@ -50,6 +64,7 @@ export default function SettingsPage() {
       const j = (await r.json()) as { config: AppConfigShape };
       setConfig(j.config);
       setInfo("Enregistré.");
+      window.dispatchEvent(new Event("app-config-changed"));
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -57,98 +72,161 @@ export default function SettingsPage() {
     }
   }
 
+  const requiredDirs = config?.requiredDirs ?? [];
+  // Fallback : si l'app n'a déclaré aucun requiredDirs, on affiche quand même
+  // les 3 dossiers classiques (input/output/audit) pour permettre la conf manuelle.
+  const dirsToShow: RequiredDirSpec[] =
+    requiredDirs.length > 0
+      ? requiredDirs
+      : [
+          { key: "inputDir", label: "Dossier input (lecture)" },
+          { key: "outputDir", label: "Dossier output (écriture)" },
+          { key: "auditLogDir", label: "Dossier audit-log" },
+        ];
+
   return (
-    <main style={{ maxWidth: 720, margin: "0 auto", padding: "32px 24px" }}>
-      <header style={{ marginBottom: 16 }}>
-        <Link href="/" style={{ fontSize: 13, color: "#666" }}>
-          ← Accueil
-        </Link>
-        <h1 style={{ fontSize: 22, fontWeight: 600, marginTop: 8 }}>Paramètres</h1>
-      </header>
+    <div className="app">
+      <AppChromeHeader />
+      <main
+        style={{
+          flex: 1,
+          overflowY: "auto",
+          padding: 32,
+          maxWidth: 880,
+          width: "100%",
+          margin: "0 auto",
+        }}
+      >
+        <header style={{ marginBottom: 24 }}>
+          <h1
+            style={{
+              fontFamily: "var(--serif)",
+              fontWeight: 600,
+              fontSize: 28,
+              letterSpacing: "-0.01em",
+              color: "var(--text-strong)",
+              marginBottom: 6,
+            }}
+          >
+            Paramètres
+          </h1>
+          <p style={{ fontSize: 13, color: "var(--text-muted)" }}>
+            Configuration de l&apos;app : profil, stockage, modèle.
+          </p>
+        </header>
 
-      {!config ? (
-        <p>Chargement…</p>
-      ) : (
-        <section style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <Field label="Utilisateur connecté">
-            <input
-              type="text"
-              defaultValue={config.currentUser ?? ""}
-              onBlur={(e) => save({ currentUser: e.target.value })}
-            />
-          </Field>
+        {!config ? (
+          <p>Chargement…</p>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+            {/* Section : Profil */}
+            <Section title="Profil">
+              <Field label="Utilisateur connecté">
+                <input
+                  type="text"
+                  defaultValue={config.currentUser ?? ""}
+                  onBlur={(e) => save({ currentUser: e.target.value })}
+                />
+              </Field>
+              <Field label="Administrateur">
+                <input
+                  type="checkbox"
+                  checked={!!config.isAdmin}
+                  onChange={(e) => save({ isAdmin: e.target.checked })}
+                />
+              </Field>
+            </Section>
 
-          <Field label="Modèle Claude Code">
-            <select
-              value={config.model}
-              onChange={(e) => save({ model: e.target.value })}
-            >
-              {models.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.label}
-                </option>
+            {/* Section : Stockage */}
+            <Section title="Stockage">
+              <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 12 }}>
+                Chemins de dossiers que l&apos;app peut lire/écrire. Ces dossiers
+                sont autorisés à Claude Code via <code>--add-dir</code>.
+              </p>
+              {dirsToShow.map((spec) => (
+                <Field key={spec.key} label={spec.label}>
+                  <input
+                    type="text"
+                    defaultValue={(config[spec.key] as string | undefined) ?? ""}
+                    onBlur={(e) => save({ [spec.key]: e.target.value || undefined })}
+                    style={{ width: "100%" }}
+                    placeholder={`/chemin/vers/${spec.key}`}
+                  />
+                </Field>
               ))}
-            </select>
-          </Field>
+            </Section>
 
-          <Field label="Admin">
-            <input
-              type="checkbox"
-              checked={!!config.isAdmin}
-              onChange={(e) => save({ isAdmin: e.target.checked })}
-            />
-          </Field>
+            {/* Section : Modèle Claude Code */}
+            <Section title="Modèle Claude Code">
+              <Field label="Modèle">
+                <select
+                  value={config.model}
+                  onChange={(e) => save({ model: e.target.value })}
+                >
+                  {models.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Max runs concurrents">
+                <input
+                  type="number"
+                  defaultValue={config.maxConcurrentRuns ?? 5}
+                  onBlur={(e) =>
+                    save({ maxConcurrentRuns: Number(e.target.value) || undefined })
+                  }
+                />
+              </Field>
+            </Section>
 
-          <Field label="Max runs concurrents">
-            <input
-              type="number"
-              defaultValue={config.maxConcurrentRuns ?? 5}
-              onBlur={(e) =>
-                save({ maxConcurrentRuns: Number(e.target.value) || undefined })
-              }
-            />
-          </Field>
+            {/* AGENT-SLOT: settings-section-calibrage
+                L'agent ui-page-generator ajoute ici une section "Calibrage"
+                ou autre section métier si le brief le demande. */}
 
-          <Field label="Dossier input (lecture)">
-            <input
-              type="text"
-              defaultValue={config.inputDir ?? ""}
-              onBlur={(e) => save({ inputDir: e.target.value || undefined })}
-              style={{ width: "100%" }}
-            />
-          </Field>
+            {saving && <p style={{ fontSize: 13, color: "var(--text-muted)" }}>Enregistrement…</p>}
+            {info && <p style={{ fontSize: 13, color: "var(--green, green)" }}>{info}</p>}
+            {error && <p style={{ fontSize: 13, color: "var(--red, crimson)" }}>{error}</p>}
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
 
-          <Field label="Dossier output (écriture)">
-            <input
-              type="text"
-              defaultValue={config.outputDir ?? ""}
-              onBlur={(e) => save({ outputDir: e.target.value || undefined })}
-              style={{ width: "100%" }}
-            />
-          </Field>
-
-          <Field label="Dossier audit-log">
-            <input
-              type="text"
-              defaultValue={config.auditLogDir ?? ""}
-              onBlur={(e) => save({ auditLogDir: e.target.value || undefined })}
-              style={{ width: "100%" }}
-            />
-          </Field>
-
-          {saving && <p style={{ fontSize: 13, color: "#666" }}>Enregistrement…</p>}
-          {info && <p style={{ fontSize: 13, color: "green" }}>{info}</p>}
-          {error && <p style={{ fontSize: 13, color: "crimson" }}>{error}</p>}
-        </section>
-      )}
-    </main>
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section
+      className="pane"
+      style={{
+        padding: 20,
+        display: "flex",
+        flexDirection: "column",
+        gap: 12,
+      }}
+    >
+      <h2
+        style={{
+          fontSize: 11,
+          fontWeight: 600,
+          textTransform: "uppercase",
+          letterSpacing: "0.06em",
+          color: "var(--text-muted)",
+          margin: 0,
+        }}
+      >
+        {title}
+      </h2>
+      {children}
+    </section>
   );
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      <span style={{ fontSize: 13, fontWeight: 500 }}>{label}</span>
+      <span style={{ fontSize: 13, fontWeight: 500, color: "var(--text)" }}>{label}</span>
       {children}
     </label>
   );
