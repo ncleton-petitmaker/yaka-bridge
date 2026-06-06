@@ -102,6 +102,8 @@ template.config.json    manifeste des placeholders (lu par init-from-template.mj
 - [docs/customization-guide.md](docs/customization-guide.md) : où poser le code domain.
 - [docs/gotchas.md](docs/gotchas.md) : pièges connus (Maestro unicode, undici timeout, Kong, asar).
 - [docs/subprocess-patterns.md](docs/subprocess-patterns.md) : 4 modèles de drivers (claude-cli, maestro, http-api, cli-custom).
+- [docs/supabase-vps-architecture.md](docs/supabase-vps-architecture.md) : architecture Bridge + Supabase self-hosted.
+- [docs/vps-provisioning-runbook.md](docs/vps-provisioning-runbook.md) : checklist pour provisionner un VPS client.
 
 ## License
 
