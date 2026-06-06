@@ -58,6 +58,8 @@ import {
   verifyAuditLogIntegrity,
   type AuditEventInput,
 } from "./audit-log.js";
+import { getBridgeStatusPayload } from "./bridge-status.js";
+import { registerBridgeControlPlaneRoutes } from "./bridge-control-plane.js";
 
 // Version pseudo-templating : remplacée au scaffolding ; en attendant `0.0.1`.
 const APP_VERSION = "{{VERSION}}";
@@ -127,6 +129,12 @@ function buildAddDirs(dataDir: string, cfg: AppConfig): string[] {
 }
 
 const app = new Hono();
+registerBridgeControlPlaneRoutes(app, DATA_DIR);
+
+app.use("*", async (c, next) => {
+  await next();
+  c.header("Access-Control-Allow-Private-Network", "true");
+});
 
 app.use(
   "*",
@@ -153,6 +161,8 @@ app.get("/api/health", (c) =>
     pricing: getPricingMetadata(),
   })
 );
+
+app.get("/api/bridge/status", (c) => c.json(getBridgeStatusPayload("local-daemon")));
 
 // ---------------------------------------------------------------------------
 // /api/agents

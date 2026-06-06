@@ -80,7 +80,12 @@
     "lint": "next lint",
     "electron": "electron electron/main.cjs",
     "electron:pack:mac": "node scripts/prepare-pack.mjs && electron-builder --mac",
-    "electron:pack:win": "node scripts/prepare-pack.mjs && electron-builder --win --x64 --config.npmRebuild=false"
+    "electron:pack:win": "node scripts/prepare-pack.mjs && electron-builder --win --x64 --config.npmRebuild=false",
+    "bridge": "tsx bridge/index.ts",
+    "bridge:install": "tsx bridge/install.ts",
+    "bridge:build": "node scripts/build-bridge.mjs",
+    "bridge:pack:mac": "npm run bridge:build && electron-builder --mac --config electron-builder.bridge.cjs",
+    "bridge:pack:win": "npm run bridge:build && electron-builder --win --x64 --config electron-builder.bridge.cjs --config.npmRebuild=false"
   },
   "dependencies": {
     "react-resizable-panels": "^2.1.9"
