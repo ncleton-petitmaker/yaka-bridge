@@ -737,13 +737,13 @@ function statusHtml() {
     function esc(value) { return String(value == null ? "" : value).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c])); }
     function render(state) {
       current = state;
-      const draft = readLoginDraft();
       document.getElementById("subtitle").textContent = (state.account?.email || "Compte Bridge non connecté") + " · " + state.services.length + " service(s)";
       document.getElementById("error").textContent = state.bridgeError || state.lastError || "";
       const services = document.getElementById("services");
-      services.innerHTML = !state.authenticated
-        ? '<div class="login-hero">' + loginForm("main", state, draft) + '</div>'
-        : state.services.length ? state.services.map(service => {
+      if (!state.authenticated) {
+        ensureLoginHero(state);
+      } else {
+        services.innerHTML = state.services.length ? state.services.map(service => {
         const status = service.status || "disconnected";
         const scopes = (service.scopes || []).slice(0, 3).join(" · ");
         const actionLabel = status === "active" || status === "reconnecting"
@@ -760,13 +760,14 @@ function statusHtml() {
           '<div class="service-actions"><button data-open="' + esc(service.serviceId) + '" class="primary">' + esc(actionLabel) + '</button></div>' +
         '</article>';
       }).join("") : '<p class="empty">Aucun service autorisé.</p>';
-      services.querySelectorAll("[data-open]").forEach(btn => btn.addEventListener("click", () => window.bridge.openService(btn.dataset.open)));
+        services.querySelectorAll("[data-open]").forEach(btn => btn.addEventListener("click", () => window.bridge.openService(btn.dataset.open)));
+      }
 
       const account = state.account || {};
-      document.getElementById("login-panel").innerHTML = state.authenticated ? "" :
-        loginForm("identity", state, draft);
+      const loginPanel = document.getElementById("login-panel");
+      if (state.authenticated) loginPanel.innerHTML = "";
+      else ensureLoginPanel(loginPanel, "identity", state);
       attachLoginForms();
-      restoreLoginFocus(draft);
       document.getElementById("identity-grid").innerHTML =
         panel("Compte", [
           ["Email", account.email || "Non connecté"],
@@ -794,8 +795,17 @@ function statusHtml() {
         '<div class="activity-row"><span>' + new Date(item.ts).toLocaleTimeString("fr-FR") + '</span><strong>' + esc(item.message) + '</strong></div>'
       ).join("") : '<p class="empty">Aucune activité récente.</p>';
     }
+    function ensureLoginHero(state) {
+      const services = document.getElementById("services");
+      if (services.querySelector("#login-form-main")) return;
+      services.innerHTML = '<div class="login-hero">' + loginForm("main", state, readLoginDraft()) + '</div>';
+    }
+    function ensureLoginPanel(container, suffix, state) {
+      if (container.querySelector("#login-form-" + suffix)) return;
+      container.innerHTML = loginForm(suffix, state, readLoginDraft());
+    }
     function readLoginDraft() {
-      const form = document.querySelector(".login-form");
+      const form = document.activeElement?.closest?.(".login-form") || document.querySelector(".login-form");
       if (!form) return {};
       const values = Object.fromEntries(new FormData(form).entries());
       return {
