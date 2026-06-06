@@ -55,6 +55,9 @@ docker exec -i supabase-db psql -U postgres -d postgres -v ON_ERROR_STOP=1 \
 
 docker exec -i supabase-db psql -U postgres -d postgres -v ON_ERROR_STOP=1 \
   < supabase/migrations/20260606123000_modular_erp_core.sql
+
+docker exec -i supabase-db psql -U postgres -d postgres -v ON_ERROR_STOP=1 \
+  < supabase/migrations/20260606150000_bridge_observability.sql
 ```
 
 Verify the shared ERP modules:
@@ -141,6 +144,8 @@ SUPABASE_URL=http://supabase-kong:8000
 SUPABASE_ANON_KEY=<anon key>
 SUPABASE_SERVICE_ROLE_KEY=<service role key>
 NEXT_PUBLIC_BRIDGE_INSTALLER_BASE_URL=https://api.customer.example/storage/v1/object/public/bridge-installers
+NEXT_PUBLIC_OPENREPLAY_ENABLED=false
+NEXT_PUBLIC_OPENREPLAY_PRIVATE_MODE=true
 ```
 
 If the app uses Next route handlers as its cloud API, disable local daemon rewrites in production. Long-running Codex jobs should go through Bridge jobs, not through the web container.
@@ -250,5 +255,6 @@ promoting a stack to production. Minimum smoke checks:
 - App-specific health route returns Supabase configured.
 - A browser login succeeds against the customer app domain.
 - Bridge can register, sync services, receive a job, and emit job events.
+- `/admin/observability` shows the current support session after a browser login.
 - A restore drill succeeds from the latest Postgres and Storage backups.
 - Public signup is refused unless the customer explicitly opted into it.

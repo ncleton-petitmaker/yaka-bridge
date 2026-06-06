@@ -27,6 +27,17 @@ Use this matrix before promoting a customer stack from smoke test to production.
 - Disabled entitlement removes the service from Bridge after sync.
 - Disabled service remains hidden from non-admin Bridge users.
 
+## Observability And Support
+
+- Browser login creates or refreshes one `bridge_support_sessions` row.
+- Route changes update `current_route` within 10 seconds.
+- Client runtime errors create `bridge_observability_events` rows grouped by fingerprint.
+- OpenReplay private mode is enabled by default and network payload capture is disabled.
+- Replay URL is linked to the support session when OpenReplay is configured.
+- Organization members cannot call admin observability endpoints unless role is `owner` or `admin`.
+- Admin from organization A cannot read organization B support sessions or events.
+- Payload redaction removes bearer tokens, Supabase keys, cookies, JWTs and service role keys.
+
 ## Codex Runtime Isolation
 
 - Job for service A writes only under `<BridgeData>/services/service-a`.

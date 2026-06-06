@@ -12,6 +12,8 @@ import { BridgeIndicator } from "@/components/BridgeStatusProvider";
  * `ui-page-generator` l'enrichit lors du scaffolding selon les entités métier
  * définies dans `template.config.json` (clé `shell.nav_tabs`).
  *
+ * Format : { href, label }
+ *
  * AGENT-SLOT: nav-tabs — l'agent ui-page-generator remplace ce tableau lors du
  * scaffold. Garder le type pour TS.
  */
@@ -19,8 +21,16 @@ interface NavTab {
   href: string;
   label: string;
 }
-const baseTabs: NavTab[] = [];
+const baseTabs: NavTab[] = [
+  { href: "/admin/observability", label: "Observation" },
+];
 
+/**
+ * Header global de l'app : Mark + nom + onglets + theme switcher.
+ * Wrap aussi le ConflictBanner pour qu'il apparaisse au-dessus du header.
+ *
+ * Hérité d'oif-eval, génericisé : tabs et nom d'app via placeholders.
+ */
 export function AppChromeHeader() {
   const path = usePathname();
   const [theme, setTheme] = useState<"light" | "dark">("light");
@@ -29,6 +39,8 @@ export function AppChromeHeader() {
     const t = document.documentElement.getAttribute("data-theme");
     if (t === "dark" || t === "light") setTheme(t);
   }, []);
+
+  const tabs = baseTabs;
 
   function toggleTheme() {
     const next = theme === "dark" ? "light" : "dark";
@@ -94,7 +106,7 @@ export function AppChromeHeader() {
             alignItems: "stretch",
           }}
         >
-          {baseTabs.map((t) => {
+          {tabs.map((t) => {
             const active = path?.startsWith(t.href) ?? false;
             return (
               <Link

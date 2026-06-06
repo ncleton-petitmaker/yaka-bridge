@@ -92,6 +92,7 @@
     "brand:icons": "node scripts/brand-icons.mjs"
   },
   "dependencies": {
+    "@openreplay/tracker": "^18.0.13",
     "@supabase/supabase-js": "^2.107.0",
     "electron-updater": "^6.8.9",
     "react-resizable-panels": "^2.1.9"

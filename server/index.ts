@@ -62,6 +62,15 @@ import { callAction, listActions, type ActionContext } from "./actions.js";
 import { getSupabasePublicConfig } from "./supabase.js";
 import { getBridgeStatusPayload } from "./bridge-status.js";
 import { registerBridgeControlPlaneRoutes } from "./bridge-control-plane.js";
+import {
+  ingestObservabilityEvent,
+  observabilityOverview,
+  resolveObservabilityEvent,
+  supportSessionDetail,
+  supportSessionsOverview,
+  updateSupportSession,
+  upsertSupportSession,
+} from "./observability.js";
 
 // Version pseudo-templating : remplacée au scaffolding ; en attendant `0.0.1`.
 const APP_VERSION = "{{VERSION}}";
@@ -178,6 +187,17 @@ app.get("/api/health", (c) =>
 );
 
 app.get("/api/bridge/status", (c) => c.json(getBridgeStatusPayload("local-daemon")));
+
+// ---------------------------------------------------------------------------
+// /api/observability : support sessions + OpenReplay correlation
+// ---------------------------------------------------------------------------
+app.post("/api/observability/events", (c) => ingestObservabilityEvent(DATA_DIR, c));
+app.post("/api/support-sessions", (c) => upsertSupportSession(DATA_DIR, c));
+app.patch("/api/support-sessions/:id", (c) => updateSupportSession(DATA_DIR, c));
+app.get("/api/admin/observability", (c) => observabilityOverview(DATA_DIR, c));
+app.get("/api/admin/support-sessions", (c) => supportSessionsOverview(DATA_DIR, c));
+app.get("/api/admin/support-sessions/:id", (c) => supportSessionDetail(DATA_DIR, c));
+app.post("/api/admin/observability/:id/resolve", (c) => resolveObservabilityEvent(DATA_DIR, c));
 
 // ---------------------------------------------------------------------------
 // /api/agents

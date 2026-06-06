@@ -3,6 +3,8 @@ import "./globals.css";
 import { StorageGuard } from "@/components/StorageGuard";
 import { CloudAuthGate } from "@/components/CloudAuthGate";
 import { BridgeStatusProvider } from "@/components/BridgeStatusProvider";
+import { OpenReplayProvider } from "@/components/OpenReplayProvider";
+import { RuntimeHealthGuard } from "@/components/RuntimeHealthGuard";
 
 export const metadata: Metadata = {
   title: "{{APP_NAME}}",
@@ -30,7 +32,9 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
       <body style={{ background: "var(--bg)", color: "var(--fg)" }}>
+        <RuntimeHealthGuard />
         <CloudAuthGate>
+          <OpenReplayProvider />
           <BridgeStatusProvider>
             {children}
             <StorageGuard />
