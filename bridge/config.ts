@@ -51,11 +51,18 @@ export function normalizeBridgeConfig(input: Partial<BridgeConfig>): BridgeConfi
       process.env.BRIDGE_CONTROL_PLANE_URL ??
       process.env.APP_CLOUD_BASE_URL
   );
+  const supabaseUrl = cleanOptional(input.supabaseUrl ?? process.env.BRIDGE_SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL);
+  const supabaseAnonKey = cleanOptional(
+    input.supabaseAnonKey ??
+      process.env.BRIDGE_SUPABASE_ANON_KEY ??
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ??
+      process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+  );
   const organizationId = cleanOptional(input.organizationId ?? process.env.BRIDGE_ORGANIZATION_ID ?? process.env.APP_ORGANIZATION_ID);
   const bridgeToken = cleanOptional(input.bridgeToken ?? process.env.BRIDGE_TOKEN ?? process.env.APP_BRIDGE_TOKEN);
   const installId = cleanOptional(input.installId) ?? randomUUID();
   const deviceId = cleanOptional(input.deviceId) ?? installId;
-  const demoMode = input.demoMode ?? !(controlPlaneBaseUrl && bridgeToken);
+  const demoMode = input.demoMode === true || process.env.BRIDGE_DEMO_MODE === "1";
 
   const services = normalizeServices({
     services: input.services,
@@ -67,6 +74,8 @@ export function normalizeBridgeConfig(input: Partial<BridgeConfig>): BridgeConfi
 
   return {
     controlPlaneBaseUrl,
+    supabaseUrl,
+    supabaseAnonKey,
     cloudBaseUrl: controlPlaneBaseUrl,
     organizationId,
     bridgeToken,
@@ -110,7 +119,8 @@ function normalizeServices(input: {
   legacyAllowedRoots?: BridgeAllowedRoot[];
   demoMode: boolean;
 }): BridgeServiceInstance[] {
-  const raw = input.services?.length ? input.services : input.demoMode ? demoServices(input.organizationId) : [];
+  const source = input.services?.length ? pruneLegacyDemoServices(input.services) : [];
+  const raw = source.length ? source : input.demoMode ? demoServices(input.organizationId) : [];
   return raw.map((service) => {
     const serviceId = cleanRequired(service.serviceId, "service.serviceId");
     const root = serviceDataDir({ dataDir: input.dataDir }, serviceId);
@@ -250,6 +260,15 @@ function validateBridgeConfig(cfg: BridgeConfig): void {
     if (service.healthUrl) new URL(service.healthUrl);
     if (service.launchCallbackUrl) new URL(service.launchCallbackUrl);
   }
+}
+
+function pruneLegacyDemoServices(services: BridgeServiceInstance[]): BridgeServiceInstance[] {
+  if (process.env.BRIDGE_ALLOW_DEMO_SERVICES === "1") return services;
+  return services.filter((service) => {
+    const legacyId = service.serviceId === "crm" || service.serviceId === "purchasing";
+    const legacyUrl = typeof service.baseUrl === "string" && service.baseUrl.includes("localhost:3307");
+    return !(legacyId && legacyUrl);
+  });
 }
 
 function resolvePath(value: string): string {

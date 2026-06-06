@@ -14,7 +14,7 @@ export class BridgeCloudClient {
   constructor(private readonly cfg: BridgeConfig) {}
 
   isConfigured(): boolean {
-    return Boolean(this.cfg.controlPlaneBaseUrl && this.cfg.bridgeToken);
+    return Boolean(this.cfg.controlPlaneBaseUrl && (this.cfg.bridgeToken || this.cfg.session?.accessToken));
   }
 
   async register(capabilities: Record<string, unknown>): Promise<{
@@ -99,6 +99,7 @@ export class BridgeCloudClient {
       method: "POST",
       headers: {
         "content-type": "application/json",
+        ...(this.cfg.session?.accessToken ? { authorization: `Bearer ${this.cfg.session.accessToken}` } : {}),
         "x-bridge-protocol-version": "2",
         "x-bridge-organization-id": this.cfg.organizationId ?? "",
         "x-bridge-id": this.cfg.bridgeId ?? "",

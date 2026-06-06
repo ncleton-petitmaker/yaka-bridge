@@ -1,8 +1,8 @@
 {
-  "name": "{{APP_NAME_KEBAB}}",
+  "name": "bridge-erp-template",
   "version": "0.0.1",
   "private": true,
-  "description": "{{DOMAIN_BRIEF}}",
+  "description": "Template Bridge + Supabase self-hosted pour ERP modulaire multi-services.",
   "engines": {
     "node": ">=24"
   },

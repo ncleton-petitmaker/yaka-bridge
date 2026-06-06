@@ -94,6 +94,7 @@ class BridgeRuntime implements BridgeRuntimeHandle {
       this.emitState();
       return;
     }
+    await refreshSupabaseSessionIfNeeded(this.cfg, this.options.configPath);
     const synced = await this.client.sync(this.state());
     if (synced.bridgeId && synced.bridgeId !== this.cfg.bridgeId) {
       this.cfg.bridgeId = synced.bridgeId;
@@ -118,6 +119,7 @@ class BridgeRuntime implements BridgeRuntimeHandle {
       return;
     }
 
+    await refreshSupabaseSessionIfNeeded(this.cfg, this.options.configPath);
     const res = await this.client.poll(capabilities(this.cfg));
     if (!res.jobs?.length) {
       this.lastError = undefined;
@@ -147,6 +149,7 @@ class BridgeRuntime implements BridgeRuntimeHandle {
   }
 
   private async registerAndSync(): Promise<void> {
+    await refreshSupabaseSessionIfNeeded(this.cfg, this.options.configPath);
     const registered = await this.client.register(capabilities(this.cfg));
     if (registered.bridgeId && registered.bridgeId !== this.cfg.bridgeId) {
       this.cfg.bridgeId = registered.bridgeId;
@@ -322,6 +325,28 @@ class BridgeRuntime implements BridgeRuntimeHandle {
   }
 }
 
+async function refreshSupabaseSessionIfNeeded(cfg: BridgeConfig, configPath: string): Promise<void> {
+  if (!cfg.session?.refreshToken || !cfg.supabaseUrl || !cfg.supabaseAnonKey) return;
+  const expiresAt = cfg.session.expiresAt ? Date.parse(cfg.session.expiresAt) : 0;
+  if (expiresAt && expiresAt - Date.now() > 60_000) return;
+  const res = await fetch(`${cfg.supabaseUrl.replace(/\/+$/, "")}/auth/v1/token?grant_type=refresh_token`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      apikey: cfg.supabaseAnonKey,
+      authorization: `Bearer ${cfg.supabaseAnonKey}`,
+    },
+    body: JSON.stringify({ refresh_token: cfg.session.refreshToken }),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.error_description || json.msg || json.error || `Refresh HTTP ${res.status}`);
+  cfg.session.accessToken = json.access_token;
+  cfg.session.refreshToken = json.refresh_token || cfg.session.refreshToken;
+  cfg.session.expiresAt = json.expires_in ? new Date(Date.now() + Number(json.expires_in) * 1000).toISOString() : cfg.session.expiresAt;
+  cfg.session.lastRefreshAt = new Date().toISOString();
+  saveBridgeConfig(cfg, configPath);
+}
+
 export async function startBridgeRuntime(options: BridgeRuntimeOptions = {}): Promise<BridgeRuntimeHandle> {
   const runtime = new BridgeRuntime({
     command: options.command ?? "run",
@@ -424,7 +449,8 @@ function runtimeState(
     deviceId: cfg.deviceId,
     bridgeId: cfg.bridgeId,
     dataDir: cfg.dataDir,
-    controlPlaneConfigured: Boolean(cfg.controlPlaneBaseUrl && cfg.bridgeToken),
+    controlPlaneConfigured: Boolean(cfg.controlPlaneBaseUrl && (cfg.bridgeToken || cfg.session?.accessToken)),
+    authenticated: Boolean(cfg.session?.accessToken || cfg.bridgeToken),
     demoMode: cfg.demoMode === true,
     services: cfg.services.map((service): BridgeRuntimeServiceState => {
       const runningJobs = runtime.runningByService.get(service.serviceId) ?? 0;

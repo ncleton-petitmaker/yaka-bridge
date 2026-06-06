@@ -102,6 +102,8 @@ export interface BridgeErpBusConfig {
 
 export interface BridgeConfig {
   controlPlaneBaseUrl?: string;
+  supabaseUrl?: string;
+  supabaseAnonKey?: string;
   /** Backward-compatible alias used by the first cloud bridge prototype. */
   cloudBaseUrl?: string;
   organizationId?: string;
@@ -258,6 +260,7 @@ export interface BridgeRuntimeState {
   bridgeId?: string;
   dataDir: string;
   controlPlaneConfigured: boolean;
+  authenticated: boolean;
   demoMode: boolean;
   services: BridgeRuntimeServiceState[];
   erpBus: BridgeErpBusConfig;

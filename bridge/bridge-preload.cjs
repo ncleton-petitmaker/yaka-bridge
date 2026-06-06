@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("bridge", {
   getStatus: () => ipcRenderer.invoke("bridge:get-status"),
   sync: () => ipcRenderer.invoke("bridge:sync"),
+  signIn: (input) => ipcRenderer.invoke("bridge:sign-in", input),
   openService: (serviceId) => ipcRenderer.invoke("bridge:open-service", serviceId),
   reconnectService: (serviceId) => ipcRenderer.invoke("bridge:reconnect-service", serviceId),
   signOut: () => ipcRenderer.invoke("bridge:sign-out"),

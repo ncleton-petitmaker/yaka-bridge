@@ -7,7 +7,7 @@ Use this runbook when starting a new modular ERP customer stack based on Bridge 
 Collect these values before touching the server:
 
 - VPS IPv4 and SSH user.
-- Public Supabase domain, for example `supabase.customer.example`.
+- Public Supabase API domain, for example `api.customer.example`.
 - Public app/admin domains, for example `erp.customer.example` and `admin.customer.example`.
 - Email for TLS certificates.
 - Organization name and first Bridge admin email.
@@ -19,7 +19,7 @@ Do not put secrets in the repo. Secrets belong in `/opt/supabase/.env`, Coolify 
 Create DNS records before testing browser flows:
 
 ```text
-supabase.customer.example  A     <vps-ipv4>
+api.customer.example       A     <vps-ipv4>
 erp.customer.example       A     <vps-ipv4>
 admin.customer.example     A     <vps-ipv4>
 ```

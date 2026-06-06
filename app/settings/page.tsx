@@ -140,7 +140,7 @@ export default function SettingsPage() {
                 <input
                   type="url"
                   defaultValue={config.supabaseUrl ?? ""}
-                  placeholder="https://xxxx.supabase.co"
+                  placeholder="https://api.customer.example"
                   onBlur={(e) => save({ supabaseUrl: e.target.value.trim() || undefined })}
                 />
               </Field>

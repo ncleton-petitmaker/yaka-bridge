@@ -16,15 +16,7 @@ export function getApiMode(): ApiMode {
 export function getCloudApiBaseUrl(): string | null {
   const explicit = cleanBaseUrl(process.env.NEXT_PUBLIC_CLOUD_API_URL);
   if (explicit) return explicit;
-  const supabaseUrl = cleanBaseUrl(process.env.NEXT_PUBLIC_SUPABASE_URL);
-  if (!supabaseUrl) return null;
-  try {
-    const url = new URL(supabaseUrl);
-    url.hostname = url.hostname.replace(".supabase.co", ".functions.supabase.co");
-    return url.toString().replace(/\/+$/, "");
-  } catch {
-    return null;
-  }
+  return "";
 }
 
 export function localDaemonOrigin(): string {
@@ -48,11 +40,6 @@ export function apiUrl(path: string): string {
   const normalized = normalizePath(path);
   if (getApiMode() !== "cloud") return normalized;
   const base = getCloudApiBaseUrl();
-  if (!base) {
-    throw new Error(
-      "NEXT_PUBLIC_CLOUD_API_URL ou NEXT_PUBLIC_SUPABASE_URL requis en mode cloud."
-    );
-  }
   return `${base}${normalized}`;
 }
 

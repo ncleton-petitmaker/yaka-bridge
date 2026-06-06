@@ -17,7 +17,7 @@ This template targets a repeatable Bridge + Supabase self-hosted architecture fo
 The public Supabase URL must be a real DNS name, for example:
 
 ```text
-https://supabase.example.com
+https://api.customer.example
 ```
 
 Do not rely on the server IP as a browser Supabase URL. Traefik routes by host, TLS certificates are host-bound, and Supabase Auth redirects need stable domains.
@@ -90,7 +90,7 @@ Expected foundation modules:
 From outside the VPS, first verify DNS:
 
 ```bash
-dig +short supabase.example.com
+dig +short api.customer.example
 ```
 
 If DNS is not ready, a temporary `curl --resolve` check can prove Traefik/Kong routing, but browser auth will still need real DNS or a local hosts entry.

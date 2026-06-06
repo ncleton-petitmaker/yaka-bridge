@@ -21,11 +21,11 @@ Le template peut tourner comme app web cloud :
 - `NEXT_PUBLIC_APP_API_MODE=cloud`
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY` ou `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
-- `NEXT_PUBLIC_CLOUD_API_URL`, ou par defaut les Edge Functions derivees de l'URL Supabase
+- `NEXT_PUBLIC_CLOUD_API_URL` si l'API n'est pas servie sur le meme domaine que l'app web
 
 Dans ce mode, le navigateur appelle l'API cloud avec le JWT Supabase de l'utilisateur. Les taches agentiques longues sont deleguees a l'app Electron `Bridge`, qui reste un produit horizontal independant du service metier.
 
-Contrat minimal attendu cote Control Plane / Edge Functions :
+Contrat minimal attendu cote Control Plane / API web :
 
 - `POST /bridge/register`
 - `POST /bridge/sync`

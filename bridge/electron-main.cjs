@@ -211,7 +211,8 @@ function stateFromConfig(cfg) {
     deviceId: cfg.deviceId || cfg.installId,
     bridgeId: cfg.bridgeId,
     dataDir: cfg.dataDir,
-    controlPlaneConfigured: Boolean(cfg.controlPlaneBaseUrl && cfg.bridgeToken),
+    controlPlaneConfigured: Boolean(cfg.controlPlaneBaseUrl && (cfg.bridgeToken || cfg.session?.accessToken)),
+    authenticated: Boolean(cfg.session?.accessToken || cfg.bridgeToken),
     demoMode: cfg.demoMode === true,
     services: cfg.services.map((service) => ({
       serviceId: service.serviceId,
@@ -257,31 +258,8 @@ function defaultConfig() {
     installId: stableInstallId(),
     deviceId: stableInstallId(),
     label: os.hostname(),
-    demoMode: true,
-    services: [
-      {
-        serviceId: "crm",
-        serviceInstanceId: "demo-org:crm",
-        organizationId: "demo-org",
-        name: "CRM",
-        baseUrl: "http://localhost:3307/dashboard?service=crm",
-        healthUrl: "http://localhost:3307/api/health",
-        scopes: ["erp:core:read", "erp:events:publish", "codex:run"],
-        actions: [{ id: "customer.lookup", label: "Rechercher client" }],
-        events: [{ type: "core.customer.updated", label: "Client mis à jour" }],
-      },
-      {
-        serviceId: "purchasing",
-        serviceInstanceId: "demo-org:purchasing",
-        organizationId: "demo-org",
-        name: "Achats",
-        baseUrl: "http://localhost:3307/runs?service=purchasing",
-        healthUrl: "http://localhost:3307/api/health",
-        scopes: ["erp:core:read", "erp:events:consume", "codex:run"],
-        actions: [{ id: "supplier.quote.import", label: "Importer offre" }],
-        events: [{ type: "purchasing.quote.imported", label: "Offre importée" }],
-      },
-    ],
+    demoMode: process.env.BRIDGE_DEMO_MODE === "1",
+    services: [],
     erpBus: {
       enabled: true,
       mode: "typed-actions-events",
@@ -300,8 +278,8 @@ function defaultConfig() {
 
 function normalizeConfig(cfg) {
   const dataDir = cfg.dataDir || DATA_DIR;
-  const organizationId = cfg.organizationId || cfg.account?.organizationId || "demo-org";
-  const services = Array.isArray(cfg.services) ? cfg.services : [];
+  const organizationId = cfg.organizationId || cfg.account?.organizationId;
+  const services = pruneLegacyDemoServices(Array.isArray(cfg.services) ? cfg.services : [], cfg);
   return {
     ...cfg,
     dataDir,
@@ -312,16 +290,25 @@ function normalizeConfig(cfg) {
     label: cfg.label || os.hostname(),
     services: services.map((service) => ({
       ...service,
-      organizationId: service.organizationId || organizationId,
-      serviceInstanceId: service.serviceInstanceId || `${organizationId}:${service.serviceId}`,
+      organizationId: service.organizationId || organizationId || "unknown-org",
+      serviceInstanceId: service.serviceInstanceId || `${organizationId || "unknown-org"}:${service.serviceId}`,
       scopes: Array.isArray(service.scopes) ? service.scopes : [],
       actions: Array.isArray(service.actions) ? service.actions : [],
       events: Array.isArray(service.events) ? service.events : [],
       status: service.paused ? "paused" : service.status || "disconnected",
     })),
     erpBus: cfg.erpBus || { enabled: true, mode: "typed-actions-events", sharedCore: "organization", rules: [] },
-    demoMode: cfg.demoMode !== false && !(cfg.controlPlaneBaseUrl && cfg.bridgeToken),
+    demoMode: cfg.demoMode === true || process.env.BRIDGE_DEMO_MODE === "1",
   };
+}
+
+function pruneLegacyDemoServices(services, cfg) {
+  if (process.env.BRIDGE_ALLOW_DEMO_SERVICES === "1") return services;
+  return services.filter((service) => {
+    const legacyId = service?.serviceId === "crm" || service?.serviceId === "purchasing";
+    const legacyUrl = typeof service?.baseUrl === "string" && service.baseUrl.includes("localhost:3307");
+    return !(legacyId && legacyUrl);
+  });
 }
 
 function stableInstallId() {
@@ -393,11 +380,7 @@ async function syncServices() {
     return;
   }
   try {
-    const res = await postControlPlane(cfg, "bridge/sync", localStatusPayload());
-    if (Array.isArray(res.services)) cfg.services = res.services;
-    if (res.account) cfg.account = res.account;
-    if (res.erpBus) cfg.erpBus = res.erpBus;
-    saveConfig(cfg);
+    await syncServicesFromControlPlane(cfg);
     pushActivity("Services synchronisés.");
     bridgeError = null;
   } catch (err) {
@@ -405,6 +388,133 @@ async function syncServices() {
     pushActivity(`Synchronisation échouée: ${bridgeError}`);
   }
   refreshStatusWindow();
+}
+
+async function signIn(input = {}) {
+  const controlPlaneBaseUrl = cleanExternalUrl(input.controlPlaneBaseUrl);
+  if (!controlPlaneBaseUrl) return { ok: false, error: "URL Bridge entreprise invalide." };
+
+  const email = String(input.email || "").trim();
+  const password = String(input.password || "");
+  if (!email || !password) return { ok: false, error: "Email et mot de passe requis." };
+
+  localActivity.unshift({ message: "Connexion au compte Bridge...", ts: new Date().toISOString() });
+  refreshStatusWindow();
+
+  try {
+    const authConfig = await discoverBridgeAuthConfig(controlPlaneBaseUrl, input);
+    const session = await supabasePasswordSignIn(authConfig, email, password);
+    const cfg = loadConfig();
+    cfg.controlPlaneBaseUrl = controlPlaneBaseUrl;
+    cfg.cloudBaseUrl = controlPlaneBaseUrl;
+    cfg.supabaseUrl = authConfig.supabaseUrl;
+    cfg.supabaseAnonKey = authConfig.supabaseAnonKey;
+    cfg.session = session;
+    cfg.account = {
+      userId: session.user?.id || session.user?.sub || email,
+      email,
+      displayName: session.user?.user_metadata?.name || session.user?.user_metadata?.full_name,
+      organizationId: cfg.organizationId || cfg.account?.organizationId || "",
+      organizationName: cfg.account?.organizationName,
+      role: cfg.account?.role,
+    };
+    cfg.userId = cfg.account.userId;
+    cfg.demoMode = false;
+    cfg.services = pruneLegacyDemoServices(cfg.services || [], cfg);
+    saveConfig(cfg);
+
+    const synced = await syncServicesFromControlPlane(cfg);
+    restartRuntime();
+    pushActivity(`Compte Bridge connecté: ${email}`);
+    return { ok: true, account: synced.account || cfg.account, services: synced.services || cfg.services };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    bridgeError = message;
+    pushActivity(`Connexion échouée: ${message}`);
+    refreshStatusWindow();
+    return { ok: false, error: message };
+  }
+}
+
+async function discoverBridgeAuthConfig(controlPlaneBaseUrl, input) {
+  const providedSupabaseUrl = cleanExternalUrl(input.supabaseUrl);
+  const providedAnonKey = String(input.supabaseAnonKey || "").trim();
+  if (providedSupabaseUrl && providedAnonKey) {
+    return { supabaseUrl: providedSupabaseUrl, supabaseAnonKey: providedAnonKey };
+  }
+
+  const res = await fetch(`${controlPlaneBaseUrl.replace(/\/+$/, "")}/bridge/auth/config`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`Configuration auth indisponible (${res.status}).`);
+  const json = await res.json();
+  const supabaseUrl = providedSupabaseUrl || cleanExternalUrl(json.supabaseUrl);
+  const supabaseAnonKey = providedAnonKey || String(json.supabaseAnonKey || "").trim();
+  if (!supabaseUrl || !supabaseAnonKey) {
+    throw new Error("Le Control Plane ne publie pas encore la configuration Supabase publique.");
+  }
+  return { supabaseUrl, supabaseAnonKey };
+}
+
+async function supabasePasswordSignIn(authConfig, email, password) {
+  const res = await fetch(`${authConfig.supabaseUrl.replace(/\/+$/, "")}/auth/v1/token?grant_type=password`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      apikey: authConfig.supabaseAnonKey,
+      authorization: `Bearer ${authConfig.supabaseAnonKey}`,
+    },
+    body: JSON.stringify({ email, password }),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.error_description || json.msg || json.error || `Auth HTTP ${res.status}`);
+  return {
+    provider: "supabase-pkce",
+    accessToken: json.access_token,
+    refreshToken: json.refresh_token,
+    expiresAt: json.expires_in ? new Date(Date.now() + Number(json.expires_in) * 1000).toISOString() : undefined,
+    persisted: true,
+    lastRefreshAt: new Date().toISOString(),
+    user: json.user,
+  };
+}
+
+async function refreshSupabaseSessionIfNeeded(cfg) {
+  if (!cfg.session?.refreshToken || !cfg.supabaseUrl || !cfg.supabaseAnonKey) return cfg;
+  const expiresAt = cfg.session.expiresAt ? Date.parse(cfg.session.expiresAt) : 0;
+  if (expiresAt && expiresAt - Date.now() > 60_000) return cfg;
+  const res = await fetch(`${cfg.supabaseUrl.replace(/\/+$/, "")}/auth/v1/token?grant_type=refresh_token`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      apikey: cfg.supabaseAnonKey,
+      authorization: `Bearer ${cfg.supabaseAnonKey}`,
+    },
+    body: JSON.stringify({ refresh_token: cfg.session.refreshToken }),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.error_description || json.msg || json.error || `Refresh HTTP ${res.status}`);
+  cfg.session.accessToken = json.access_token;
+  cfg.session.refreshToken = json.refresh_token || cfg.session.refreshToken;
+  cfg.session.expiresAt = json.expires_in ? new Date(Date.now() + Number(json.expires_in) * 1000).toISOString() : cfg.session.expiresAt;
+  cfg.session.lastRefreshAt = new Date().toISOString();
+  saveConfig(cfg);
+  return cfg;
+}
+
+async function syncServicesFromControlPlane(cfg) {
+  await refreshSupabaseSessionIfNeeded(cfg);
+  const res = await postControlPlane(cfg, "bridge/sync", localStatusPayload());
+  if (Array.isArray(res.services)) cfg.services = res.services;
+  if (res.account) {
+    cfg.account = res.account;
+    cfg.userId = res.account.userId;
+    cfg.organizationId = res.account.organizationId;
+  }
+  if (res.erpBus) cfg.erpBus = res.erpBus;
+  bridgeError = res.error || null;
+  saveConfig(cfg);
+  refreshStatusWindow();
+  updateTrayMenu();
+  return res;
 }
 
 async function openService(serviceId) {
@@ -416,7 +526,8 @@ async function openService(serviceId) {
 
   let target = service.baseUrl;
   try {
-    if (cfg.controlPlaneBaseUrl && cfg.bridgeToken) {
+    await refreshSupabaseSessionIfNeeded(cfg);
+    if (cfg.controlPlaneBaseUrl && (cfg.bridgeToken || cfg.session?.accessToken)) {
       const ticket = await postControlPlane(cfg, "bridge/launch-ticket", {
         serviceId: service.serviceId,
         serviceInstanceId: service.serviceInstanceId,
@@ -439,18 +550,20 @@ async function openService(serviceId) {
 
 async function postControlPlane(cfg, route, payload) {
   const url = `${String(cfg.controlPlaneBaseUrl).replace(/\/+$/, "")}/${route.replace(/^\/+/, "")}`;
+  const headers = {
+    "content-type": "application/json",
+    "x-bridge-protocol-version": String(PROTOCOL_VERSION),
+    "x-bridge-organization-id": cfg.organizationId || cfg.account?.organizationId || "",
+    "x-bridge-id": cfg.bridgeId || "",
+    "x-bridge-install-id": cfg.installId || "",
+    "x-bridge-device-id": cfg.deviceId || "",
+    "x-bridge-user-id": cfg.userId || cfg.account?.userId || "",
+    "x-bridge-token": cfg.bridgeToken || "",
+  };
+  if (cfg.session?.accessToken) headers.authorization = `Bearer ${cfg.session.accessToken}`;
   const res = await fetch(url, {
     method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-bridge-protocol-version": String(PROTOCOL_VERSION),
-      "x-bridge-organization-id": cfg.organizationId || cfg.account?.organizationId || "",
-      "x-bridge-id": cfg.bridgeId || "",
-      "x-bridge-install-id": cfg.installId || "",
-      "x-bridge-device-id": cfg.deviceId || "",
-      "x-bridge-user-id": cfg.userId || cfg.account?.userId || "",
-      "x-bridge-token": cfg.bridgeToken || "",
-    },
+    headers,
     body: JSON.stringify({
       organizationId: cfg.organizationId || cfg.account?.organizationId,
       bridgeId: cfg.bridgeId,
@@ -470,9 +583,23 @@ function signOut() {
   delete cfg.account;
   delete cfg.session;
   delete cfg.userId;
+  cfg.organizationId = undefined;
+  cfg.services = [];
   saveConfig(cfg);
+  restartRuntime();
   pushActivity("Compte Bridge déconnecté.");
   refreshStatusWindow();
+}
+
+function restartRuntime() {
+  try {
+    runtimeHandle?.stop?.();
+  } catch {
+    // no-op
+  }
+  runtimeHandle = null;
+  runtimeState = null;
+  startRuntimeIfAvailable();
 }
 
 function revealDataDir() {
@@ -509,6 +636,7 @@ function showStatusWindow() {
     ipcRegistered = true;
     ipcMain.handle("bridge:get-status", () => localStatusPayload());
     ipcMain.handle("bridge:sync", () => syncServices());
+    ipcMain.handle("bridge:sign-in", (_event, input) => signIn(input));
     ipcMain.handle("bridge:open-service", (_event, serviceId) => openService(serviceId));
     ipcMain.handle("bridge:reconnect-service", (_event, serviceId) => openService(serviceId));
     ipcMain.handle("bridge:sign-out", () => signOut());
@@ -536,12 +664,13 @@ function statusHtml() {
     main { display: grid; grid-template-rows: auto auto 1fr; min-height: 100vh; }
     header { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 18px 22px 14px; border-bottom: 1px solid var(--line); background: #fbfbf8; }
     .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
-    .mark { width: 34px; height: 34px; border: 1px solid #cfcfc6; border-radius: 8px; display: grid; place-items: center; background: #fff; color: #111; font-weight: 800; }
+    .mark { width: 34px; height: 34px; flex: 0 0 auto; display: block; }
     h1 { font-size: 18px; line-height: 1.1; margin: 0; letter-spacing: 0; }
     .subtitle { color: var(--muted); font-size: 12px; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .top-actions { display: flex; gap: 8px; align-items: center; }
     button { border: 1px solid var(--line); border-radius: 7px; background: #fff; color: var(--fg); padding: 8px 10px; font-size: 13px; font-weight: 650; cursor: pointer; min-height: 34px; }
     button:hover { border-color: #b9bbb3; }
+    button:disabled { opacity: .55; cursor: progress; }
     button.primary { background: #171716; color: #fff; border-color: #171716; }
     button.icon { width: 34px; padding: 0; display: grid; place-items: center; }
     nav { display: flex; gap: 4px; padding: 10px 22px 0; background: #fbfbf8; }
@@ -567,6 +696,12 @@ function statusHtml() {
     .grid { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .panel { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 14px; }
     .panel h2 { font-size: 13px; margin: 0 0 10px; }
+    .login-form { display: grid; gap: 10px; margin-bottom: 12px; }
+    .login-form label { display: grid; gap: 5px; color: var(--muted); font-size: 12px; }
+    .login-form input { width: 100%; border: 1px solid var(--line); border-radius: 7px; min-height: 34px; padding: 7px 9px; font: inherit; color: var(--fg); background: #fff; }
+    .login-form details { border: 1px solid var(--line); border-radius: 7px; padding: 8px; display: grid; gap: 8px; }
+    .login-form summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+    .form-message { min-height: 18px; margin: 0; color: var(--red); font-size: 12px; }
     .kv { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 8px; color: var(--muted); font-size: 12px; }
     .kv strong { color: var(--fg); font-weight: 600; overflow-wrap: anywhere; }
     .activity { display: grid; gap: 8px; }
@@ -579,7 +714,7 @@ function statusHtml() {
 <body>
   <main>
     <header>
-      <div class="brand"><div class="mark">B</div><div><h1>Bridge</h1><div class="subtitle" id="subtitle"></div></div></div>
+      <div class="brand">${bridgeLogoSvg("mark")}<div><h1>Bridge</h1><div class="subtitle" id="subtitle"></div></div></div>
       <div class="top-actions"><button class="icon" id="sync" title="Synchroniser" aria-label="Synchroniser">R</button><button id="folder">Dossier</button></div>
     </header>
     <nav>
@@ -588,12 +723,12 @@ function statusHtml() {
       <button data-tab="activity">Activité</button>
     </nav>
     <section id="bridges" class="active"><div class="services" id="services"></div><p class="error" id="error"></p></section>
-    <section id="identity"><div class="grid" id="identity-grid"></div></section>
+    <section id="identity"><div id="login-panel"></div><div class="grid" id="identity-grid"></div></section>
     <section id="activity"><div class="activity" id="activity-list"></div></section>
   </main>
   <script>
     let current = null;
-    const labels = { connected: "connecté", paused: "pause", reconnecting: "reconnexion", active: "actif", disconnected: "déconnecté" };
+    const labels = { connected: "connecté", paused: "pause", reconnecting: "connexion", active: "actif", disconnected: "hors ligne" };
     function esc(value) { return String(value == null ? "" : value).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c])); }
     function render(state) {
       current = state;
@@ -603,16 +738,48 @@ function statusHtml() {
       services.innerHTML = state.services.length ? state.services.map(service => {
         const status = service.status || "disconnected";
         const scopes = (service.scopes || []).slice(0, 3).join(" · ");
+        const actionLabel = status === "active" || status === "reconnecting"
+          ? "Ouverture..."
+          : status === "connected"
+            ? "Ouvrir"
+            : service.lastSeenAt
+              ? "Reconnecter"
+              : "Connecter";
         return '<article class="service-row ' + esc(status) + '">' +
           '<span class="dot" aria-hidden="true"></span>' +
           '<div class="service-main"><div class="service-title"><strong>' + esc(service.name) + '</strong><span class="state">' + esc(labels[status] || status) + '</span></div>' +
           '<div class="meta">' + esc(scopes || service.baseUrl) + '</div></div>' +
-          '<div class="service-actions"><button data-open="' + esc(service.serviceId) + '" class="primary">' + (status === "disconnected" ? "Reconnecter" : "Ouvrir") + '</button></div>' +
+          '<div class="service-actions"><button data-open="' + esc(service.serviceId) + '" class="primary">' + esc(actionLabel) + '</button></div>' +
         '</article>';
-      }).join("") : '<p class="empty">Aucun service autorisé.</p>';
+      }).join("") : '<p class="empty">' + (state.authenticated ? 'Aucun service autorisé.' : 'Connecte ton compte Bridge pour charger les services autorisés.') + '</p>';
       services.querySelectorAll("[data-open]").forEach(btn => btn.addEventListener("click", () => window.bridge.openService(btn.dataset.open)));
 
       const account = state.account || {};
+      document.getElementById("login-panel").innerHTML = state.authenticated ? "" :
+        '<form id="login-form" class="panel login-form">' +
+          '<h2>Compte Bridge</h2>' +
+          '<label>URL Bridge entreprise<input name="controlPlaneBaseUrl" type="url" placeholder="https://rossinienergy.yaka-bridge.com" required /></label>' +
+          '<label>Email<input name="email" type="email" autocomplete="username" required /></label>' +
+          '<label>Mot de passe<input name="password" type="password" autocomplete="current-password" required /></label>' +
+          '<details><summary>Configuration avancée</summary>' +
+            '<label>URL Supabase<input name="supabaseUrl" type="url" placeholder="https://api.customer.example" /></label>' +
+            '<label>Clé publique Supabase<input name="supabaseAnonKey" type="password" /></label>' +
+          '</details>' +
+          '<button class="primary" type="submit">Se connecter</button>' +
+          '<p class="form-message" id="login-message"></p>' +
+        '</form>';
+      document.getElementById("login-form")?.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const button = form.querySelector("button");
+        const message = document.getElementById("login-message");
+        if (button) button.disabled = true;
+        if (message) message.textContent = "Connexion...";
+        const values = Object.fromEntries(new FormData(form).entries());
+        const res = await window.bridge.signIn(values);
+        if (!res?.ok && message) message.textContent = res?.error || "Connexion impossible.";
+        if (button) button.disabled = false;
+      });
       document.getElementById("identity-grid").innerHTML =
         panel("Compte", [
           ["Email", account.email || "Non connecté"],
@@ -654,4 +821,37 @@ function statusHtml() {
   </script>
 </body>
 </html>`;
+}
+
+function cleanExternalUrl(value) {
+  const raw = String(value || "").trim().replace(/\/+$/, "");
+  if (!raw) return null;
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "https:" && url.hostname !== "localhost" && url.hostname !== "127.0.0.1") return null;
+    return url.toString().replace(/\/+$/, "");
+  } catch {
+    return null;
+  }
+}
+
+function bridgeLogoSvg(className = "") {
+  return `<svg class="${escapeHtmlAttr(className)}" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Bridge">
+    <rect width="1024" height="1024" rx="224" fill="#F6F1E8"/>
+    <path d="M322 516h380" fill="none" stroke="#2A211B" stroke-width="54" stroke-linecap="round"/>
+    <path d="M500 360v312" fill="none" stroke="#2A211B" stroke-width="42" stroke-linecap="round"/>
+    <rect x="238" y="376" width="172" height="172" rx="54" fill="#2A211B"/>
+    <rect x="614" y="476" width="172" height="172" rx="54" fill="#C96442"/>
+    <circle cx="500" cy="516" r="58" fill="#F6F1E8" stroke="#2A211B" stroke-width="42"/>
+  </svg>`;
+}
+
+function escapeHtmlAttr(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  })[c]);
 }

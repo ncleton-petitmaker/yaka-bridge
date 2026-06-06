@@ -15,6 +15,17 @@ interface ControlPlaneStore {
 }
 
 export function registerBridgeControlPlaneRoutes(app: Hono, dataDir: string): void {
+  app.get("/bridge/auth/config", (c) => {
+    return c.json({
+      ok: true,
+      supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_PUBLIC_URL ?? process.env.SUPABASE_URL,
+      supabaseAnonKey:
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ??
+        process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ??
+        process.env.SUPABASE_ANON_KEY,
+    });
+  });
+
   app.post("/bridge/register", async (c) => {
     const body = await readPayload(c);
     const store = loadStore(dataDir);
