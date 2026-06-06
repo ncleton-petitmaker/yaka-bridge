@@ -4,6 +4,13 @@ const path = require("node:path");
 const fs = require("node:fs");
 const os = require("node:os");
 
+let autoUpdater = null;
+try {
+  ({ autoUpdater } = require("electron-updater"));
+} catch {
+  autoUpdater = null;
+}
+
 process.env.APP_BRIDGE_ELECTRON = "1";
 process.env.APP_BRIDGE_VERSION = process.env.APP_BRIDGE_VERSION || app.getVersion();
 
@@ -30,12 +37,41 @@ let runtimeHandle = null;
 let runtimeState = null;
 let localStatuses = {};
 let localActivity = [];
+let autoUpdateStarted = false;
+let autoUpdateInterval = null;
+let updateDownloaded = false;
+let updateState = {
+  enabled: false,
+  status: "idle",
+  feedUrl: "",
+  currentVersion: app.getVersion(),
+  availableVersion: "",
+  lastCheckedAt: "",
+  lastError: "",
+};
+
+const singleInstanceLock = app.requestSingleInstanceLock();
+if (!singleInstanceLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    showStatusWindow();
+    syncServices();
+  });
+}
+
+app.on("open-url", (event) => {
+  event.preventDefault();
+  showStatusWindow();
+  syncServices();
+});
 
 app.on("before-quit", () => {
   isQuitting = true;
   try {
     runtimeHandle?.stop?.();
     localHealthServer?.close();
+    if (autoUpdateInterval) clearInterval(autoUpdateInterval);
   } catch {
     // no-op
   }
@@ -47,15 +83,138 @@ app.on("window-all-closed", () => {
 
 app.whenReady().then(() => {
   ensureDirs();
+  registerBridgeProtocol();
   createTray();
   startRuntimeIfAvailable();
   startLocalHealthServer();
+  startAutoUpdates();
   showStatusWindow();
   refreshExternalStatuses();
   setInterval(refreshExternalStatuses, 15_000);
 });
 
 app.on("activate", () => showStatusWindow());
+
+function registerBridgeProtocol() {
+  try {
+    app.setAsDefaultProtocolClient("bridge");
+  } catch (err) {
+    pushActivity(`Protocole bridge:// indisponible: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+function startAutoUpdates({ reconfigure = false } = {}) {
+  if (!autoUpdater) {
+    updateState = { ...updateState, enabled: false, status: "module-missing", lastError: "electron-updater indisponible" };
+    return;
+  }
+  if (!app.isPackaged && process.env.BRIDGE_AUTO_UPDATE_IN_DEV !== "1") {
+    updateState = { ...updateState, enabled: false, status: "disabled-dev" };
+    return;
+  }
+  const feedUrl = updateFeedBaseUrl(loadConfig());
+  if (!feedUrl) {
+    updateState = { ...updateState, enabled: false, status: "missing-feed" };
+    updateTrayMenu();
+    refreshStatusWindow();
+    return;
+  }
+  if (autoUpdateStarted && !reconfigure && updateState.feedUrl === feedUrl) return;
+
+  autoUpdateStarted = true;
+  updateDownloaded = false;
+  updateState = {
+    ...updateState,
+    enabled: true,
+    status: "configured",
+    feedUrl,
+    lastError: "",
+  };
+
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.allowPrerelease = process.env.BRIDGE_UPDATE_ALLOW_PRERELEASE === "1";
+  autoUpdater.setFeedURL({ provider: "generic", url: feedUrl });
+  attachAutoUpdateHandlers();
+  scheduleAutoUpdateCheck(3_000);
+  if (!autoUpdateInterval) {
+    const intervalMs = Number(process.env.BRIDGE_UPDATE_CHECK_INTERVAL_MS || 60 * 60 * 1000);
+    autoUpdateInterval = setInterval(() => scheduleAutoUpdateCheck(), Math.max(intervalMs, 15 * 60 * 1000));
+  }
+  updateTrayMenu();
+  refreshStatusWindow();
+}
+
+function attachAutoUpdateHandlers() {
+  if (autoUpdater.__bridgeHandlersAttached) return;
+  autoUpdater.__bridgeHandlersAttached = true;
+  autoUpdater.on("checking-for-update", () => setUpdateState("checking"));
+  autoUpdater.on("update-not-available", () => setUpdateState("up-to-date"));
+  autoUpdater.on("update-available", (info) => {
+    updateState.availableVersion = info?.version || "";
+    setUpdateState("downloading");
+    pushActivity(`Mise à jour Bridge ${updateState.availableVersion || ""} détectée.`);
+  });
+  autoUpdater.on("download-progress", (progress) => {
+    updateState.status = `downloading ${Math.round(progress?.percent || 0)}%`;
+    refreshStatusWindow();
+    updateTrayMenu();
+  });
+  autoUpdater.on("update-downloaded", (info) => {
+    updateDownloaded = true;
+    updateState.availableVersion = info?.version || updateState.availableVersion;
+    setUpdateState("downloaded");
+    pushActivity("Mise à jour Bridge téléchargée. Installation automatique dès que Bridge est disponible.");
+    maybeInstallDownloadedUpdate();
+  });
+  autoUpdater.on("error", (err) => {
+    updateState.lastError = err instanceof Error ? err.message : String(err);
+    setUpdateState("error");
+    pushActivity(`Mise à jour Bridge échouée: ${updateState.lastError}`);
+  });
+}
+
+function setUpdateState(status) {
+  updateState = {
+    ...updateState,
+    enabled: true,
+    status,
+    lastCheckedAt: new Date().toISOString(),
+  };
+  updateTrayMenu();
+  refreshStatusWindow();
+}
+
+function scheduleAutoUpdateCheck(delayMs = 0) {
+  if (!autoUpdater || !updateState.enabled) return;
+  setTimeout(() => {
+    autoUpdater.checkForUpdates().catch((err) => {
+      updateState.lastError = err instanceof Error ? err.message : String(err);
+      setUpdateState("error");
+    });
+  }, delayMs);
+}
+
+function maybeInstallDownloadedUpdate() {
+  if (!autoUpdater || !updateDownloaded) return;
+  const activeJobs = Number(runtimeState?.activeJobs || 0);
+  if (activeJobs > 0) {
+    setUpdateState("waiting-for-idle");
+    return;
+  }
+  setUpdateState("installing");
+  isQuitting = true;
+  setTimeout(() => {
+    autoUpdater.quitAndInstall(false, true);
+  }, 750);
+}
+
+function updateFeedBaseUrl(cfg) {
+  const explicit = cleanExternalUrl(process.env.BRIDGE_UPDATE_BASE_URL || process.env.BRIDGE_AUTO_UPDATE_URL || cfg.updateBaseUrl);
+  if (explicit) return explicit;
+  const supabaseUrl = cleanExternalUrl(cfg.supabaseUrl);
+  return supabaseUrl ? `${supabaseUrl}/storage/v1/object/public/bridge-updates` : null;
+}
 
 function ensureDirs() {
   try {
@@ -101,6 +260,7 @@ function updateTrayMenu() {
       enabled: false,
     },
     { label: localHealthReady ? "Bridge détectable localement" : "Démarrage local...", enabled: false },
+    { label: updateState.enabled ? `Mises à jour: ${updateState.status}` : "Mises à jour: non configurées", enabled: false },
     { type: "separator" },
     { label: "Synchroniser", click: () => syncServices() },
     {
@@ -128,6 +288,7 @@ function startRuntimeIfAvailable() {
       onState: (state) => {
         runtimeState = state;
         bridgeError = state.lastError || null;
+        maybeInstallDownloadedUpdate();
         refreshStatusWindow();
         updateTrayMenu();
       },
@@ -193,6 +354,7 @@ function localStatusPayload() {
     })),
     localHealthReady,
     bridgeError,
+    autoUpdate: updateState,
     activity: localActivity.slice(0, 30),
   };
 }
@@ -346,6 +508,7 @@ function normalizeConfig(cfg) {
     dataDir,
     cloudBaseUrl: cfg.controlPlaneBaseUrl || cfg.cloudBaseUrl || process.env.BRIDGE_DEFAULT_CONTROL_PLANE_URL,
     controlPlaneBaseUrl: cfg.controlPlaneBaseUrl || cfg.cloudBaseUrl || process.env.BRIDGE_DEFAULT_CONTROL_PLANE_URL,
+    updateBaseUrl: cfg.updateBaseUrl || process.env.BRIDGE_UPDATE_BASE_URL || process.env.BRIDGE_AUTO_UPDATE_URL,
     installId: cfg.installId || stableInstallId(),
     deviceId: cfg.deviceId || cfg.installId || stableInstallId(),
     label: cfg.label || os.hostname(),
@@ -429,6 +592,7 @@ async function syncServices() {
     await runtimeHandle.syncOnce().catch((err) => {
       bridgeError = err instanceof Error ? err.message : String(err);
     });
+    startAutoUpdates({ reconfigure: true });
     pushActivity("Synchronisation demandée.");
     refreshStatusWindow();
     return;
@@ -442,6 +606,7 @@ async function syncServices() {
   }
   try {
     await syncServicesFromControlPlane(cfg);
+    startAutoUpdates({ reconfigure: true });
     pushActivity("Services synchronisés.");
     bridgeError = null;
   } catch (err) {
@@ -485,6 +650,7 @@ async function signIn(input = {}) {
     saveConfig(cfg);
 
     const synced = await syncServicesFromControlPlane(cfg);
+    startAutoUpdates({ reconfigure: true });
     restartRuntime();
     pushActivity(`Compte Bridge connecté: ${email}`);
     return { ok: true, account: synced.account || cfg.account, services: synced.services || cfg.services };
@@ -571,6 +737,7 @@ async function syncServicesFromControlPlane(cfg) {
     cfg.organizationId = res.account.organizationId;
   }
   if (res.erpBus) cfg.erpBus = res.erpBus;
+  if (res.updateBaseUrl) cfg.updateBaseUrl = res.updateBaseUrl;
   bridgeError = res.error || null;
   saveConfig(cfg);
   refreshStatusWindow();
@@ -752,9 +919,9 @@ function statusHtml() {
     @keyframes move { from { transform: translateX(-30%); } to { transform: translateX(30%); } }
     .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--grey); box-shadow: 0 0 0 4px #ecece8; }
     .connected .dot { background: var(--green); box-shadow: 0 0 0 4px #e2f2e8; }
-    .active .dot, .reconnecting .dot { background: var(--blue); box-shadow: 0 0 0 4px #e3edf9; }
-    .paused .dot { background: var(--grey); }
-    .disconnected .dot { background: var(--red); box-shadow: 0 0 0 4px #f5e6e3; }
+    .service-row.active .dot, .service-row.reconnecting .dot { background: var(--blue); box-shadow: 0 0 0 4px #e3edf9; }
+    .service-row.paused .dot { background: var(--grey); }
+    .service-row.disconnected .dot { background: var(--red); box-shadow: 0 0 0 4px #f5e6e3; }
     .service-main { min-width: 0; }
     .service-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
     .service-title strong { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

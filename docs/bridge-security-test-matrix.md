@@ -51,6 +51,11 @@ Use this matrix before promoting a customer stack from smoke test to production.
 - `SHA256SUMS` matches every published installer.
 - Stable installer aliases match the current versioned artifacts.
 - Bridge app name, bundle id, data directory and installer names remain `Bridge`.
+- Auto-update feed is HTTPS and publicly readable.
+- Auto-update metadata references only signed/notarized versioned artifacts.
+- Bridge downloads an available update without user interaction.
+- Bridge waits for active jobs to finish before installing a downloaded update.
+- Unsigned smoke-test builds are never uploaded to the customer update feed.
 
 ## Backup And Recovery
 

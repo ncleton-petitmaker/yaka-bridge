@@ -153,6 +153,10 @@ Bridge installers belong on the customer VPS, not on Vercel or a generated app h
 insert into storage.buckets (id, name, public, file_size_limit)
 values ('bridge-installers', 'bridge-installers', true, 268435456)
 on conflict (id) do update set public = true, file_size_limit = 268435456;
+
+insert into storage.buckets (id, name, public, file_size_limit)
+values ('bridge-updates', 'bridge-updates', true, 536870912)
+on conflict (id) do update set public = true, file_size_limit = 536870912;
 ```
 
 Upload stable object names after packaging Bridge. For production, macOS builds
@@ -166,6 +170,16 @@ SHA256SUMS
 ```
 
 The generated service reads `NEXT_PUBLIC_BRIDGE_INSTALLER_BASE_URL` and exposes those URLs through `/api/bridge/status`.
+
+The Bridge desktop app reads its automatic update feed from
+`BRIDGE_UPDATE_BASE_URL`, `cfg.updateBaseUrl`, or by default:
+
+```text
+https://api.customer.example/storage/v1/object/public/bridge-updates
+```
+
+See [`bridge-auto-update.md`](bridge-auto-update.md) for the required
+`latest*.yml`, blockmap and versioned artifact files.
 
 ## Supabase Auth
 
@@ -231,6 +245,7 @@ promoting a stack to production. Minimum smoke checks:
 - `docker compose ps` shows Supabase services healthy.
 - Public `https://api.customer.example/rest/v1/` reaches Kong.
 - Public `https://api.customer.example/storage/v1/object/public/bridge-installers/SHA256SUMS` returns installer checksums.
+- Public `https://api.customer.example/storage/v1/object/public/bridge-updates/latest.yml` returns update metadata after the first release.
 - `erp_modules` returns `crm` and `purchasing`.
 - App-specific health route returns Supabase configured.
 - A browser login succeeds against the customer app domain.

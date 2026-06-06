@@ -107,6 +107,7 @@ class BridgeRuntime implements BridgeRuntimeHandle {
     }
     if (synced.services?.length) this.cfg.services = synced.services;
     if (synced.erpBus) this.cfg.erpBus = synced.erpBus;
+    if (synced.updateBaseUrl) this.cfg.updateBaseUrl = synced.updateBaseUrl;
     this.lastSyncAt = synced.serverTime ?? new Date().toISOString();
     this.lastError = synced.error;
     saveBridgeConfig(this.cfg, this.options.configPath);

@@ -1,6 +1,12 @@
 module.exports = {
   appId: "app.bridge.desktop",
   productName: "Bridge",
+  publish: [
+    {
+      provider: "generic",
+      url: process.env.BRIDGE_UPDATE_BASE_URL || "https://api.customer.example/storage/v1/object/public/bridge-updates",
+    },
+  ],
   directories: {
     output: "release-bridge",
   },
@@ -14,12 +20,27 @@ module.exports = {
     "node_modules/@anthropic-ai/**/*",
     "node_modules/openai/**/*",
     "node_modules/@supabase/**/*",
+    "node_modules/electron-updater/**/*",
+    "node_modules/builder-util-runtime/**/*",
+    "node_modules/fs-extra/**/*",
+    "node_modules/graceful-fs/**/*",
+    "node_modules/jsonfile/**/*",
+    "node_modules/lazy-val/**/*",
+    "node_modules/lodash.isequal/**/*",
+    "node_modules/semver/**/*",
+    "node_modules/universalify/**/*",
     "node_modules/zod/**/*",
     "node_modules/yaml/**/*",
   ],
   extraMetadata: {
     main: "dist/bridge/electron-main.cjs",
   },
+  protocols: [
+    {
+      name: "Bridge",
+      schemes: ["bridge"],
+    },
+  ],
   mac: {
     category: "public.app-category.productivity",
     icon: "public/icon.icns",
@@ -27,7 +48,7 @@ module.exports = {
     gatekeeperAssess: false,
     entitlements: "build/entitlements.mac.plist",
     entitlementsInherit: "build/entitlements.mac.plist",
-    target: ["dmg"],
+    target: ["dmg", "zip"],
   },
   win: {
     icon: "public/icon-512.png",

@@ -104,6 +104,7 @@ export interface BridgeConfig {
   controlPlaneBaseUrl?: string;
   supabaseUrl?: string;
   supabaseAnonKey?: string;
+  updateBaseUrl?: string;
   /** Backward-compatible alias used by the first cloud bridge prototype. */
   cloudBaseUrl?: string;
   organizationId?: string;
@@ -142,6 +143,7 @@ export interface BridgeControlPlaneSyncResponse {
   account?: BridgeAccount;
   services?: BridgeServiceInstance[];
   erpBus?: BridgeErpBusConfig;
+  updateBaseUrl?: string;
   serverTime?: string;
   error?: string;
 }

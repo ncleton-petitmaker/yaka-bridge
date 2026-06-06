@@ -75,6 +75,7 @@ export function normalizeBridgeConfig(input: Partial<BridgeConfig>): BridgeConfi
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ??
       process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
   );
+  const updateBaseUrl = cleanOptional(input.updateBaseUrl ?? process.env.BRIDGE_UPDATE_BASE_URL ?? process.env.BRIDGE_AUTO_UPDATE_URL);
   const organizationId = cleanOptional(input.organizationId ?? process.env.BRIDGE_ORGANIZATION_ID ?? process.env.APP_ORGANIZATION_ID);
   const bridgeToken = cleanOptional(input.bridgeToken ?? process.env.BRIDGE_TOKEN ?? process.env.APP_BRIDGE_TOKEN);
   const installId = cleanOptional(input.installId) ?? randomUUID();
@@ -93,6 +94,7 @@ export function normalizeBridgeConfig(input: Partial<BridgeConfig>): BridgeConfi
     controlPlaneBaseUrl,
     supabaseUrl,
     supabaseAnonKey,
+    updateBaseUrl,
     cloudBaseUrl: controlPlaneBaseUrl,
     organizationId,
     bridgeToken,

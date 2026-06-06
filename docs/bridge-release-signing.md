@@ -61,3 +61,21 @@ spctl -a -vvv -t install release-bridge/Bridge-*.dmg
 
 For Windows, run Authenticode verification on a Windows runner before publishing
 the `.exe`.
+
+## Auto Update Feed
+
+Production Bridge builds use `electron-updater` with a generic HTTPS feed. See
+[`bridge-auto-update.md`](bridge-auto-update.md).
+
+Set the feed URL before packaging:
+
+```bash
+export BRIDGE_UPDATE_BASE_URL=https://api.customer.example/storage/v1/object/public/bridge-updates
+npm run bridge:pack:mac
+npm run bridge:pack:win
+```
+
+Upload update metadata and versioned artifacts to the `bridge-updates` bucket.
+The manual installer bucket and the update bucket are intentionally separate:
+manual downloads expose stable filenames, while auto updates depend on
+immutable versioned files and generated `latest*.yml` metadata.
