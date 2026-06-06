@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { hostname, platform } from "node:os";
 import { isAbsolute, relative, resolve } from "node:path";
@@ -206,7 +206,7 @@ class BridgeRuntime implements BridgeRuntimeHandle {
         maxTurns: payload.maxTurns,
         images: assets.images,
         outputSchema: assets.outputSchema,
-        sandbox: payload.sandbox ?? "read-only",
+        sandbox: normalizeJobSandbox(job, service),
         includeMcp: payload.includeMcp ?? false,
         ephemeral: payload.ephemeral ?? true,
       });
@@ -563,7 +563,21 @@ function assertInsideRoots(resolved: string, roots: ReturnType<typeof serviceRoo
   for (const root of roots) {
     const rootPath = resolve(root.path);
     const rel = relative(rootPath, resolved);
-    if (rel === "" || (!rel.startsWith("..") && !isAbsolute(rel))) return resolved;
+    if (rel === "" || (!rel.startsWith("..") && !isAbsolute(rel))) {
+      if (!existsSync(resolved)) return resolved;
+      const realRoot = realpathSync.native(rootPath);
+      const realResolved = realpathSync.native(resolved);
+      const realRel = relative(realRoot, realResolved);
+      if (realRel === "" || (!realRel.startsWith("..") && !isAbsolute(realRel))) return resolved;
+    }
   }
   throw new Error(`Chemin hors racine autorisée: ${label}`);
+}
+
+function normalizeJobSandbox(job: CloudBridgeJob, service: BridgeServiceInstance): "read-only" | "workspace-write" | "danger-full-access" {
+  const sandbox = job.payload.sandbox ?? "read-only";
+  if (sandbox !== "danger-full-access") return sandbox;
+  const scopes = new Set([...(job.scopes ?? []), ...(service.scopes ?? [])]);
+  if (scopes.has("codex:danger-full-access")) return sandbox;
+  throw new Error(`Sandbox danger-full-access refusée pour ${service.serviceId}.`);
 }

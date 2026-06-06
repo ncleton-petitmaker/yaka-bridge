@@ -36,11 +36,28 @@ Unsigned Windows builds are acceptable only for internal smoke tests.
 
 ## Distribution
 
-Upload only the signed/notarized stable filenames to the customer Supabase
-Storage bucket:
+Upload only signed/notarized artifacts to the customer Supabase Storage bucket.
+Keep immutable versioned filenames for rollback and expose stable aliases for
+the current recommended download:
 
 ```text
+Bridge-0.1.0.dmg
+Bridge-Setup-0.1.0.exe
 Bridge.dmg
 Bridge-Setup.exe
 SHA256SUMS
 ```
+
+`Bridge.dmg` and `Bridge-Setup.exe` are convenience aliases. They must point to
+the same bytes listed in `SHA256SUMS`. Never overwrite them with unsigned smoke
+test builds on a customer environment.
+
+Before upload, verify:
+
+```bash
+shasum -a 256 release-bridge/Bridge-*.dmg release-bridge/Bridge-Setup-*.exe
+spctl -a -vvv -t install release-bridge/Bridge-*.dmg
+```
+
+For Windows, run Authenticode verification on a Windows runner before publishing
+the `.exe`.
