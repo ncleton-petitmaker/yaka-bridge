@@ -164,6 +164,11 @@ export interface BridgeJobPayload {
   model?: string;
   maxTurns?: number;
   allowedTools?: string[];
+  imageUrls?: string[];
+  outputSchema?: Record<string, unknown>;
+  sandbox?: "read-only" | "workspace-write" | "danger-full-access";
+  includeMcp?: boolean;
+  ephemeral?: boolean;
   tag?: string;
   metadata?: Record<string, unknown>;
 }

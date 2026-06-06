@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync } from "node:fs";
+import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { hostname, platform } from "node:os";
 import { isAbsolute, relative, resolve } from "node:path";
@@ -7,6 +7,7 @@ import {
   loadBridgeConfig,
   resolveConfigPath,
   saveBridgeConfig,
+  safeSegment,
   serviceDataDir,
   serviceRoots,
 } from "./config.js";
@@ -190,6 +191,7 @@ class BridgeRuntime implements BridgeRuntimeHandle {
       const dir = resolvePathRef(this.cfg, service, ref);
       if (dir) addDirs.add(dir);
     }
+    const assets = await prepareJobAssets(this.cfg, service, job);
 
     let localRunId = "";
     let seq = 0;
@@ -202,6 +204,11 @@ class BridgeRuntime implements BridgeRuntimeHandle {
         addDirs: Array.from(addDirs),
         allowedTools: payload.allowedTools,
         maxTurns: payload.maxTurns,
+        images: assets.images,
+        outputSchema: assets.outputSchema,
+        sandbox: payload.sandbox ?? "read-only",
+        includeMcp: payload.includeMcp ?? false,
+        ephemeral: payload.ephemeral ?? true,
       });
       localRunId = run.id;
       attachListener(run.id, (event) => {
@@ -323,6 +330,60 @@ class BridgeRuntime implements BridgeRuntimeHandle {
       console.log(`[bridge] health local: http://127.0.0.1:${port}/api/health`);
     });
   }
+}
+
+async function prepareJobAssets(
+  cfg: BridgeConfig,
+  service: BridgeServiceInstance,
+  job: CloudBridgeJob
+): Promise<{ images?: string[]; outputSchema?: string }> {
+  const payload = job.payload;
+  const jobDir = resolve(serviceDataDir(cfg, service.serviceId), "jobs", safeSegment(job.id));
+  mkdirSync(jobDir, { recursive: true });
+
+  let outputSchema: string | undefined;
+  if (payload.outputSchema && typeof payload.outputSchema === "object") {
+    outputSchema = resolve(jobDir, "output.schema.json");
+    writeFileSync(outputSchema, JSON.stringify(payload.outputSchema, null, 2), "utf8");
+  }
+
+  const imageUrls = Array.isArray(payload.imageUrls) ? payload.imageUrls : [];
+  const images: string[] = [];
+  for (const [idx, rawUrl] of imageUrls.entries()) {
+    const url = assertSafeDownloadUrl(String(rawUrl));
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) throw new Error(`Image OCR ${idx + 1} HTTP ${res.status}`);
+    const bytes = Buffer.from(await res.arrayBuffer());
+    if (bytes.length > 15 * 1024 * 1024) {
+      throw new Error(`Image OCR ${idx + 1} trop volumineuse (${bytes.length} octets).`);
+    }
+    const file = resolve(jobDir, `page-${String(idx + 1).padStart(3, "0")}.png`);
+    writeFileSync(file, bytes);
+    images.push(file);
+  }
+
+  return {
+    images: images.length ? images : undefined,
+    outputSchema,
+  };
+}
+
+function assertSafeDownloadUrl(raw: string): string {
+  const url = new URL(raw);
+  if (url.protocol !== "https:") throw new Error("Les images OCR doivent utiliser HTTPS.");
+  const host = url.hostname.toLowerCase();
+  if (host === "localhost" || host.endsWith(".localhost")) throw new Error("URL OCR locale interdite.");
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) {
+    const [a, b] = host.split(".").map(Number);
+    const privateIp =
+      a === 10 ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      a === 127 ||
+      a === 169;
+    if (privateIp) throw new Error("URL OCR vers IP privée interdite.");
+  }
+  return url.toString();
 }
 
 async function refreshSupabaseSessionIfNeeded(cfg: BridgeConfig, configPath: string): Promise<void> {

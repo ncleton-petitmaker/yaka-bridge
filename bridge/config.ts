@@ -308,7 +308,7 @@ function valueAfter(argv: string[], flag: string): string | undefined {
   return argv[idx + 1];
 }
 
-function safeSegment(value: string): string {
+export function safeSegment(value: string): string {
   return value
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")

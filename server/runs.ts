@@ -1,14 +1,13 @@
 /**
- * Gestion des runs Claude Code : spawn, parsing du stream, mémoire des events,
- * fan-out vers les listeners SSE.
+ * Gestion des runs Codex CLI : spawn `codex exec --json`, parsing du stream
+ * JSONL, mémoire des events, fan-out vers les listeners SSE.
  */
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { findClaudeBin, buildClaudeArgs, type BuildArgsOptions } from "./agents.js";
-import { StreamParser } from "./parse-stream.js";
+import { findCodexBin, buildCodexArgs, type BuildArgsOptions } from "./agents.js";
+import { CodexStreamParser } from "./parse-stream.js";
 import { saveRunEvents } from "./run-history.js";
 import {
-  computeCostUsd,
   emptyTotals,
   type UsageTotals,
 } from "./pricing.js";
@@ -16,7 +15,7 @@ import type { AgentEvent, RunRecord, RunStatus } from "./types.js";
 
 interface ActiveRun extends RunRecord {
   child?: ChildProcessWithoutNullStreams;
-  parser?: StreamParser;
+  parser?: CodexStreamParser;
   /** Listeners SSE attachés à ce run */
   listeners: Set<(ev: AgentEvent) => void>;
   /** Promesse de fin (résolue quand le child exit) */
@@ -136,7 +135,7 @@ export function cleanupZombies(): number {
         process.kill(pid, 0);
       } catch {
         dead = true;
-        reason = `process Claude PID ${pid} introuvable côté OS`;
+        reason = `process Codex PID ${pid} introuvable côté OS`;
       }
     } else if (!run.child) {
       // Pas de child référencé du tout : le run est orphelin
@@ -241,16 +240,10 @@ function broadcast(run: ActiveRun, ev: AgentEvent) {
     run.totals.cache_create_5m += u.cache_create_5m;
     run.totals.cache_create_1h += u.cache_create_1h;
     if (u.model) run.totals.last_model = u.model;
-    run.totals.cost_usd = computeCostUsd(
-      {
-        input_tokens: run.totals.input_tokens,
-        output_tokens: run.totals.output_tokens,
-        cache_read: run.totals.cache_read,
-        cache_create_5m: run.totals.cache_create_5m,
-        cache_create_1h: run.totals.cache_create_1h,
-      },
-      run.totals.last_model
-    );
+    // Codex en OAuth ChatGPT : l'usage est inclus dans l'abonnement, il n'y a
+    // pas de facturation par token. On garde l'agrégat de tokens (utile pour
+    // suivre la consommation de quota) mais le coût USD reste à 0.
+    run.totals.cost_usd = 0;
   }
   run.events.push(ev);
   for (const l of run.listeners) {
@@ -282,16 +275,16 @@ function setStatus(run: ActiveRun, status: RunStatus, exitCode?: number | null) 
 }
 
 export function startRun(opts: StartRunOptions): RunRecord {
-  const bin = findClaudeBin();
+  const bin = findCodexBin();
   if (!bin) {
     throw new Error(
-      "Claude Code CLI introuvable sur le PATH. Installez-le et reconnectez-vous."
+      "Codex CLI introuvable sur le PATH. Installez-le (npm i -g @openai/codex) puis faites `codex login`."
     );
   }
 
   const id = randomUUID();
-  const args = buildClaudeArgs(opts);
-  const parser = new StreamParser();
+  const args = buildCodexArgs(opts);
+  const parser = new CodexStreamParser();
 
   let resolveDone: () => void = () => {};
   const done = new Promise<void>((resolve) => {
@@ -322,12 +315,7 @@ export function startRun(opts: StartRunOptions): RunRecord {
     shell: false,
     env: {
       ...process.env,
-      // Kill-switch officiel Anthropic pour couper le thinking adaptatif sur
-      // Sonnet 4.6/Opus 4.6+ qui causait des hangs de 5-10 min sans event.
-      // Combine avec --effort low dans buildClaudeArgs pour une latence prévisible.
-      CLAUDE_CODE_DISABLE_THINKING: "1",
-      // CI=1 force la sortie JSON en mode non-TTY (Ink ne rend rien sur pipe sinon).
-      CI: "1",
+      // Sortie sobre : pas de couleurs ANSI dans le flux JSONL ni sur stderr.
       NO_COLOR: "1",
     },
   });
@@ -358,6 +346,22 @@ export function startRun(opts: StartRunOptions): RunRecord {
   child.on("close", (code) => {
     const tail = parser.flush();
     for (const ev of tail) broadcast(run, ev);
+    // codex exec n'émet pas d'événement "result" dans son flux JSONL
+    // (contrairement à claude --output-format stream-json) : on le synthétise
+    // pour conserver le contrat AgentEvent du template (l'UI affiche la
+    // réponse finale + le statut succès/échec à partir de cet event).
+    if (!run.events.some((e) => e.kind === "result")) {
+      const lastText = [...run.events].reverse().find((e) => e.kind === "text_delta")?.text;
+      broadcast(run, {
+        kind: "result",
+        result: {
+          success: code === 0 && run.status !== "cancelled",
+          output: lastText,
+          durationMs: Date.now() - run.startedAt,
+        },
+        ts: Date.now(),
+      });
+    }
     if (run.status === "cancelled") {
       // déjà marqué
       run.endedAt = Date.now();
