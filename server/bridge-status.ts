@@ -24,29 +24,34 @@ export interface BridgeInstaller {
 
 const DEFAULT_PORT = Number(process.env["NEXT_PUBLIC_BRIDGE_PORT"] ?? "7707") || 7707;
 const DEFAULT_BRIDGE_URL = `http://127.0.0.1:${DEFAULT_PORT}`;
-const WINDOWS_INSTALLER = "/bridge/Bridge-Setup.exe";
-const MAC_INSTALLER = "/bridge/Bridge.dmg";
+const DEFAULT_INSTALLER_BASE_URL = "/bridge";
+const WINDOWS_INSTALLER_FILENAME = "Bridge-Setup.exe";
+const MAC_INSTALLER_FILENAME = "Bridge.dmg";
 
 export function getBridgeStatusPayload(runtime: BridgeStatusPayload["runtime"]): BridgeStatusPayload {
   const bridgeUrl = cleanUrl(process.env["NEXT_PUBLIC_BRIDGE_URL"]) ?? DEFAULT_BRIDGE_URL;
+  const installerBaseUrl =
+    cleanPathOrUrl(process.env["NEXT_PUBLIC_BRIDGE_INSTALLER_BASE_URL"]) ?? DEFAULT_INSTALLER_BASE_URL;
+  const windowsInstallerUrl = joinUrl(installerBaseUrl, WINDOWS_INSTALLER_FILENAME);
+  const macInstallerUrl = joinUrl(installerBaseUrl, MAC_INSTALLER_FILENAME);
   const installerUrl =
-    cleanPathOrUrl(process.env["NEXT_PUBLIC_BRIDGE_INSTALLER_URL"]) ?? WINDOWS_INSTALLER;
+    cleanPathOrUrl(process.env["NEXT_PUBLIC_BRIDGE_INSTALLER_URL"]) ?? windowsInstallerUrl;
   const expectedPort = Number(new URL(bridgeUrl).port || DEFAULT_PORT) || DEFAULT_PORT;
-  const installerFilename = installerUrl.split("/").filter(Boolean).pop() ?? "Bridge-Setup.exe";
+  const installerFilename = installerUrl.split("/").filter(Boolean).pop() ?? WINDOWS_INSTALLER_FILENAME;
   const installers: BridgeInstaller[] = [
     {
       platform: "windows",
       label: "Windows",
       extension: "exe",
-      installerUrl: WINDOWS_INSTALLER,
-      installerFilename: "Bridge-Setup.exe",
+      installerUrl: windowsInstallerUrl,
+      installerFilename: WINDOWS_INSTALLER_FILENAME,
     },
     {
       platform: "mac",
       label: "macOS",
       extension: "dmg",
-      installerUrl: MAC_INSTALLER,
-      installerFilename: "Bridge.dmg",
+      installerUrl: macInstallerUrl,
+      installerFilename: MAC_INSTALLER_FILENAME,
     },
   ];
 
@@ -87,4 +92,8 @@ function cleanPathOrUrl(value: string | undefined): string | null {
   if (!clean) return null;
   if (clean.startsWith("/")) return clean;
   return cleanUrl(clean);
+}
+
+function joinUrl(base: string, filename: string): string {
+  return `${base.replace(/\/+$/, "")}/${filename}`;
 }

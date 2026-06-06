@@ -106,14 +106,35 @@ SUPABASE_SERVICE_ROLE_KEY=<service role key from /opt/supabase/.env>
 For VPS/Coolify deployment:
 
 ```dotenv
-NEXT_PUBLIC_SUPABASE_URL=https://supabase.customer.example
+NEXT_PUBLIC_SUPABASE_URL=https://api.customer.example
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<anon key>
 SUPABASE_URL=http://supabase-kong:8000
 SUPABASE_ANON_KEY=<anon key>
 SUPABASE_SERVICE_ROLE_KEY=<service role key>
+NEXT_PUBLIC_BRIDGE_INSTALLER_BASE_URL=https://api.customer.example/storage/v1/object/public/bridge-installers
 ```
 
 If the app uses Next route handlers as its cloud API, disable local daemon rewrites in production. Long-running Codex jobs should go through Bridge jobs, not through the web container.
+
+## Bridge Installers Storage
+
+Bridge installers belong on the customer VPS, not on Vercel or a generated app host. Use the self-hosted Supabase Storage service:
+
+```sql
+insert into storage.buckets (id, name, public, file_size_limit)
+values ('bridge-installers', 'bridge-installers', true, 268435456)
+on conflict (id) do update set public = true, file_size_limit = 268435456;
+```
+
+Upload stable object names after packaging Bridge:
+
+```text
+Bridge-Setup.exe
+Bridge.dmg
+SHA256SUMS
+```
+
+The generated service reads `NEXT_PUBLIC_BRIDGE_INSTALLER_BASE_URL` and exposes those URLs through `/api/bridge/status`.
 
 ## Supabase Auth
 
@@ -134,7 +155,8 @@ docker compose restart auth
 ## Acceptance Checks
 
 - `docker compose ps` shows Supabase services healthy.
-- Public `https://supabase.customer.example/rest/v1/` reaches Kong.
+- Public `https://api.customer.example/rest/v1/` reaches Kong.
+- Public `https://api.customer.example/storage/v1/object/public/bridge-installers/SHA256SUMS` returns installer checksums.
 - `erp_modules` returns `crm` and `purchasing`.
 - App-specific health route returns Supabase configured.
 - A browser login succeeds against the customer app domain.
