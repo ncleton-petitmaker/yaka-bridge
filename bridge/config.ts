@@ -70,7 +70,7 @@ export function normalizeBridgeConfig(input: Partial<BridgeConfig>): BridgeConfi
     cloudBaseUrl: controlPlaneBaseUrl,
     organizationId,
     bridgeToken,
-    bridgeId: cleanOptional(input.bridgeId ?? process.env.APP_BRIDGE_ID),
+    bridgeId: cleanOptional(input.bridgeId ?? process.env.BRIDGE_ID ?? process.env.APP_BRIDGE_ID),
     installId,
     deviceId,
     userId: cleanOptional(input.userId),

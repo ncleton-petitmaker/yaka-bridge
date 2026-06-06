@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { AppChromeHeader } from "@/components/AppChromeHeader";
+import { apiFetch } from "@/lib/api-client";
 import { isElectron, openFile, revealFile, selectDirectory } from "@/lib/electron";
 
 interface RequiredDirSpec {
@@ -17,8 +18,9 @@ interface RequiredDirSpec {
 
 interface AppConfigShape {
   model: string;
-  currentUser?: string;
-  isAdmin?: boolean;
+  databaseProvider?: "supabase";
+  supabaseUrl?: string;
+  supabaseAnonKey?: string;
   maxConcurrentRuns?: number;
   inputDir?: string;
   outputDir?: string;
@@ -35,7 +37,7 @@ interface AvailableModel {
 
 /**
  * Page paramètres : sections séparées en cards, hérité d'oif-eval.
- * - Profil (utilisateur courant, rôle admin)
+ * - Base de données Supabase
  * - Stockage (dossiers requis lus dynamiquement depuis `requiredDirs`)
  * - Modèle Claude Code + concurrence
  * - AGENT-SLOT: settings-section-calibrage (vide dans le template)
@@ -48,7 +50,7 @@ export default function SettingsPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/app-config")
+    apiFetch("/api/app-config")
       .then((r) => r.json())
       .then((j: { config: AppConfigShape; availableModels: AvailableModel[] }) => {
         setConfig(j.config);
@@ -62,7 +64,7 @@ export default function SettingsPage() {
     setInfo(null);
     setError(null);
     try {
-      const r = await fetch("/api/app-config", {
+      const r = await apiFetch("/api/app-config", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(partial),
@@ -118,7 +120,7 @@ export default function SettingsPage() {
             Paramètres
           </h1>
           <p style={{ fontSize: 13, color: "var(--text-muted)" }}>
-            Configuration de l&apos;app : profil, stockage, modèle.
+            Configuration de l&apos;app : base de données, stockage, modèle.
           </p>
         </header>
 
@@ -126,20 +128,28 @@ export default function SettingsPage() {
           <p>Chargement…</p>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-            {/* Section : Profil */}
-            <Section title="Profil">
-              <Field label="Utilisateur connecté">
+            {/* Section : Base de données */}
+            <Section title="Base de données Supabase">
+              <p style={{ fontSize: 12, color: "var(--muted)", marginBottom: 12 }}>
+                Le template persiste les données métier dans Supabase. La clé
+                service-role doit rester côté daemon via{" "}
+                <code>SUPABASE_SERVICE_ROLE_KEY</code>; elle n&apos;est jamais
+                saisie ici.
+              </p>
+              <Field label="URL Supabase">
                 <input
-                  type="text"
-                  defaultValue={config.currentUser ?? ""}
-                  onBlur={(e) => save({ currentUser: e.target.value })}
+                  type="url"
+                  defaultValue={config.supabaseUrl ?? ""}
+                  placeholder="https://xxxx.supabase.co"
+                  onBlur={(e) => save({ supabaseUrl: e.target.value.trim() || undefined })}
                 />
               </Field>
-              <Field label="Administrateur">
+              <Field label="Anon key Supabase">
                 <input
-                  type="checkbox"
-                  checked={!!config.isAdmin}
-                  onChange={(e) => save({ isAdmin: e.target.checked })}
+                  type="password"
+                  defaultValue={config.supabaseAnonKey ?? ""}
+                  placeholder="eyJ..."
+                  onBlur={(e) => save({ supabaseAnonKey: e.target.value.trim() || undefined })}
                 />
               </Field>
             </Section>

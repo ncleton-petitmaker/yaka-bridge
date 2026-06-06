@@ -23,6 +23,13 @@ data/
 # Évaluations sortantes (sensibles)
 evaluations/
 
+# Factory crash tests / apps générées localement
+Projets/
+.pi/
+.factory-meta.json
+.factory-error.json
+brief.generated.md
+
 # Cache local
 *.sqlite
 *.sqlite-journal

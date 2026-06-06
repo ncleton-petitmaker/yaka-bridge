@@ -9,6 +9,7 @@
  */
 import { parseSseFrame as _parseSseFrame } from "./sse";
 void _parseSseFrame; // exporté plus loin pour les apps qui l'utilisent
+import { apiDaemonUrl, apiFetch } from "./api-client";
 import type {
   AgentEvent,
   RunRecord,
@@ -17,29 +18,19 @@ import type {
   StartRunResponse,
 } from "./types";
 
-function daemonOrigin(): string {
-  // En dev les rewrites Next prennent le relais sauf pour les SSE.
-  if (typeof window !== "undefined" && window.location.hostname) {
-    const port =
-      process.env.NEXT_PUBLIC_DAEMON_PORT ?? "{{DAEMON_PORT}}";
-    return `http://${window.location.hostname}:${port}`;
-  }
-  return `http://localhost:{{DAEMON_PORT}}`;
-}
-
 export async function health(): Promise<{
   ok: boolean;
   version: string;
   claude: string | null;
   dataDir: string;
 }> {
-  const r = await fetch("/api/health");
+  const r = await apiFetch("/api/health");
   if (!r.ok) throw new Error(`GET /api/health ${r.status}`);
   return await r.json();
 }
 
 export async function startRun(req: StartRunRequest): Promise<string> {
-  const r = await fetch("/api/runs", {
+  const r = await apiFetch("/api/runs", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(req),
@@ -53,7 +44,7 @@ export async function startRun(req: StartRunRequest): Promise<string> {
 }
 
 export async function getRun(runId: string): Promise<RunRecord | null> {
-  const r = await fetch(`/api/runs/${encodeURIComponent(runId)}`);
+  const r = await apiFetch(`/api/runs/${encodeURIComponent(runId)}`);
   if (r.status === 404) return null;
   if (!r.ok) throw new Error(`GET /api/runs/${runId} ${r.status}`);
   const j = (await r.json()) as { run: RunRecord };
@@ -61,21 +52,21 @@ export async function getRun(runId: string): Promise<RunRecord | null> {
 }
 
 export async function listRuns(): Promise<RunRecord[]> {
-  const r = await fetch("/api/runs");
+  const r = await apiFetch("/api/runs");
   if (!r.ok) throw new Error(`GET /api/runs ${r.status}`);
   const j = (await r.json()) as { runs: RunRecord[] };
   return j.runs;
 }
 
 export async function cancelRun(runId: string): Promise<void> {
-  await fetch(`/api/runs/${encodeURIComponent(runId)}/cancel`, { method: "POST" });
+  await apiFetch(`/api/runs/${encodeURIComponent(runId)}/cancel`, { method: "POST" });
 }
 
 export async function listSkills(
   user?: string
 ): Promise<{ global: SkillEntry[]; perso: SkillEntry[] }> {
   const url = user ? `/api/skills?user=${encodeURIComponent(user)}` : "/api/skills";
-  const r = await fetch(url);
+  const r = await apiFetch(url);
   if (!r.ok) throw new Error(`GET /api/skills ${r.status}`);
   return await r.json();
 }
@@ -84,7 +75,7 @@ export async function updateSkill(
   slug: string,
   content: string
 ): Promise<{ skill: SkillEntry }> {
-  const r = await fetch(`/api/skills/${encodeURIComponent(slug)}`, {
+  const r = await apiFetch(`/api/skills/${encodeURIComponent(slug)}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ content }),
@@ -112,7 +103,7 @@ export function streamRun(
   handlers: RunStreamHandlers
 ): Promise<void> {
   return new Promise((resolve, reject) => {
-    const url = `${daemonOrigin()}/api/runs/${encodeURIComponent(runId)}/events`;
+    const url = apiDaemonUrl(`/api/runs/${encodeURIComponent(runId)}/events`);
     const es = new EventSource(url);
     let ended = false;
 
@@ -181,7 +172,7 @@ export async function listAuditLogs(opts: {
   if (opts.action) qs.set("action", opts.action);
   if (opts.limit) qs.set("limit", String(opts.limit));
   const url = qs.toString() ? `/api/audit/logs?${qs}` : "/api/audit/logs";
-  const r = await fetch(url);
+  const r = await apiFetch(url);
   if (!r.ok) throw new Error(`GET /api/audit/logs ${r.status}`);
   return await r.json();
 }
@@ -209,7 +200,7 @@ export async function listConflictCopies(path?: string): Promise<ConflictFile[]>
   const url = path
     ? `/api/storage/conflicts?path=${encodeURIComponent(path)}`
     : "/api/storage/conflicts";
-  const r = await fetch(url);
+  const r = await apiFetch(url);
   if (!r.ok) throw new Error(`GET /api/storage/conflicts ${r.status}`);
   const j = (await r.json()) as { conflicts: ConflictFile[] };
   return j.conflicts;

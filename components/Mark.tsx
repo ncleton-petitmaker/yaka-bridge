@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Mark de l'app : pastille avec l'icône de l'app (servie depuis /icon-64.png),
+ * Mark de l'app : pastille avec le logo minimal (servi depuis /app-mark.svg),
  * utilisée dans le header global et les écrans d'accueil.
  *
  * La factory remplace l'icône via la procédure de branding (cf. docs). Hérité
@@ -28,7 +28,7 @@ export function Mark({ size = 22, className }: { size?: number; className?: stri
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
-        src="/icon-64.png"
+        src="/app-mark.svg"
         alt="{{APP_NAME}}"
         style={{
           width: "100%",

@@ -5,13 +5,12 @@ import { useEffect, useState } from "react";
 import { Mark } from "@/components/Mark";
 import { Icon } from "@/components/Icon";
 import { ConflictBanner } from "@/components/ConflictBanner";
+import { BridgeIndicator } from "@/components/BridgeStatusProvider";
 
 /**
  * Onglets affichés dans le header global. Vide par défaut : l'agent
  * `ui-page-generator` l'enrichit lors du scaffolding selon les entités métier
  * définies dans `template.config.json` (clé `shell.nav_tabs`).
- *
- * Format : { href, label, adminOnly? }
  *
  * AGENT-SLOT: nav-tabs — l'agent ui-page-generator remplace ce tableau lors du
  * scaffold. Garder le type pour TS.
@@ -19,44 +18,17 @@ import { ConflictBanner } from "@/components/ConflictBanner";
 interface NavTab {
   href: string;
   label: string;
-  adminOnly?: boolean;
 }
 const baseTabs: NavTab[] = [];
 
-/**
- * Header global de l'app : Mark + nom + onglets + profile chip + theme switcher.
- * Wrap aussi le ConflictBanner pour qu'il apparaisse au-dessus du header.
- *
- * Hérité d'oif-eval, génericisé : tabs et nom d'app via placeholders.
- */
-export function AppChromeHeader({ user: userProp }: { user?: string }) {
+export function AppChromeHeader() {
   const path = usePathname();
   const [theme, setTheme] = useState<"light" | "dark">("light");
-  const [profile, setProfile] = useState<{ currentUser?: string; isAdmin?: boolean }>({});
-
-  useEffect(() => {
-    function loadProfile() {
-      fetch("/api/app-config")
-        .then((r) => r.json())
-        .then((j: { config?: { currentUser?: string; isAdmin?: boolean } }) =>
-          setProfile({ currentUser: j.config?.currentUser, isAdmin: j.config?.isAdmin })
-        )
-        .catch(() => {
-          // ignore
-        });
-    }
-    loadProfile();
-    window.addEventListener("app-config-changed", loadProfile);
-    return () => window.removeEventListener("app-config-changed", loadProfile);
-  }, []);
 
   useEffect(() => {
     const t = document.documentElement.getAttribute("data-theme");
     if (t === "dark" || t === "light") setTheme(t);
   }, []);
-
-  const tabs = baseTabs.filter((t) => !t.adminOnly || profile.isAdmin);
-  const userLabel = profile.currentUser ?? userProp ?? "Non connecté";
 
   function toggleTheme() {
     const next = theme === "dark" ? "light" : "dark";
@@ -90,8 +62,9 @@ export function AppChromeHeader({ user: userProp }: { user?: string }) {
               fontFamily: "var(--serif)",
               fontWeight: 600,
               fontSize: 14,
-              letterSpacing: "-0.01em",
+              letterSpacing: 0,
               color: "var(--fg-strong)",
+              whiteSpace: "nowrap",
             }}
           >
             {"{{APP_NAME}}"}
@@ -102,6 +75,10 @@ export function AppChromeHeader({ user: userProp }: { user?: string }) {
               fontSize: 11,
               color: "var(--muted)",
               fontWeight: 400,
+              maxWidth: 460,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
             }}
           >
             {"{{DOMAIN_BRIEF}}"}
@@ -117,7 +94,7 @@ export function AppChromeHeader({ user: userProp }: { user?: string }) {
             alignItems: "stretch",
           }}
         >
-          {tabs.map((t) => {
+          {baseTabs.map((t) => {
             const active = path?.startsWith(t.href) ?? false;
             return (
               <Link
@@ -140,28 +117,7 @@ export function AppChromeHeader({ user: userProp }: { user?: string }) {
         </nav>
 
         <div style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-          <span
-            className="pill ok"
-            style={{ cursor: "default" }}
-          >
-            <span className="dot" aria-hidden />
-            {userLabel}
-            {profile.isAdmin && (
-              <span
-                style={{
-                  fontSize: 9.5,
-                  fontWeight: 600,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.06em",
-                  color: "var(--muted)",
-                  fontFamily: "var(--mono)",
-                  marginLeft: 2,
-                }}
-              >
-                admin
-              </span>
-            )}
-          </span>
+          <BridgeIndicator />
           <button
             type="button"
             onClick={toggleTheme}

@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { OnboardingWizard } from "@/components/OnboardingWizard";
 import { StorageGuard } from "@/components/StorageGuard";
+import { CloudAuthGate } from "@/components/CloudAuthGate";
+import { BridgeStatusProvider } from "@/components/BridgeStatusProvider";
 
 export const metadata: Metadata = {
   title: "{{APP_NAME}}",
@@ -29,9 +30,12 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
       <body style={{ background: "var(--bg)", color: "var(--fg)" }}>
-        {children}
-        <OnboardingWizard />
-        <StorageGuard />
+        <CloudAuthGate>
+          <BridgeStatusProvider>
+            {children}
+            <StorageGuard />
+          </BridgeStatusProvider>
+        </CloudAuthGate>
       </body>
     </html>
   );

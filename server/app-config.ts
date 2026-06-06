@@ -1,7 +1,7 @@
 /**
  * Lecture et écriture persistante de la config app dans `<dataDir>/.claude/app-config.json`.
  *
- * Le template ne fixe que les champs structurels (modèle, user, paths
+ * Le template ne fixe que les champs structurels (modèle, Supabase, paths
  * autorisés en écriture). Les apps métier étendent ce type avec leurs propres
  * settings en redéfinissant ce fichier ou en ajoutant un sous-module.
  */
@@ -20,10 +20,12 @@ export interface AppConfig {
   outputDir?: string;
   /** Dossier où le journal d'audit chaîné est écrit. */
   auditLogDir?: string;
-  /** Identité de l'utilisateur connecté (slugifié côté audit-log). */
-  currentUser?: string;
-  /** Rôle admin (autorisé à modifier les skills globaux par exemple). */
-  isAdmin?: boolean;
+  /** Provider de base de données. Le template impose Supabase par défaut. */
+  databaseProvider: "supabase";
+  /** URL du projet Supabase. Peut aussi venir de SUPABASE_URL. */
+  supabaseUrl?: string;
+  /** Clé anon publique Supabase. Peut aussi venir de SUPABASE_ANON_KEY. */
+  supabaseAnonKey?: string;
   /** Nombre max de runs Claude en parallèle. Défaut : 5. */
   maxConcurrentRuns?: number;
   /**
@@ -47,6 +49,7 @@ const DEFAULT_CONFIG: AppConfig = {
   // Alias "sonnet" : Claude Code CLI résout vers la dernière version Sonnet.
   // Pour épingler une version, utiliser un ID complet (ex "claude-sonnet-4-6").
   model: "sonnet",
+  databaseProvider: "supabase",
   maxConcurrentRuns: 5,
 };
 

@@ -12,19 +12,21 @@ tools:
 
 ## Responsabilité
 
-Lit le brief (SUBPROCESS, ENTITIES, EXTRA_ROUTES, GIT_BINDING) et génère :
+Lit le brief (SUBPROCESS, ENTITIES, EXTRA_ROUTES, GIT_BINDING, AGENTIC_FIRST, MCP_ACTIONS) et génère :
 
 1. `server/<domain>-driver.ts` : wrapper bas-niveau du subprocess (spawn, parse, retry, timeout).
 2. `server/<domain>-runner.ts` : orchestrateur haut-niveau (boucle sur N items, émission d'événements SSE typés, persistance des résultats).
-3. Routes Hono ajoutées **dans `server/index.ts`** :
+3. **Si `AGENTIC_FIRST !== false` (défaut)** : un registry d'actions serveur typées (`server/<domain>-actions.ts`) qui est la source canonique pour HTTP, UI et MCP. Aucune logique métier ne doit vivre seulement dans une route Hono ou dans le front.
+4. Routes Hono ajoutées **dans `server/index.ts`** :
    - `POST /api/<entities>` (création d'un run)
    - `GET  /api/<entities>` (list + filtres)
    - `GET  /api/<entities>/:id` (détail)
    - `GET  /api/<entities>/:id/events` (SSE)
    - `POST /api/<entities>/:id/cancel`
-4. Si `GIT_BINDING` dans le brief : `server/git-binding.ts` (helpers + routes `/api/git/*`).
-5. Si `EXTRA_ROUTES` dans le brief : ajoute aussi ces routes dans `server/index.ts`.
-6. Vérifie que `npx tsc --noEmit` passe.
+5. Si `AGENTIC_FIRST !== false` : un serveur/bridge MCP local (`server/mcp-tools.ts` ou équivalent) qui expose les mêmes actions que l'UI, avec préfixe `<app_slug>__...`.
+6. Si `GIT_BINDING` dans le brief : `server/git-binding.ts` (helpers + routes `/api/git/*`).
+7. Si `EXTRA_ROUTES` dans le brief : ajoute aussi ces routes dans `server/index.ts` et dans le registry d'actions/MCP si elles sont invocables depuis l'UI.
+8. Vérifie que `npx tsc --noEmit` passe.
 
 **Hors scope** (NE PAS TOUCHER) :
 
@@ -145,7 +147,58 @@ Règles :
 - **Cleanup zombies** : à l'unhandled rejection ou SIGTERM, marque les runs `running` comme `cancelled` (cf `runs.ts`).
 - **Combinaison `A + B`** : le runner invoque les 2 drivers tour à tour pour chaque item, et émet 2 sous-événements (`event: "ui-result"`, `event: "api-result"`) avant l'event final `result`.
 
-### 5. Routes Hono dans `server/index.ts`
+### 5. Agentic-first : action registry + MCP parity
+
+Lire `docs/agentic-first.md` avant de générer les routes.
+
+Si `AGENTIC_FIRST !== false` (défaut), tu dois créer une couche action canonique avant les routes :
+
+```ts
+// server/<domain>-actions.ts
+import { z } from "zod";
+
+export interface ActionContext {
+  dataDir: string;
+  actorId: string;
+  actorRole: string;
+  signal?: AbortSignal;
+}
+
+export interface DomainAction<I, O> {
+  id: string;
+  description: string;
+  inputSchema: z.ZodType<I>;
+  handler(ctx: ActionContext, input: I): Promise<O>;
+  audit?: { action: string; resourceType: string; dangerous?: boolean; adminOnly?: boolean };
+}
+
+export const domainActions = {
+  "<entity>.create": { /* calls runner/service */ },
+  "<entity>.list": { /* calls runner/service */ },
+  "<entity>.get": { /* ... */ },
+  "<entity>.cancel": { /* calls cancel */ },
+} satisfies Record<string, DomainAction<unknown, unknown>>;
+```
+
+Règles :
+
+- Les routes Hono appellent `domainActions[...] .handler(...)` ; elles ne réimplémentent pas la logique.
+- Les tools MCP appellent exactement les mêmes handlers.
+- Toute action UI générée par `ui-page-generator` doit apparaître ici.
+- Les `MCP_ACTIONS` du brief sont obligatoires : si tu ne sais pas les implémenter, ajoute un TODO explicite dans le journal et ne prétends pas que la parité est complète.
+- Le `factory-journal.md` doit contenir une table `UI action | server action | HTTP route | MCP tool | audit`.
+
+Créer aussi un module MCP qui convertit ce registry en tools typés (pattern CRMclaw) :
+
+```ts
+// server/mcp-tools.ts
+export function listMcpTools(appSlug: string) { /* zod -> json schema */ }
+export async function callMcpTool(name: string, args: unknown, ctx: ActionContext) { /* dispatch */ }
+```
+
+Le serveur MCP peut être minimal au scaffold, mais les contrats doivent être présents et typecheck.
+
+### 6. Routes Hono dans `server/index.ts`
 
 Édite `server/index.ts` (pas de réécriture complète — `Edit` chirurgical) pour ajouter :
 

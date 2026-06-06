@@ -19,8 +19,8 @@
  *   2. Confirmation interactive (sauf --yes ou --dry-run).
  *   3. Clone template-dir → output-dir, supprime .git, lance init-from-template.mjs.
  *   4. Spawn agents séquentiellement :
- *        app-scaffolder → domain-modeler → subprocess-driver
- *        → ui-page-generator → skill-author
+ *        app-scaffolder → brand-identity-designer → domain-modeler
+ *        → subprocess-driver → ui-page-generator → skill-author
  *      Chaque agent reçoit un prompt dérivé du brief ; sa sortie est appendée
  *      à output-dir/factory-journal.md.
  *   5. npm install + npx tsc --noEmit (sauf --skip-*).
@@ -63,6 +63,9 @@ const BriefSchema = z.object({
   NEXT_PORT: z.coerce.number().int().min(1024).max(65535),
   DAEMON_PORT: z.coerce.number().int().min(1024).max(65535),
   DATA_DIR_NAME: z.string().min(1),
+  PROJECT_MODE: z.enum(["new", "adapt-existing"]).optional().default("new"),
+  SOURCE_PROJECT_DIR: z.string().optional(),
+  ADAPTATION_BRIEF: z.string().optional(),
   ENTITY: z.string().min(1),
   ENTITY_PLURAL: z.string().optional(),
   SUBPROCESS: z.string().min(1),
@@ -79,6 +82,8 @@ const BriefSchema = z.object({
   GIT_BINDING: z.string().optional(),
   EXTRA_ROUTES: z.array(z.string()).optional(),
   SKILLS: z.array(z.string()).optional(),
+  AGENTIC_FIRST: z.coerce.boolean().optional().default(true),
+  MCP_ACTIONS: z.array(z.string()).optional(),
 });
 
 const CANONICAL_SUBPROCESS = [
@@ -196,19 +201,17 @@ function validateBrief(raw) {
     );
   }
   if (Array.isArray(brief.EXTRA_ROUTES) && Array.isArray(brief.ENTITIES)) {
-    const knownEntities = new Set(
-      [brief.ENTITY, ...brief.ENTITIES.map((e) => e.name)].map((n) =>
-        n.toLowerCase()
-      )
-    );
+    const entityNames = [brief.ENTITY, brief.ENTITY_PLURAL, ...brief.ENTITIES.flatMap((e) => [e.name, deducePlural(e.name)])].filter(Boolean);
+    const knownEntities = new Set(entityNames.map((n) => n.toLowerCase()));
     for (const route of brief.EXTRA_ROUTES) {
       const m = route.match(/\/api\/([a-z][a-z0-9_-]*)/i);
       if (
         m &&
         !knownEntities.has(m[1].toLowerCase()) &&
-        !["git", "services", "skills", "audit-log", "runs", "health"].includes(
+        !["git", "services", "skills", "audit-log", "runs", "health", "preferences", "qa-bank", "actions", "agents", "app-config"].includes(
           m[1].toLowerCase()
-        )
+        ) &&
+        !knownEntities.has(m[1].toLowerCase().replace(/-/g, "_"))
       ) {
         warnings.push(
           `EXTRA_ROUTES: "${route}" mentionne une ressource "${m[1]}" non listée dans ENTITIES.`
@@ -261,12 +264,10 @@ function copyDirSync(src, dst, ignore) {
 
 // ----- Subprocess helpers -----
 
-function checkClaudeCli() {
-  const r = spawnSync("claude", ["--version"], { encoding: "utf8" });
-  if (r.error || r.status !== 0) {
-    return null;
-  }
-  return r.stdout.trim() || "claude (version unknown)";
+function checkCodexCli() {
+  const r = spawnSync("codex", ["--version"], { encoding: "utf8" });
+  if (r.error || r.status !== 0) return null;
+  return r.stdout.trim() || "codex (version unknown)";
 }
 
 function runCmd(cmd, args, opts = {}) {
@@ -303,7 +304,7 @@ function runCmd(cmd, args, opts = {}) {
       } else {
         reject(
           new Error(
-            `${cmd} exit code ${code}\nstderr: ${stderr.slice(0, 2000)}`
+            `${cmd} exit code ${code}\nstdout: ${stdout.slice(0, 2000)}\nstderr: ${stderr.slice(0, 2000)}`
           )
         );
       }
@@ -313,11 +314,16 @@ function runCmd(cmd, args, opts = {}) {
 
 // ----- Agents -----
 
-const AGENTS = [
+const BASE_AGENTS = [
   {
     name: "app-scaffolder",
     description:
       "Finalise le scaffold (package.json, README, .gitignore) et initialise factory-journal.md.",
+  },
+  {
+    name: "brand-identity-designer",
+    description:
+      "Trouve le nom court et génère le logo minimal de l'app en respectant le design system.",
   },
   {
     name: "domain-modeler",
@@ -341,9 +347,58 @@ const AGENTS = [
   },
 ];
 
+const ADAPTATION_PRE_AGENTS = [
+  { name: "existing-project-auditor", description: "Audite le projet source en lecture seule et cartographie le portage." },
+  { name: "migration-planner", description: "Planifie le portage par lots sûrs." },
+  { name: "api-surface-mapper", description: "Mappe API/routes/services existants vers actions serveur typées." },
+];
+
+const ADAPTATION_POST_AGENTS = [
+  { name: "data-migration-agent", description: "Prépare imports/migrations de données si nécessaires." },
+  { name: "subprocess-adapter", description: "Adapte scripts/CLI/drivers existants en drivers Hono/Electron." },
+  { name: "ui-migration-agent", description: "Porte l'UI existante vers le shell TeamFactory." },
+];
+
+const AGENTIC_FINAL_AGENTS = [
+  { name: "mcp-parity-mapper", description: "Vérifie et complète la parité UI ↔ HTTP ↔ MCP." },
+  { name: "security-config-auditor", description: "Audite secrets, permissions, MCP, paths et packaging." },
+];
+
+function buildAgentPlan(brief) {
+  const isAdaptation = brief.PROJECT_MODE === "adapt-existing";
+  return [
+    ...(isAdaptation ? ADAPTATION_PRE_AGENTS : []),
+    ...BASE_AGENTS,
+    ...(isAdaptation ? ADAPTATION_POST_AGENTS : []),
+    ...(brief.AGENTIC_FIRST === false ? [] : AGENTIC_FINAL_AGENTS),
+  ];
+}
+
+function readAgentDescriptor(agentName, outputDir) {
+  const candidates = [
+    resolve(outputDir, "pi-electron-app-factory", "claude-agents", `${agentName}.md`),
+    resolve(outputDir, ".claude", "agents", `${agentName}.md`),
+    resolve(process.env.HOME || "", ".claude", "agents", `${agentName}.md`),
+  ];
+  for (const p of candidates) {
+    try {
+      if (existsSync(p)) return { path: p, content: readFileSync(p, "utf8") };
+    } catch {}
+  }
+  return { path: null, content: `# ${agentName}\n\nNo descriptor found. Execute the agent scope from the factory prompt.` };
+}
+
 function buildAgentPrompt(agentName, brief, outputDir) {
+  const descriptor = readAgentDescriptor(agentName, outputDir);
   const header = [
     `# Agent: ${agentName}`,
+    "",
+    `## Agent descriptor (${descriptor.path ?? "inline fallback"})`,
+    "",
+    "```markdown",
+    descriptor.content,
+    "```",
+    "",
     "",
     `## App context`,
     `- APP_NAME: ${brief.APP_NAME}`,
@@ -351,6 +406,9 @@ function buildAgentPrompt(agentName, brief, outputDir) {
     `- NEXT_PORT: ${brief.NEXT_PORT}`,
     `- DAEMON_PORT: ${brief.DAEMON_PORT}`,
     `- DATA_DIR_NAME: ${brief.DATA_DIR_NAME}`,
+    `- PROJECT_MODE: ${brief.PROJECT_MODE ?? "new"}`,
+    ...(brief.SOURCE_PROJECT_DIR ? [`- SOURCE_PROJECT_DIR: ${brief.SOURCE_PROJECT_DIR}`] : []),
+    `- AGENTIC_FIRST: ${brief.AGENTIC_FIRST !== false}`,
     `- ENTITY: ${brief.ENTITY} (plural: ${brief.ENTITY_PLURAL})`,
     `- SUBPROCESS: ${brief.SUBPROCESS}`,
     `- OUTPUT_DIR: ${outputDir}`,
@@ -376,9 +434,19 @@ function buildAgentPrompt(agentName, brief, outputDir) {
     header.push(brief.GIT_BINDING);
     header.push("");
   }
+  if (brief.ADAPTATION_BRIEF) {
+    header.push("## Adaptation brief");
+    header.push(brief.ADAPTATION_BRIEF);
+    header.push("");
+  }
   if (brief.EXTRA_ROUTES?.length) {
     header.push("## Extra routes");
     for (const r of brief.EXTRA_ROUTES) header.push(`- ${r}`);
+    header.push("");
+  }
+  if (brief.MCP_ACTIONS?.length) {
+    header.push("## MCP actions required");
+    for (const a of brief.MCP_ACTIONS) header.push(`- ${a}`);
     header.push("");
   }
   if (brief.SKILLS?.length) {
@@ -388,7 +456,7 @@ function buildAgentPrompt(agentName, brief, outputDir) {
   }
   header.push(
     "## Mission",
-    `Read your agent descriptor at ~/.claude/agents/${agentName}.md and execute its scope.`,
+    `Read the embedded agent descriptor above and execute its scope.`,
     `When done, append your report to ${outputDir}/factory-journal.md as "## ${agentName} <ISO timestamp>".`,
     `Leave TODOs in code as "// TODO(factory):" so the orchestrator can grep them.`,
     ""
@@ -412,33 +480,31 @@ async function spawnAgent(agent, brief, outputDir, opts) {
   if (opts.dryRun) {
     appendFileSync(
       journalPath,
-      `DRY-RUN: would spawn \`claude --agent ${agent.name}\` with prompt above.\n`,
+      `DRY-RUN: would spawn \`codex exec\` with prompt above.\n`,
       "utf8"
     );
     return { ok: true, skipped: "dry-run" };
   }
 
-  if (!opts.claudeAvailable) {
+  if (!opts.codexAvailable) {
     appendFileSync(
       journalPath,
-      `SKIPPED: claude CLI introuvable. Prompt préparé dans ${basename(promptPath)} ; relance manuellement quand claude est dispo.\n`,
+      `SKIPPED: codex CLI introuvable. Prompt préparé dans ${basename(promptPath)} ; relance manuellement quand codex est dispo.\n`,
       "utf8"
     );
-    return { ok: false, skipped: "no-claude-cli" };
+    return { ok: false, skipped: "no-codex-cli" };
   }
 
   try {
-    // R.3 fix : passer le prompt en positional arg (pas shell, donc safe).
-    // `claude [options] [command] [prompt]` accepte le prompt directement.
-    // --print pour mode non-interactif, --add-dir pour autoriser write dans outputDir,
-    // --dangerously-skip-permissions pour bypass les prompts interactifs.
     const result = await runCmd(
-      "claude",
+      "codex",
       [
-        "--agent", agent.name,
-        "--print",
+        "exec",
+        "--cd", outputDir,
         "--add-dir", outputDir,
-        "--dangerously-skip-permissions",
+        "--sandbox", "workspace-write",
+        "--skip-git-repo-check",
+        "--color", "never",
         prompt,
       ],
       {
@@ -478,6 +544,7 @@ async function cloneTemplate(templateDir, outputDir, opts) {
     ".next",
     "dist",
     "release",
+    "Projets",
     ".factory-meta.json",
     ".factory-error.json",
   ];
@@ -709,20 +776,20 @@ async function main() {
     for (const w of warnings) console.log(`  ! ${w}`);
   }
 
-  // 2. Check claude CLI
-  const claudeVersion = checkClaudeCli();
-  if (!claudeVersion && !opts.dryRun) {
+  // 2. Check Codex CLI (agent runner)
+  const codexVersion = checkCodexCli();
+  if (!codexVersion && !opts.dryRun) {
     console.log(
-      `\n[factory] WARNING: \`claude\` CLI introuvable dans le PATH.`
+      `\n[factory] WARNING: \`codex\` CLI introuvable dans le PATH.`
     );
     console.log(
-      `         Install: https://docs.anthropic.com/claude-code/quickstart`
+      `         Install/login: codex login`
     );
     console.log(
       `         Les agents seront skipped (prompts écrits dans .factory-prompt-*.md).`
     );
-  } else if (claudeVersion) {
-    console.log(`\n[factory] claude CLI: ${claudeVersion}`);
+  } else if (codexVersion) {
+    console.log(`\n[factory] codex CLI: ${codexVersion}`);
   }
 
   // 3. Check output-dir
@@ -807,9 +874,11 @@ async function main() {
     console.log("[factory] Step 3 — spawn agents");
     const agentOpts = {
       ...opts,
-      claudeAvailable: !!claudeVersion,
+      codexAvailable: !!codexVersion,
     };
-    for (const agent of AGENTS) {
+    const agentPlan = buildAgentPlan(brief);
+    report.agentPlan = agentPlan.map((a) => a.name);
+    for (const agent of agentPlan) {
       console.log(`  - ${agent.name}`);
       if (opts.dryRun) {
         // In dry-run we don't have an output dir to write to, skip prompt write

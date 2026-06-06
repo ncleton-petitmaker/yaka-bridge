@@ -50,6 +50,9 @@
   "exclude": [
     "node_modules",
     "data",
-    ".next"
+    ".next",
+    "Projets",
+    ".pi",
+    "pi-electron-app-factory"
   ]
 }

@@ -122,6 +122,7 @@ const DEFAULT_ALLOWED_TOOLS = ["Read", "Write", "Glob", "Skill"];
  * sur `./data` relatif au cwd si la variable n'est pas définie.
  */
 const DATA_DIR_ENV_VAR = "{{DATA_DIR_ENV_VAR}}";
+const MCP_SERVER_NAME = "{{APP_NAME_KEBAB}}";
 
 export function buildClaudeArgs(opts: BuildArgsOptions = {}): string[] {
   const args = [
@@ -162,18 +163,46 @@ export function buildClaudeArgs(opts: BuildArgsOptions = {}): string[] {
   //   - hook PreToolUse `restrict-write-paths.mjs`
   args.push("--permission-mode", opts.permissionMode ?? "bypassPermissions");
 
-  // MCP : activé automatiquement si une config a été générée à `<dataDir>/.claude/mcp.json`.
-  // opts.mcpConfig peut override le path. La détection du dataDir suit l'env
-  // var injectée par scaffolding (DATA_DIR_ENV_VAR) avec fallback `./data`.
+  // MCP agentic-first : activé automatiquement. Si `<dataDir>/.claude/mcp.json`
+  // n'existe pas encore, on le génère vers le serveur MCP local du template.
+  // opts.mcpConfig peut toujours override le path.
   const fsSync = require("node:fs") as typeof import("node:fs");
   const pathSync = require("node:path") as typeof import("node:path");
   const dataDir =
     process.env[DATA_DIR_ENV_VAR] ?? pathSync.resolve(process.cwd(), "data");
   const defaultMcpConfig = pathSync.resolve(dataDir, ".claude", "mcp.json");
-  const mcpConfig = opts.mcpConfig ?? (fsSync.existsSync(defaultMcpConfig) ? defaultMcpConfig : null);
-  if (mcpConfig) {
-    args.push("--mcp-config", mcpConfig);
+
+  function ensureDefaultMcpConfig() {
+    if (fsSync.existsSync(defaultMcpConfig)) return defaultMcpConfig;
+    const root = process.cwd();
+    const packagedMcp = pathSync.resolve(root, "dist", "mcp.cjs");
+    const devMcp = pathSync.resolve(root, "server", "mcp.ts");
+    const isPackaged = fsSync.existsSync(packagedMcp);
+    const config = {
+      mcpServers: {
+        [MCP_SERVER_NAME]: isPackaged
+          ? {
+              command: process.execPath,
+              args: [packagedMcp],
+              env: {
+                ELECTRON_RUN_AS_NODE: process.env.ELECTRON_RUN_AS_NODE ?? "1",
+                [DATA_DIR_ENV_VAR]: dataDir,
+              },
+            }
+          : {
+              command: "npx",
+              args: ["tsx", devMcp],
+              env: { [DATA_DIR_ENV_VAR]: dataDir },
+            },
+      },
+    };
+    fsSync.mkdirSync(pathSync.dirname(defaultMcpConfig), { recursive: true });
+    fsSync.writeFileSync(defaultMcpConfig, JSON.stringify(config, null, 2), "utf8");
+    return defaultMcpConfig;
   }
+
+  const mcpConfig = opts.mcpConfig ?? ensureDefaultMcpConfig();
+  args.push("--mcp-config", mcpConfig);
 
   return args;
 }

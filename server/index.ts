@@ -58,6 +58,8 @@ import {
   verifyAuditLogIntegrity,
   type AuditEventInput,
 } from "./audit-log.js";
+import { callAction, listActions, type ActionContext } from "./actions.js";
+import { getSupabasePublicConfig } from "./supabase.js";
 import { getBridgeStatusPayload } from "./bridge-status.js";
 import { registerBridgeControlPlaneRoutes } from "./bridge-control-plane.js";
 
@@ -80,10 +82,9 @@ const NEXT_PORT_DEFAULT = Number("{{NEXT_PORT}}") || 3100;
 const DAEMON_PORT_DEFAULT = Number("{{DAEMON_PORT}}") || 7456;
 
 function getActor(): { actor_id: string; actor_role: string } {
-  const cfg = loadAppConfig(DATA_DIR);
   return {
-    actor_id: cfg.currentUser ?? "anonyme",
-    actor_role: cfg.isAdmin ? "admin" : "user",
+    actor_id: "local-agent",
+    actor_role: "agent",
   };
 }
 
@@ -99,9 +100,8 @@ function audit(
 ): void {
   try {
     const cfg = loadAppConfig(DATA_DIR);
-    const actor_id = partial.actor_id ?? cfg.currentUser ?? "anonyme";
-    const actor_role =
-      partial.actor_role ?? (cfg.isAdmin ? "admin" : "user");
+    const actor_id = partial.actor_id ?? "local-agent";
+    const actor_role = partial.actor_role ?? "agent";
     appendAuditEvent(
       DATA_DIR,
       {
@@ -128,6 +128,18 @@ function buildAddDirs(dataDir: string, cfg: AppConfig): string[] {
   return Array.from(dirs);
 }
 
+function actionContext(c: { req: { header: (k: string) => string | undefined; raw: { signal: AbortSignal } } }): ActionContext {
+  const a = getActor();
+  return {
+    dataDir: DATA_DIR,
+    actorId: a.actor_id,
+    actorRole: a.actor_role,
+    appVersion: APP_VERSION,
+    clientIp: c.req.header("x-forwarded-for") ?? c.req.header("x-real-ip") ?? "local",
+    signal: c.req.raw.signal,
+  };
+}
+
 const app = new Hono();
 registerBridgeControlPlaneRoutes(app, DATA_DIR);
 
@@ -142,6 +154,8 @@ app.use(
     origin: [
       `http://localhost:${NEXT_PORT_DEFAULT}`,
       `http://127.0.0.1:${NEXT_PORT_DEFAULT}`,
+      ...(process.env["APP_ALLOWED_ORIGINS"]?.split(",").map((s) => s.trim()).filter(Boolean) ?? []),
+      ...(process.env["NEXT_PUBLIC_APP_ORIGIN"]?.split(",").map((s) => s.trim()).filter(Boolean) ?? []),
     ],
     credentials: true,
   })
@@ -158,6 +172,7 @@ app.get("/api/health", (c) =>
     claude: findClaudeBin(),
     dataDir: DATA_DIR,
     dataDirExists: existsSync(DATA_DIR),
+    database: getSupabasePublicConfig(DATA_DIR),
     pricing: getPricingMetadata(),
   })
 );
@@ -177,7 +192,11 @@ app.get("/api/agents", async (c) => {
 // ---------------------------------------------------------------------------
 app.get("/api/app-config", (c) => {
   const cfg = loadAppConfig(DATA_DIR);
-  return c.json({ config: cfg, availableModels: AVAILABLE_MODELS });
+  return c.json({
+    config: cfg,
+    availableModels: AVAILABLE_MODELS,
+    database: getSupabasePublicConfig(DATA_DIR),
+  });
 });
 
 app.put("/api/app-config", async (c) => {
@@ -190,6 +209,37 @@ app.put("/api/app-config", async (c) => {
     metadata: { keys: Object.keys(body) },
   });
   return c.json({ config: next });
+});
+
+// ---------------------------------------------------------------------------
+// /api/actions : registry canonique agentic-first (UI ↔ HTTP ↔ MCP)
+// ---------------------------------------------------------------------------
+app.get("/api/actions", (c) =>
+  c.json({
+    actions: listActions().map((a) => ({
+      id: a.id,
+      description: a.description,
+      inputSchema: a.inputJsonSchema,
+      audit: a.audit,
+    })),
+  })
+);
+
+app.post("/api/actions/:id", async (c) => {
+  const id = c.req.param("id");
+  let input: unknown = {};
+  try {
+    input = await c.req.json();
+  } catch {
+    input = {};
+  }
+  try {
+    const output = await callAction(id, actionContext(c), input);
+    return c.json({ ok: true, output });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return c.json({ ok: false, error: message }, 400);
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -344,17 +394,6 @@ app.put("/api/skills/:slug", async (c) => {
   if (typeof body.content !== "string") {
     return c.json({ error: "champ `content` manquant" }, 400);
   }
-  const cfg = loadAppConfig(DATA_DIR);
-  if (!cfg.isAdmin) {
-    audit(c, {
-      action: "skill.update",
-      resource_type: "skill",
-      resource_id: slug,
-      result: "denied",
-      reason: "non-admin",
-    });
-    return c.json({ error: "permission refusée (non-admin)" }, 403);
-  }
   try {
     const filename = slug.endsWith(".md") ? slug : `${slug}.skill.md`;
     const entry = writeGlobalSkill(DATA_DIR, filename, body.content);
@@ -420,15 +459,11 @@ app.get("/api/storage/conflicts", (c) => {
 });
 
 // ---------------------------------------------------------------------------
-// /api/onboarding-status : stub. Permet à un wizard d'onboarding de savoir
-// si l'app vient d'être installée. Par défaut on déclare l'onboarding terminé
-// dès qu'un currentUser est posé dans la config.
+// /api/onboarding-status : stub. Le template n'impose plus de wizard profil.
 // ---------------------------------------------------------------------------
 app.get("/api/onboarding-status", (c) => {
-  const cfg = loadAppConfig(DATA_DIR);
   return c.json({
-    done: Boolean(cfg.currentUser),
-    currentUser: cfg.currentUser ?? null,
+    done: true,
   });
 });
 

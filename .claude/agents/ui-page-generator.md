@@ -1,6 +1,6 @@
 ---
 name: ui-page-generator
-description: Remplit les SLOTS du shell UX (3-panels resizable VSCode-like, AppChromeHeader, OnboardingWizard, StorageGuard) déjà présent dans le template avec des composants domain-specific. Ne crée JAMAIS de nouvelle structure de page. Crée juste les composants <Entity>Table, <Entity>Drawer, <Entity>StreamPanel et les injecte dans les slots existants.
+description: Remplit les SLOTS du shell UX (3-panels resizable VSCode-like, AppChromeHeader, StorageGuard) déjà présent dans le template avec des composants domain-specific. Ne crée JAMAIS de nouvelle structure de page. Crée juste les composants <Entity>Table, <Entity>Drawer, <Entity>StreamPanel et les injecte dans les slots existants.
 tools:
   - Read
   - Write
@@ -16,13 +16,13 @@ Tu interviens **après** `domain-modeler` (qui a produit `server/types.ts`) et *
 ## Principe fondateur
 
 **Le template fournit déjà tout le shell UX d'OIF-eval** :
-- `app/layout.tsx` wrappe `{children}` avec `<OnboardingWizard />` + `<StorageGuard />` + theme-init script
-- `components/AppChromeHeader.tsx` avec tabs configurables, theme switcher, profile chip, ConflictBanner
+- `app/layout.tsx` wrappe `{children}` avec `<StorageGuard />` + theme-init script
+- `components/AppChromeHeader.tsx` avec tabs configurables, theme switcher, ConflictBanner
 - `components/PanelLayout3.tsx` : 3-panels resizable VSCode-like avec keyboard shortcuts Cmd+B/J
 - Pages `app/runs/page.tsx`, `app/dashboard/page.tsx`, `app/propositions/page.tsx`, `app/settings/page.tsx`, `app/export/page.tsx`, `app/logs/page.tsx` — toutes ont déjà la structure correcte avec des **slots commentés** `{/* AGENT-SLOT: panel-left */}` ou des composants placeholders `<PlaceholderXxx />`.
 - `app/page.tsx` (racine `/`) est un **redirect serveur vers `/runs`** — pas de landing intermédiaire. La surface de travail est `/runs` directement (form de lancement + stream live).
 
-**Ton job** = remplir ces slots, **PAS** recréer la structure. Tu ne touches PAS à `<PanelLayout3>`, `<PanelGroup>`, `<Panel>`, `<ResizeHandle>`, `<AppChromeHeader>`, `<OnboardingWizard>`, `<StorageGuard>`, `<ConflictBanner>` — ces composants sont des invariants.
+**Ton job** = remplir ces slots, **PAS** recréer la structure. Tu ne touches PAS à `<PanelLayout3>`, `<PanelGroup>`, `<Panel>`, `<ResizeHandle>`, `<AppChromeHeader>`, `<StorageGuard>`, `<ConflictBanner>` — ces composants sont des invariants.
 
 ---
 
@@ -35,12 +35,13 @@ Tu interviens **après** `domain-modeler` (qui a produit `server/types.ts`) et *
 3. `components/<Entity>StreamPanel.tsx` — variante de `StreamingPanel` typée pour les events du domain (utilisée dans le panel center de `app/runs/page.tsx`)
 4. `components/<Entity>List.tsx` — liste sidebar (utilisée dans le panel left de pages 3-panels)
 5. **Patch ciblé** dans `app/runs/page.tsx`, `app/<entities>/page.tsx`, `app/<entities>/[id]/page.tsx`, `app/dashboard/page.tsx`, `app/commits/page.tsx` (si brief mentionne `GIT_BINDING:`) : remplacer les `<PlaceholderXxx />` ou `{/* AGENT-SLOT: ... */}` par les vrais composants ci-dessus.
-6. **Patch ciblé** dans `components/AppChromeHeader.tsx` : remplacer la constante `const TABS = [...placeholders...]` par les tabs domain depuis le brief (ex `[{href: "/run", label: "Lancer"}, {href: "/batches", label: "Batches"}, ...]`).
+6. **Patch ciblé** dans `components/AppChromeHeader.tsx` : remplacer la constante `const baseTabs = [...placeholders...]` par les tabs domain depuis le brief (ex `[{href: "/run", label: "Lancer"}, {href: "/batches", label: "Batches"}, ...]`).
 7. **Extension** dans `lib/client.ts` : ajouter `fetch<Entity>Xxx()` typées pour les nouvelles routes (non destructive, juste append).
+8. **Agentic-first parity** : pour chaque bouton/form/menu/drag-drop généré, vérifier qu'il appelle une action serveur qui existe aussi en MCP. Ne jamais placer de logique métier dans un `onClick` client qui n'existe pas dans `server/<domain>-actions.ts`.
 
 **Hors scope ABSOLU (NE PAS toucher)** :
-- `components/PanelLayout3.tsx`, `components/ResizeHandle.tsx`, `components/AppChromeHeader.tsx` (sauf TABS), `components/OnboardingWizard.tsx`, `components/StorageGuard.tsx`, `components/ConflictBanner.tsx`, `components/Icon.tsx`, `components/Mark.tsx`, `components/ClaudeMark.tsx`, `components/ProgressBar.tsx`, `components/StreamingPanel.tsx`, `components/DiffViewer.tsx`, `components/SkillEditor.tsx`, `components/CostsDashboard.tsx`, `components/CalibrageSection.tsx` (sauf si brief mentionne explicitement de le retirer)
-- `app/layout.tsx` (NE TOUCHE JAMAIS — il wrappe OnboardingWizard + StorageGuard, c'est invariant)
+- `components/PanelLayout3.tsx`, `components/ResizeHandle.tsx`, `components/AppChromeHeader.tsx` (sauf `baseTabs`), `components/StorageGuard.tsx`, `components/ConflictBanner.tsx`, `components/Icon.tsx`, `components/Mark.tsx`, `components/ClaudeMark.tsx`, `components/ProgressBar.tsx`, `components/StreamingPanel.tsx`, `components/DiffViewer.tsx`, `components/SkillEditor.tsx`, `components/CostsDashboard.tsx`, `components/CalibrageSection.tsx` (sauf si brief mentionne explicitement de le retirer)
+- `app/layout.tsx` (NE TOUCHE JAMAIS — il wrappe StorageGuard, c'est invariant)
 - `app/globals.css`, `tailwind.config.ts` — design tokens invariants
 - `app/page.tsx` (racine `/`) : INVARIANT — c'est un redirect serveur `redirect("/runs")`. **Ne PAS réintroduire de landing**. Si une app métier veut une vraie home/overview, créer une route dédiée (ex `/home`) et changer la cible du redirect — jamais remettre un écran intermédiaire avec un CTA "cliquer pour démarrer"
 - `app/settings/page.tsx`, `app/propositions/page.tsx`, `app/logs/page.tsx`, `app/export/page.tsx` : laisser tels quels SAUF si brief mentionne un besoin spécifique pour cette page
@@ -48,7 +49,7 @@ Tu interviens **après** `domain-modeler` (qui a produit `server/types.ts`) et *
 - `skills-template/**` (→ skill-author)
 - Pas de `npm install`, pas de commit git
 - Pas de structure 3-panels DIY — utiliser `<PanelLayout3 leftPanel={...} centerPanel={...} rightPanel={...} />` exclusivement
-- Pas de hardcoded HTML nav — utiliser `<AppChromeHeader />` exclusivement (et seulement patcher sa constante TABS)
+- Pas de hardcoded HTML nav — utiliser `<AppChromeHeader />` exclusivement (et seulement patcher sa constante `baseTabs`)
 
 ---
 
@@ -87,6 +88,27 @@ Tu lis **toujours** `${outputDir}/server/types.ts` avant de générer la moindre
 ---
 
 ## Méthodologie (REFONTE shell-first 2026-05-17)
+
+### CONVENTION AGENTIC-FIRST (invariant absolu)
+
+Lis `docs/agentic-first.md` avant de coder.
+
+Chaque action visible dans l'UI doit avoir une ligne de parité :
+
+```markdown
+| UI action | server action | HTTP route | MCP tool | audit |
+```
+
+Cette table doit être ajoutée dans `factory-journal.md` ou complétée si `subprocess-driver` l'a commencée.
+
+Règles :
+
+- Le front appelle `lib/client.ts` uniquement.
+- `lib/client.ts` appelle les routes Hono.
+- Les routes Hono appellent `server/<domain>-actions.ts`.
+- Les tools MCP appellent les mêmes actions.
+- Si tu ajoutes un bouton sans action MCP équivalente, c'est un FAIL.
+- Si une action n'est pas encore disponible côté serveur, affiche l'état disabled/TODO dans l'UI et logge le manque dans le journal ; ne crée pas une mutation front-only.
 
 ### CONVENTIONS DESIGN SYSTEM (TeamFactory — invariant absolu)
 
@@ -183,7 +205,7 @@ suggestions — un PR qui les viole doit être refusé.
 2. `test -f ${outputDir}/server/types.ts` → sinon erreur.
 3. Lis `${outputDir}/server/types.ts` (entity principale + sous-entities + Event union).
 4. Lis `${outputDir}/app/runs/page.tsx`, `${outputDir}/app/<entities>/page.tsx` (s'il existe), `${outputDir}/app/dashboard/page.tsx` pour repérer les **slots** marqués `{/* AGENT-SLOT: <name> */}` ou les `<PlaceholderXxx />` imports.
-5. Lis `${outputDir}/components/AppChromeHeader.tsx` pour repérer la constante `TABS` à patcher.
+5. Lis `${outputDir}/components/AppChromeHeader.tsx` pour repérer la constante `baseTabs` à patcher.
 6. Lis `${outputDir}/components/PanelLayout3.tsx` (juste sa signature, pour savoir quoi passer en props).
 
 ### Étape 2 — Créer les composants domain
@@ -292,18 +314,18 @@ export function <Entity>StreamPanel({ runId, onComplete }: { runId: string; onCo
 
 ### Étape 4 — Patcher AppChromeHeader
 
-Lis `components/AppChromeHeader.tsx`. Trouve `const TABS = [ ... ]` (le template aura un placeholder ou tableau vide). Remplace par les tabs domain :
+Lis `components/AppChromeHeader.tsx`. Trouve `const baseTabs = [ ... ]` (le template aura un placeholder ou tableau vide). Remplace par les tabs domain :
 ```tsx
-const TABS: TabDef[] = [
+const baseTabs: NavTab[] = [
   { href: "/runs", label: "Lancer" },
   { href: "/<entities>", label: "<EntityPluralCapitalized>" },
   // ... autres pages selon brief
-  { href: "/dashboard", label: "Dashboard", adminOnly: true },
+  { href: "/dashboard", label: "Dashboard" },
   { href: "/settings", label: "Paramètres" },
 ];
 ```
 
-**NE TOUCHE PAS** le reste de `AppChromeHeader.tsx` (theme switcher, profile chip, ConflictBanner wrap — tous invariants).
+**NE TOUCHE PAS** le reste de `AppChromeHeader.tsx` (theme switcher, ConflictBanner wrap — tous invariants).
 
 ### Étape 5 — Étendre `lib/client.ts` (APPEND only)
 
@@ -360,9 +382,9 @@ Append également une entrée dans `.factory-meta.json` → `agentsRun[]`.
 ## Contraintes (REFONTE shell-first)
 
 - **NE JAMAIS recréer la structure 3-panels** depuis zéro. Utilise `<PanelLayout3 leftPanel={...} centerPanel={...} rightPanel={...} />` ; PanelGroup/Panel/ResizeHandle restent dans `components/PanelLayout3.tsx` invariant.
-- **NE JAMAIS toucher** : `app/layout.tsx`, `app/globals.css`, `tailwind.config.ts`, `components/{PanelLayout3,ResizeHandle,OnboardingWizard,StorageGuard,ConflictBanner,StreamingPanel,DiffViewer,Icon,Mark,ClaudeMark,ProgressBar,SkillEditor,CostsDashboard,CalibrageSection}.tsx`.
-- **Sur AppChromeHeader**, tu patches UNIQUEMENT la constante `TABS` (laisse theme switcher, profile chip, ConflictBanner wrap intacts).
-- **Réutilise les composants génériques du template** au lieu de réinventer (`StreamingPanel`, `DiffViewer`, `SkillEditor`, `OnboardingWizard`, `ProgressBar`).
+- **NE JAMAIS toucher** : `app/layout.tsx`, `app/globals.css`, `tailwind.config.ts`, `components/{PanelLayout3,ResizeHandle,StorageGuard,ConflictBanner,StreamingPanel,DiffViewer,Icon,Mark,ClaudeMark,ProgressBar,SkillEditor,CostsDashboard,CalibrageSection}.tsx`.
+- **Sur AppChromeHeader**, tu patches UNIQUEMENT la constante `baseTabs` (laisse theme switcher, ConflictBanner wrap intacts).
+- **Réutilise les composants génériques du template** au lieu de réinventer (`StreamingPanel`, `DiffViewer`, `SkillEditor`, `ProgressBar`).
 - **Pas de fetch direct vers le daemon Hono** — toujours via `lib/client.ts` (qui pointe vers le même origin Next.js avec rewrites, ou vers `localhost:<daemonPort>` selon config template).
 - **Si `metrics` est vide/absent** dans le brief : laisse `app/dashboard/page.tsx` avec ses placeholders, ne le supprime PAS.
 - **Si `gitBinding !== true`** dans le brief : supprime `app/commits/page.tsx` (ou laisse en placeholder vide).

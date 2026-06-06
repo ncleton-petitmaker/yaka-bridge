@@ -96,7 +96,7 @@ export interface RunRecord {
 export interface ChatRequest {
   /** Prompt à envoyer à Claude Code via stdin */
   message: string;
-  /** Profil utilisateur connecté (pour charger ses skills perso) */
+  /** Profil optionnel fourni par un appelant externe pour charger ses skills perso */
   user?: string;
   /** Modèle à utiliser, par défaut "sonnet" */
   model?: string;

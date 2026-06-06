@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
+import { apiFetch } from "@/lib/api-client";
 
 interface RequiredDirSpec {
   key: string;
@@ -8,7 +9,6 @@ interface RequiredDirSpec {
 }
 
 interface AppConfigShape {
-  currentUser?: string;
   requiredDirs?: RequiredDirSpec[];
   [k: string]: unknown;
 }
@@ -47,7 +47,7 @@ export function StorageGuard() {
 
     function tryFetch() {
       attempts++;
-      fetch("/api/app-config")
+      apiFetch("/api/app-config")
         .then((r) => {
           if (!r.ok) throw new Error(`HTTP ${r.status}`);
           return r.json();
@@ -55,11 +55,6 @@ export function StorageGuard() {
         .then((j: { config?: AppConfigShape }) => {
           if (cancelled) return;
           const cfg = j.config ?? {};
-          // Si pas encore d'utilisateur, c'est l'OnboardingWizard qui gère
-          if (!cfg.currentUser) {
-            setChecked(true);
-            return;
-          }
           const miss = computeMissing(cfg);
           setMissing(miss.length > 0 ? miss : null);
           setChecked(true);
@@ -79,11 +74,10 @@ export function StorageGuard() {
   // Recheck après navigation (utile quand l'utilisateur revient des paramètres)
   useEffect(() => {
     function onFocus() {
-      fetch("/api/app-config")
+      apiFetch("/api/app-config")
         .then((r) => r.json())
         .then((j: { config?: AppConfigShape }) => {
           const cfg = j.config ?? {};
-          if (!cfg.currentUser) return;
           const miss = computeMissing(cfg);
           setMissing(miss.length > 0 ? miss : null);
         })
