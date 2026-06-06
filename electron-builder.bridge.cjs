@@ -4,7 +4,7 @@ module.exports = {
   directories: {
     output: "release-bridge",
   },
-  asar: false,
+  asar: true,
   files: [
     "dist/bridge/**/*",
     "data-template/**/*",
@@ -23,6 +23,10 @@ module.exports = {
   mac: {
     category: "public.app-category.productivity",
     icon: "public/icon.icns",
+    hardenedRuntime: true,
+    gatekeeperAssess: false,
+    entitlements: "build/entitlements.mac.plist",
+    entitlementsInherit: "build/entitlements.mac.plist",
     target: ["dmg"],
   },
   win: {

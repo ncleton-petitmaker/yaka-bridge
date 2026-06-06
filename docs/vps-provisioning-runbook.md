@@ -126,7 +126,9 @@ values ('bridge-installers', 'bridge-installers', true, 268435456)
 on conflict (id) do update set public = true, file_size_limit = 268435456;
 ```
 
-Upload stable object names after packaging Bridge:
+Upload stable object names after packaging Bridge. For production, macOS builds
+must be signed with a Developer ID certificate and notarized before upload; see
+[`bridge-release-signing.md`](bridge-release-signing.md).
 
 ```text
 Bridge-Setup.exe

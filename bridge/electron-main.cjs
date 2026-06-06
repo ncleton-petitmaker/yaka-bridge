@@ -213,6 +213,7 @@ function stateFromConfig(cfg) {
     dataDir: cfg.dataDir,
     controlPlaneConfigured: Boolean(cfg.controlPlaneBaseUrl && (cfg.bridgeToken || cfg.session?.accessToken)),
     authenticated: Boolean(cfg.session?.accessToken || cfg.bridgeToken),
+    controlPlaneBaseUrl: cfg.controlPlaneBaseUrl || cfg.cloudBaseUrl || process.env.BRIDGE_DEFAULT_CONTROL_PLANE_URL || "",
     demoMode: cfg.demoMode === true,
     services: cfg.services.map((service) => ({
       serviceId: service.serviceId,
@@ -258,6 +259,8 @@ function defaultConfig() {
     installId: stableInstallId(),
     deviceId: stableInstallId(),
     label: os.hostname(),
+    controlPlaneBaseUrl: process.env.BRIDGE_DEFAULT_CONTROL_PLANE_URL || undefined,
+    cloudBaseUrl: process.env.BRIDGE_DEFAULT_CONTROL_PLANE_URL || undefined,
     demoMode: process.env.BRIDGE_DEMO_MODE === "1",
     services: [],
     erpBus: {
@@ -283,8 +286,8 @@ function normalizeConfig(cfg) {
   return {
     ...cfg,
     dataDir,
-    cloudBaseUrl: cfg.controlPlaneBaseUrl || cfg.cloudBaseUrl,
-    controlPlaneBaseUrl: cfg.controlPlaneBaseUrl || cfg.cloudBaseUrl,
+    cloudBaseUrl: cfg.controlPlaneBaseUrl || cfg.cloudBaseUrl || process.env.BRIDGE_DEFAULT_CONTROL_PLANE_URL,
+    controlPlaneBaseUrl: cfg.controlPlaneBaseUrl || cfg.cloudBaseUrl || process.env.BRIDGE_DEFAULT_CONTROL_PLANE_URL,
     installId: cfg.installId || stableInstallId(),
     deviceId: cfg.deviceId || cfg.installId || stableInstallId(),
     label: cfg.label || os.hostname(),
@@ -679,6 +682,8 @@ function statusHtml() {
     section { display: none; padding: 18px 22px 22px; overflow: auto; }
     section.active { display: block; }
     .services { display: grid; gap: 8px; }
+    .login-hero { min-height: 320px; display: grid; align-content: center; justify-content: center; }
+    .login-hero .login-form { width: min(460px, calc(100vw - 64px)); }
     .service-row { display: grid; grid-template-columns: 18px 1fr auto; gap: 12px; align-items: center; border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 12px; min-height: 72px; position: relative; overflow: hidden; }
     .service-row.active::before, .service-row.reconnecting::before { content:""; position:absolute; left:-30%; right:-30%; bottom:0; height:2px; background: linear-gradient(90deg, transparent, var(--blue), transparent); animation: move 1.15s linear infinite; }
     @keyframes move { from { transform: translateX(-30%); } to { transform: translateX(30%); } }
@@ -732,10 +737,13 @@ function statusHtml() {
     function esc(value) { return String(value == null ? "" : value).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c])); }
     function render(state) {
       current = state;
+      const draft = readLoginDraft();
       document.getElementById("subtitle").textContent = (state.account?.email || "Compte Bridge non connecté") + " · " + state.services.length + " service(s)";
       document.getElementById("error").textContent = state.bridgeError || state.lastError || "";
       const services = document.getElementById("services");
-      services.innerHTML = state.services.length ? state.services.map(service => {
+      services.innerHTML = !state.authenticated
+        ? '<div class="login-hero">' + loginForm("main", state, draft) + '</div>'
+        : state.services.length ? state.services.map(service => {
         const status = service.status || "disconnected";
         const scopes = (service.scopes || []).slice(0, 3).join(" · ");
         const actionLabel = status === "active" || status === "reconnecting"
@@ -751,41 +759,20 @@ function statusHtml() {
           '<div class="meta">' + esc(scopes || service.baseUrl) + '</div></div>' +
           '<div class="service-actions"><button data-open="' + esc(service.serviceId) + '" class="primary">' + esc(actionLabel) + '</button></div>' +
         '</article>';
-      }).join("") : '<p class="empty">' + (state.authenticated ? 'Aucun service autorisé.' : 'Connecte ton compte Bridge pour charger les services autorisés.') + '</p>';
+      }).join("") : '<p class="empty">Aucun service autorisé.</p>';
       services.querySelectorAll("[data-open]").forEach(btn => btn.addEventListener("click", () => window.bridge.openService(btn.dataset.open)));
 
       const account = state.account || {};
       document.getElementById("login-panel").innerHTML = state.authenticated ? "" :
-        '<form id="login-form" class="panel login-form">' +
-          '<h2>Compte Bridge</h2>' +
-          '<label>URL Bridge entreprise<input name="controlPlaneBaseUrl" type="url" placeholder="https://rossinienergy.yaka-bridge.com" required /></label>' +
-          '<label>Email<input name="email" type="email" autocomplete="username" required /></label>' +
-          '<label>Mot de passe<input name="password" type="password" autocomplete="current-password" required /></label>' +
-          '<details><summary>Configuration avancée</summary>' +
-            '<label>URL Supabase<input name="supabaseUrl" type="url" placeholder="https://api.customer.example" /></label>' +
-            '<label>Clé publique Supabase<input name="supabaseAnonKey" type="password" /></label>' +
-          '</details>' +
-          '<button class="primary" type="submit">Se connecter</button>' +
-          '<p class="form-message" id="login-message"></p>' +
-        '</form>';
-      document.getElementById("login-form")?.addEventListener("submit", async (event) => {
-        event.preventDefault();
-        const form = event.currentTarget;
-        const button = form.querySelector("button");
-        const message = document.getElementById("login-message");
-        if (button) button.disabled = true;
-        if (message) message.textContent = "Connexion...";
-        const values = Object.fromEntries(new FormData(form).entries());
-        const res = await window.bridge.signIn(values);
-        if (!res?.ok && message) message.textContent = res?.error || "Connexion impossible.";
-        if (button) button.disabled = false;
-      });
+        loginForm("identity", state, draft);
+      attachLoginForms();
+      restoreLoginFocus(draft);
       document.getElementById("identity-grid").innerHTML =
         panel("Compte", [
           ["Email", account.email || "Non connecté"],
-          ["Organisation", account.organizationName || state.organizationId || "Démo"],
-          ["Rôle", account.role || "local"],
-          ["Session", state.controlPlaneConfigured ? "persistante" : "mode démo"]
+          ["Organisation", account.organizationName || state.organizationId || "Aucune"],
+          ["Rôle", account.role || "-"],
+          ["Session", state.authenticated ? "persistante" : "non connectée"]
         ]) +
         panel("Appareil", [
           ["Nom", state.label || ""],
@@ -799,13 +786,70 @@ function statusHtml() {
           ["Jobs actifs", String(state.activeJobs || 0)],
           ["Protocole", String(state.protocolVersion || 2)]
         ]) +
-        '<div class="panel"><h2>Session</h2><button id="signout">Déconnecter</button></div>';
+        (state.authenticated ? '<div class="panel"><h2>Session</h2><button id="signout">Déconnecter</button></div>' : "");
       document.getElementById("signout")?.addEventListener("click", () => window.bridge.signOut());
 
       const activity = state.activity || [];
       document.getElementById("activity-list").innerHTML = activity.length ? activity.map(item =>
         '<div class="activity-row"><span>' + new Date(item.ts).toLocaleTimeString("fr-FR") + '</span><strong>' + esc(item.message) + '</strong></div>'
       ).join("") : '<p class="empty">Aucune activité récente.</p>';
+    }
+    function readLoginDraft() {
+      const form = document.querySelector(".login-form");
+      if (!form) return {};
+      const values = Object.fromEntries(new FormData(form).entries());
+      return {
+        controlPlaneBaseUrl: values.controlPlaneBaseUrl || "",
+        email: values.email || "",
+        password: values.password || "",
+        supabaseUrl: values.supabaseUrl || "",
+        supabaseAnonKey: values.supabaseAnonKey || "",
+        activeName: form.contains(document.activeElement) ? document.activeElement?.getAttribute("name") : "",
+        selectionStart: form.contains(document.activeElement) ? document.activeElement?.selectionStart : null,
+        selectionEnd: form.contains(document.activeElement) ? document.activeElement?.selectionEnd : null,
+      };
+    }
+    function restoreLoginFocus(draft) {
+      if (!draft.activeName) return;
+      const input = document.querySelector('.login-form [name="' + draft.activeName + '"]');
+      if (!input) return;
+      input.focus();
+      if (draft.selectionStart != null && draft.selectionEnd != null && typeof input.setSelectionRange === "function") {
+        try { input.setSelectionRange(draft.selectionStart, draft.selectionEnd); } catch {}
+      }
+    }
+    function loginForm(suffix, state, draft = {}) {
+      const url = draft.controlPlaneBaseUrl || state.controlPlaneBaseUrl || "";
+      return '<form id="login-form-' + esc(suffix) + '" class="panel login-form">' +
+        '<h2>Compte Bridge</h2>' +
+        '<label>URL Bridge entreprise<input name="controlPlaneBaseUrl" type="url" value="' + esc(url) + '" placeholder="https://rossinienergy.yaka-bridge.com" required /></label>' +
+        '<label>Email<input name="email" type="email" value="' + esc(draft.email || "") + '" autocomplete="username" required /></label>' +
+        '<label>Mot de passe<input name="password" type="password" value="' + esc(draft.password || "") + '" autocomplete="current-password" required /></label>' +
+        '<details><summary>Configuration avancée</summary>' +
+          '<label>URL Supabase<input name="supabaseUrl" type="url" value="' + esc(draft.supabaseUrl || "") + '" placeholder="https://api.customer.example" /></label>' +
+          '<label>Clé publique Supabase<input name="supabaseAnonKey" type="password" value="' + esc(draft.supabaseAnonKey || "") + '" /></label>' +
+        '</details>' +
+        '<button class="primary" type="submit">Se connecter</button>' +
+        '<p class="form-message" id="login-message-' + esc(suffix) + '"></p>' +
+      '</form>';
+    }
+    function attachLoginForms() {
+      document.querySelectorAll(".login-form").forEach((form) => {
+        if (form.dataset.bound === "1") return;
+        form.dataset.bound = "1";
+        form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const button = form.querySelector("button");
+        const message = form.querySelector(".form-message");
+        if (button) button.disabled = true;
+        if (message) message.textContent = "Connexion...";
+        const values = Object.fromEntries(new FormData(form).entries());
+        const res = await window.bridge.signIn(values);
+        if (!res?.ok && message) message.textContent = res?.error || "Connexion impossible.";
+        if (button) button.disabled = false;
+      });
+      });
     }
     function panel(title, rows) {
       return '<div class="panel"><h2>' + esc(title) + '</h2><div class="kv">' + rows.map(([k,v]) => '<span>' + esc(k) + '</span><strong>' + esc(v) + '</strong>').join("") + '</div></div>';
