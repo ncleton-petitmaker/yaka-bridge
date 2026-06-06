@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, nativeImage, shell, Tray, ipcMain } = require("electron");
+const { app, BrowserWindow, Menu, nativeImage, shell, Tray, ipcMain, safeStorage } = require("electron");
 const { createServer } = require("node:http");
 const path = require("node:path");
 const fs = require("node:fs");
@@ -239,7 +239,7 @@ function loadConfig() {
   const fallback = defaultConfig();
   try {
     if (!fs.existsSync(CONFIG_PATH)) return fallback;
-    const parsed = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
+    const parsed = hydrateSecureBridgeSecrets(JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8")));
     return normalizeConfig({ ...fallback, ...parsed });
   } catch {
     return fallback;
@@ -249,8 +249,66 @@ function loadConfig() {
 function saveConfig(next) {
   const cfg = normalizeConfig(next);
   fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
-  fs.writeFileSync(CONFIG_PATH, `${JSON.stringify(cfg, null, 2)}\n`, "utf8");
+  fs.writeFileSync(CONFIG_PATH, `${JSON.stringify(prepareBridgeConfigForDisk(cfg), null, 2)}\n`, "utf8");
   return cfg;
+}
+
+function hydrateSecureBridgeSecrets(input) {
+  const secure = input?._secureSecrets;
+  if (!secure || secure.version !== 1 || secure.provider !== "electron-safe-storage" || !secure.ciphertext) return input;
+  if (!safeStorage?.isEncryptionAvailable()) return input;
+  try {
+    const payload = JSON.parse(safeStorage.decryptString(Buffer.from(secure.ciphertext, "base64")));
+    return {
+      ...input,
+      bridgeToken: payload.bridgeToken || input.bridgeToken,
+      session: input.session || payload.session
+        ? {
+            provider: input.session?.provider || "supabase-pkce",
+            ...(input.session || {}),
+            ...(payload.session || {}),
+            persisted: input.session?.persisted ?? true,
+          }
+        : undefined,
+    };
+  } catch {
+    return input;
+  }
+}
+
+function prepareBridgeConfigForDisk(cfg) {
+  const payload = {
+    bridgeToken: cfg.bridgeToken,
+    session: {
+      accessToken: cfg.session?.accessToken,
+      refreshToken: cfg.session?.refreshToken,
+    },
+  };
+  const hasSecrets = Boolean(payload.bridgeToken || payload.session.accessToken || payload.session.refreshToken);
+  const base = { ...cfg };
+  delete base._secureSecrets;
+  if (!hasSecrets || !safeStorage?.isEncryptionAvailable()) {
+    return Object.fromEntries(Object.entries(base).filter(([, value]) => value !== undefined));
+  }
+
+  const persisted = {
+    ...base,
+    bridgeToken: undefined,
+    session: cfg.session
+      ? {
+          ...cfg.session,
+          accessToken: undefined,
+          refreshToken: undefined,
+          persisted: true,
+        }
+      : undefined,
+    _secureSecrets: {
+      version: 1,
+      provider: "electron-safe-storage",
+      ciphertext: safeStorage.encryptString(JSON.stringify(payload)).toString("base64"),
+    },
+  };
+  return Object.fromEntries(Object.entries(persisted).filter(([, value]) => value !== undefined));
 }
 
 function defaultConfig() {
@@ -527,7 +585,8 @@ async function openService(serviceId) {
   localStatuses[serviceId] = "reconnecting";
   refreshStatusWindow();
 
-  let target = service.baseUrl;
+  let target = cleanExternalUrl(service.baseUrl);
+  if (!target) return { ok: false, error: "service-url-invalid" };
   try {
     await refreshSupabaseSessionIfNeeded(cfg);
     if (cfg.controlPlaneBaseUrl && (cfg.bridgeToken || cfg.session?.accessToken)) {
@@ -535,7 +594,11 @@ async function openService(serviceId) {
         serviceId: service.serviceId,
         serviceInstanceId: service.serviceInstanceId,
       });
-      if (ticket.launchUrl) target = ticket.launchUrl;
+      if (ticket.launchUrl) {
+        const launchUrl = cleanExternalUrl(ticket.launchUrl);
+        if (!launchUrl) throw new Error("Launch ticket URL invalide.");
+        target = launchUrl;
+      }
     }
     await shell.openExternal(target);
     localStatuses[serviceId] = "connected";
@@ -882,7 +945,8 @@ function cleanExternalUrl(value) {
   if (!raw) return null;
   try {
     const url = new URL(raw);
-    if (url.protocol !== "https:" && url.hostname !== "localhost" && url.hostname !== "127.0.0.1") return null;
+    const localHttp = url.protocol === "http:" && (url.hostname === "localhost" || url.hostname === "127.0.0.1");
+    if (url.protocol !== "https:" && !localHttp) return null;
     return url.toString().replace(/\/+$/, "");
   } catch {
     return null;

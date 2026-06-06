@@ -7,11 +7,28 @@ import {
   type BridgeAllowedRoot,
   type BridgeConfig,
   type BridgeErpBusConfig,
+  type BridgeSessionInfo,
   type BridgeServiceInstance,
 } from "./types.js";
 
 const DEFAULT_CONFIG_DIR = ".bridge";
 const DEFAULT_DATA_DIR = resolve(homedir(), BRIDGE_PRODUCT_NAME, "data");
+const SECURE_SECRETS_KEY = "_secureSecrets";
+
+interface SecureBridgeSecrets {
+  version: 1;
+  provider: "electron-safe-storage";
+  ciphertext: string;
+}
+
+interface BridgeSecretPayload {
+  bridgeToken?: string;
+  session?: Pick<BridgeSessionInfo, "accessToken" | "refreshToken">;
+}
+
+type PersistedBridgeConfig = Partial<BridgeConfig> & {
+  [SECURE_SECRETS_KEY]?: SecureBridgeSecrets;
+};
 
 export function defaultBridgeConfigPath(): string {
   return resolve(homedir(), DEFAULT_CONFIG_DIR, "config.json");
@@ -30,7 +47,7 @@ export function loadBridgeConfig(path = resolveConfigPath()): BridgeConfig {
   if (!existsSync(path)) {
     return normalizeBridgeConfig({});
   }
-  const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<BridgeConfig>;
+  const parsed = hydrateSecureBridgeSecrets(JSON.parse(readFileSync(path, "utf8")) as PersistedBridgeConfig);
   const cfg = normalizeBridgeConfig(parsed);
   validateBridgeConfig(cfg);
   return cfg;
@@ -38,7 +55,7 @@ export function loadBridgeConfig(path = resolveConfigPath()): BridgeConfig {
 
 export function saveBridgeConfig(cfg: BridgeConfig, path = resolveConfigPath()): void {
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(normalizeBridgeConfig(cfg), null, 2)}\n`, "utf8");
+  writeFileSync(path, `${JSON.stringify(prepareBridgeConfigForDisk(normalizeBridgeConfig(cfg)), null, 2)}\n`, "utf8");
 }
 
 export function normalizeBridgeConfig(input: Partial<BridgeConfig>): BridgeConfig {
@@ -155,6 +172,104 @@ function normalizeAllowedRoots(roots: BridgeAllowedRoot[], basePath: string): Br
     writable: root.writable !== false,
     scopes: normalizeStringList(root.scopes),
   }));
+}
+
+function hydrateSecureBridgeSecrets(input: PersistedBridgeConfig): Partial<BridgeConfig> {
+  const secure = input[SECURE_SECRETS_KEY];
+  if (!secure) return input;
+
+  const payload = decryptBridgeSecrets(secure);
+  if (!payload) return input;
+
+  return {
+    ...input,
+    bridgeToken: payload.bridgeToken ?? input.bridgeToken,
+    session: input.session || payload.session
+      ? {
+          provider: input.session?.provider ?? "supabase-pkce",
+          ...input.session,
+          ...payload.session,
+          persisted: input.session?.persisted ?? true,
+        }
+      : undefined,
+  };
+}
+
+function prepareBridgeConfigForDisk(cfg: BridgeConfig): PersistedBridgeConfig {
+  const base = stripSecureSecrets(cfg as PersistedBridgeConfig);
+  const payload: BridgeSecretPayload = {
+    bridgeToken: cfg.bridgeToken,
+    session: {
+      accessToken: cfg.session?.accessToken,
+      refreshToken: cfg.session?.refreshToken,
+    },
+  };
+  const encrypted = encryptBridgeSecrets(payload);
+  if (!encrypted) return base;
+
+  const persisted: PersistedBridgeConfig = {
+    ...base,
+    bridgeToken: undefined,
+    session: cfg.session
+      ? {
+          provider: cfg.session.provider,
+          expiresAt: cfg.session.expiresAt,
+          persisted: true,
+          lastRefreshAt: cfg.session.lastRefreshAt,
+        }
+      : undefined,
+    [SECURE_SECRETS_KEY]: encrypted,
+  };
+  return stripUndefined(persisted);
+}
+
+function encryptBridgeSecrets(payload: BridgeSecretPayload): SecureBridgeSecrets | null {
+  if (!payload.bridgeToken && !payload.session?.accessToken && !payload.session?.refreshToken) return null;
+  const safeStorage = electronSafeStorage();
+  if (!safeStorage?.isEncryptionAvailable()) return null;
+  const ciphertext = safeStorage.encryptString(JSON.stringify(payload)).toString("base64");
+  return { version: 1, provider: "electron-safe-storage", ciphertext };
+}
+
+function decryptBridgeSecrets(secure: SecureBridgeSecrets): BridgeSecretPayload | null {
+  if (secure.version !== 1 || secure.provider !== "electron-safe-storage" || !secure.ciphertext) return null;
+  const safeStorage = electronSafeStorage();
+  if (!safeStorage?.isEncryptionAvailable()) return null;
+  try {
+    return JSON.parse(safeStorage.decryptString(Buffer.from(secure.ciphertext, "base64"))) as BridgeSecretPayload;
+  } catch {
+    return null;
+  }
+}
+
+function electronSafeStorage(): {
+  isEncryptionAvailable(): boolean;
+  encryptString(value: string): Buffer;
+  decryptString(value: Buffer): string;
+} | null {
+  try {
+    if (!process.versions.electron) return null;
+    const electron = require("electron") as {
+      safeStorage?: {
+        isEncryptionAvailable(): boolean;
+        encryptString(value: string): Buffer;
+        decryptString(value: Buffer): string;
+      };
+    };
+    return electron.safeStorage ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function stripUndefined<T extends Record<string, unknown>>(input: T): T {
+  return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined)) as T;
+}
+
+function stripSecureSecrets(input: PersistedBridgeConfig): PersistedBridgeConfig {
+  const copy = { ...input };
+  delete copy[SECURE_SECRETS_KEY];
+  return stripUndefined(copy);
 }
 
 function normalizeErpBus(input: BridgeErpBusConfig | undefined, services: BridgeServiceInstance[]): BridgeErpBusConfig {
