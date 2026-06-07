@@ -238,7 +238,7 @@ class BridgeRuntime implements BridgeRuntimeHandle {
         images: assets.images,
         outputSchema: assets.outputSchema,
         sandbox: normalizeJobSandbox(job, service),
-        includeMcp: payload.includeMcp ?? false,
+        includeMcp: payload.includeMcp ?? Boolean(payload.mcpProxyBaseUrl || service.baseUrl),
         mcpProxyBaseUrl: payload.mcpProxyBaseUrl ?? service.baseUrl,
         mcpProxyAccessToken: payload.mcpProxyAccessToken ?? this.cfg.bridgeToken ?? this.cfg.session?.accessToken,
         ephemeral: payload.ephemeral ?? true,
