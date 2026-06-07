@@ -15,6 +15,15 @@ interface ControlPlaneStore {
 }
 
 export function registerBridgeControlPlaneRoutes(app: Hono, dataDir: string): void {
+  const bridgeUpdateInfo = () => ({
+    updateBaseUrl: process.env.BRIDGE_UPDATE_BASE_URL ?? process.env.BRIDGE_AUTO_UPDATE_URL,
+    latestVersion: process.env.BRIDGE_LATEST_VERSION ?? process.env.npm_package_version,
+    minimumVersion: process.env.BRIDGE_MINIMUM_VERSION ?? process.env.BRIDGE_MIN_VERSION ?? process.env.npm_package_version,
+    installerBaseUrl: process.env.BRIDGE_INSTALLER_BASE_URL,
+    windowsInstallerUrl: process.env.BRIDGE_WINDOWS_INSTALLER_URL,
+    macInstallerUrl: process.env.BRIDGE_MAC_INSTALLER_URL,
+  });
+
   app.get("/bridge/auth/config", (c) => {
     return c.json({
       ok: true,
@@ -23,6 +32,7 @@ export function registerBridgeControlPlaneRoutes(app: Hono, dataDir: string): vo
         process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ??
         process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ??
         process.env.SUPABASE_ANON_KEY,
+      ...bridgeUpdateInfo(),
     });
   });
 
@@ -61,13 +71,14 @@ export function registerBridgeControlPlaneRoutes(app: Hono, dataDir: string): vo
       ok: true,
       services: store.services,
       erpBus: store.erpBus,
+      ...bridgeUpdateInfo(),
       serverTime: new Date().toISOString(),
     });
   });
 
   app.post("/bridge/services", (c) => {
     const store = loadStore(dataDir);
-    return c.json({ ok: true, services: store.services, erpBus: store.erpBus, serverTime: new Date().toISOString() });
+    return c.json({ ok: true, services: store.services, erpBus: store.erpBus, ...bridgeUpdateInfo(), serverTime: new Date().toISOString() });
   });
 
   app.post("/bridge/browser-session", async (c) => {

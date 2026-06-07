@@ -116,6 +116,11 @@ class BridgeRuntime implements BridgeRuntimeHandle {
     if (synced.services?.length) this.cfg.services = synced.services;
     if (synced.erpBus) this.cfg.erpBus = synced.erpBus;
     if (synced.updateBaseUrl) this.cfg.updateBaseUrl = synced.updateBaseUrl;
+    if (synced.latestVersion) this.cfg.latestVersion = synced.latestVersion;
+    if (synced.minimumVersion) this.cfg.minimumVersion = synced.minimumVersion;
+    if (synced.installerBaseUrl) this.cfg.installerBaseUrl = synced.installerBaseUrl;
+    if (synced.windowsInstallerUrl) this.cfg.windowsInstallerUrl = synced.windowsInstallerUrl;
+    if (synced.macInstallerUrl) this.cfg.macInstallerUrl = synced.macInstallerUrl;
     this.lastSyncAt = synced.serverTime ?? new Date().toISOString();
     this.lastError = synced.error;
     saveBridgeConfig(this.cfg, this.options.configPath);
@@ -234,6 +239,8 @@ class BridgeRuntime implements BridgeRuntimeHandle {
         outputSchema: assets.outputSchema,
         sandbox: normalizeJobSandbox(job, service),
         includeMcp: payload.includeMcp ?? false,
+        mcpProxyBaseUrl: payload.mcpProxyBaseUrl ?? service.baseUrl,
+        mcpProxyAccessToken: this.cfg.session?.accessToken,
         ephemeral: payload.ephemeral ?? true,
       });
       localRunId = run.id;
@@ -529,16 +536,23 @@ function ensureRuntimeDirs(cfg: BridgeConfig): void {
 
 function capabilities(cfg: BridgeConfig): Record<string, unknown> {
   const codex = getRuntimeCodexStatus();
+  const currentVersion = process.env.APP_BRIDGE_VERSION ?? process.env.npm_package_version ?? "dev";
   return {
     app: BRIDGE_PRODUCT_NAME,
     productName: BRIDGE_PRODUCT_NAME,
     protocolVersion: BRIDGE_PROTOCOL_VERSION,
-    version: process.env.APP_BRIDGE_VERSION ?? process.env.npm_package_version ?? "dev",
+    version: currentVersion,
     host: hostname(),
     platform: platform(),
     codexAvailable: codex.ready,
     codexBin: codex.path ? "detected" : "missing",
     codex,
+    update: {
+      latestVersion: cfg.latestVersion,
+      minimumVersion: cfg.minimumVersion,
+      updateRequired: Boolean(cfg.minimumVersion && compareSemverLike(currentVersion, cfg.minimumVersion) < 0),
+      currentVersion,
+    },
     maxConcurrentJobs: cfg.maxConcurrentJobs ?? 10,
     erpBus: cfg.erpBus,
     services: cfg.services.map((service) => ({
@@ -558,6 +572,18 @@ function capabilities(cfg: BridgeConfig): Record<string, unknown> {
       })),
     })),
   };
+}
+
+function compareSemverLike(a: unknown, b: unknown): number {
+  const left = String(a || "").match(/\d+/g)?.map(Number) || [];
+  const right = String(b || "").match(/\d+/g)?.map(Number) || [];
+  if (!left.length || !right.length) return 0;
+  const len = Math.max(left.length, right.length);
+  for (let i = 0; i < len; i += 1) {
+    const diff = (left[i] || 0) - (right[i] || 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
 }
 
 function getRuntimeCodexStatus({ force = false } = {}): BridgeCodexStatus {

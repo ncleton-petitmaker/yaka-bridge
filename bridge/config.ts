@@ -76,6 +76,11 @@ export function normalizeBridgeConfig(input: Partial<BridgeConfig>): BridgeConfi
       process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
   );
   const updateBaseUrl = cleanOptional(input.updateBaseUrl ?? process.env.BRIDGE_UPDATE_BASE_URL ?? process.env.BRIDGE_AUTO_UPDATE_URL);
+  const latestVersion = cleanOptional(input.latestVersion ?? process.env.BRIDGE_LATEST_VERSION);
+  const minimumVersion = cleanOptional(input.minimumVersion ?? process.env.BRIDGE_MINIMUM_VERSION ?? process.env.BRIDGE_MIN_VERSION);
+  const installerBaseUrl = cleanOptional(input.installerBaseUrl ?? process.env.BRIDGE_INSTALLER_BASE_URL);
+  const windowsInstallerUrl = cleanOptional(input.windowsInstallerUrl ?? process.env.BRIDGE_WINDOWS_INSTALLER_URL);
+  const macInstallerUrl = cleanOptional(input.macInstallerUrl ?? process.env.BRIDGE_MAC_INSTALLER_URL);
   const organizationId = cleanOptional(input.organizationId ?? process.env.BRIDGE_ORGANIZATION_ID ?? process.env.APP_ORGANIZATION_ID);
   const bridgeToken = cleanOptional(input.bridgeToken ?? process.env.BRIDGE_TOKEN ?? process.env.APP_BRIDGE_TOKEN);
   const installId = cleanOptional(input.installId) ?? randomUUID();
@@ -95,6 +100,11 @@ export function normalizeBridgeConfig(input: Partial<BridgeConfig>): BridgeConfi
     supabaseUrl,
     supabaseAnonKey,
     updateBaseUrl,
+    latestVersion,
+    minimumVersion,
+    installerBaseUrl,
+    windowsInstallerUrl,
+    macInstallerUrl,
     cloudBaseUrl: controlPlaneBaseUrl,
     organizationId,
     bridgeToken,

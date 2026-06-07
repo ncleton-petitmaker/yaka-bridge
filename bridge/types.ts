@@ -131,6 +131,11 @@ export interface BridgeConfig {
   supabaseUrl?: string;
   supabaseAnonKey?: string;
   updateBaseUrl?: string;
+  latestVersion?: string;
+  minimumVersion?: string;
+  installerBaseUrl?: string;
+  windowsInstallerUrl?: string;
+  macInstallerUrl?: string;
   /** Backward-compatible alias used by the first cloud bridge prototype. */
   cloudBaseUrl?: string;
   organizationId?: string;
@@ -171,6 +176,11 @@ export interface BridgeControlPlaneSyncResponse {
   services?: BridgeServiceInstance[];
   erpBus?: BridgeErpBusConfig;
   updateBaseUrl?: string;
+  latestVersion?: string;
+  minimumVersion?: string;
+  installerBaseUrl?: string;
+  windowsInstallerUrl?: string;
+  macInstallerUrl?: string;
   serverTime?: string;
   error?: string;
 }
@@ -197,6 +207,7 @@ export interface BridgeJobPayload {
   outputSchema?: Record<string, unknown>;
   sandbox?: "read-only" | "workspace-write" | "danger-full-access";
   includeMcp?: boolean;
+  mcpProxyBaseUrl?: string;
   ephemeral?: boolean;
   tag?: string;
   metadata?: Record<string, unknown>;
@@ -296,6 +307,12 @@ export interface BridgeRuntimeState {
   controlPlaneConfigured: boolean;
   authenticated: boolean;
   codex?: BridgeCodexStatus;
+  update?: {
+    latestVersion?: string;
+    minimumVersion?: string;
+    updateRequired: boolean;
+    currentVersion: string;
+  };
   demoMode: boolean;
   services: BridgeRuntimeServiceState[];
   erpBus: BridgeErpBusConfig;

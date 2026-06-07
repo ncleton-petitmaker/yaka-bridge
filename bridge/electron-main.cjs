@@ -193,6 +193,26 @@ function setUpdateState(status) {
   refreshStatusWindow();
 }
 
+function currentBridgeVersion() {
+  return process.env.APP_BRIDGE_VERSION || app.getVersion() || "dev";
+}
+
+function compareSemverLike(a, b) {
+  const left = String(a || "").match(/\d+/g)?.map(Number) || [];
+  const right = String(b || "").match(/\d+/g)?.map(Number) || [];
+  if (!left.length || !right.length) return 0;
+  const len = Math.max(left.length, right.length);
+  for (let i = 0; i < len; i += 1) {
+    const diff = (left[i] || 0) - (right[i] || 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
+function bridgeUpdateRequired(cfg = loadConfig()) {
+  return Boolean(cfg.minimumVersion && compareSemverLike(currentBridgeVersion(), cfg.minimumVersion) < 0);
+}
+
 function scheduleAutoUpdateCheck(delayMs = 0) {
   if (!autoUpdater || !updateState.enabled) return;
   setTimeout(() => {
@@ -449,6 +469,12 @@ function localStatusPayload() {
     localHealthReady,
     bridgeError,
     autoUpdate: updateState,
+    update: {
+      latestVersion: cfg.latestVersion,
+      minimumVersion: cfg.minimumVersion,
+      updateRequired: bridgeUpdateRequired(cfg),
+      currentVersion: currentBridgeVersion(),
+    },
     activity: localActivity.slice(0, 30),
   };
 }
@@ -801,6 +827,11 @@ function normalizeConfig(cfg) {
     cloudBaseUrl: cfg.controlPlaneBaseUrl || cfg.cloudBaseUrl || process.env.BRIDGE_DEFAULT_CONTROL_PLANE_URL,
     controlPlaneBaseUrl: cfg.controlPlaneBaseUrl || cfg.cloudBaseUrl || process.env.BRIDGE_DEFAULT_CONTROL_PLANE_URL,
     updateBaseUrl: cfg.updateBaseUrl || process.env.BRIDGE_UPDATE_BASE_URL || process.env.BRIDGE_AUTO_UPDATE_URL,
+    latestVersion: cfg.latestVersion || process.env.BRIDGE_LATEST_VERSION,
+    minimumVersion: cfg.minimumVersion || process.env.BRIDGE_MINIMUM_VERSION || process.env.BRIDGE_MIN_VERSION,
+    installerBaseUrl: cfg.installerBaseUrl || process.env.BRIDGE_INSTALLER_BASE_URL,
+    windowsInstallerUrl: cfg.windowsInstallerUrl || process.env.BRIDGE_WINDOWS_INSTALLER_URL,
+    macInstallerUrl: cfg.macInstallerUrl || process.env.BRIDGE_MAC_INSTALLER_URL,
     installId: cfg.installId || stableInstallId(),
     deviceId: cfg.deviceId || cfg.installId || stableInstallId(),
     label: cfg.label || os.hostname(),
@@ -1084,6 +1115,12 @@ async function signIn(input = {}) {
     cfg.cloudBaseUrl = controlPlaneBaseUrl;
     cfg.supabaseUrl = authConfig.supabaseUrl;
     cfg.supabaseAnonKey = authConfig.supabaseAnonKey;
+    if (authConfig.updateBaseUrl) cfg.updateBaseUrl = authConfig.updateBaseUrl;
+    if (authConfig.latestVersion) cfg.latestVersion = authConfig.latestVersion;
+    if (authConfig.minimumVersion) cfg.minimumVersion = authConfig.minimumVersion;
+    if (authConfig.installerBaseUrl) cfg.installerBaseUrl = authConfig.installerBaseUrl;
+    if (authConfig.windowsInstallerUrl) cfg.windowsInstallerUrl = authConfig.windowsInstallerUrl;
+    if (authConfig.macInstallerUrl) cfg.macInstallerUrl = authConfig.macInstallerUrl;
     cfg.session = session;
     delete cfg.sessionInvalidAt;
     cfg.account = {
@@ -1128,7 +1165,16 @@ async function discoverBridgeAuthConfig(controlPlaneBaseUrl, input) {
   if (!supabaseUrl || !supabaseAnonKey) {
     throw new Error("Le Control Plane ne publie pas encore la configuration Supabase publique.");
   }
-  return { supabaseUrl, supabaseAnonKey };
+  return {
+    supabaseUrl,
+    supabaseAnonKey,
+    updateBaseUrl: cleanExternalUrl(json.updateBaseUrl),
+    latestVersion: typeof json.latestVersion === "string" ? json.latestVersion : undefined,
+    minimumVersion: typeof json.minimumVersion === "string" ? json.minimumVersion : undefined,
+    installerBaseUrl: cleanExternalUrl(json.installerBaseUrl),
+    windowsInstallerUrl: cleanExternalUrl(json.windowsInstallerUrl),
+    macInstallerUrl: cleanExternalUrl(json.macInstallerUrl),
+  };
 }
 
 async function supabasePasswordSignIn(authConfig, email, password) {
@@ -1210,9 +1256,14 @@ async function syncServicesFromControlPlane(cfg) {
   if (res.erpBus) cfg.erpBus = res.erpBus;
   const previousUpdateBaseUrl = cfg.updateBaseUrl;
   if (res.updateBaseUrl) cfg.updateBaseUrl = res.updateBaseUrl;
+  if (res.latestVersion) cfg.latestVersion = res.latestVersion;
+  if (res.minimumVersion) cfg.minimumVersion = res.minimumVersion;
+  if (res.installerBaseUrl) cfg.installerBaseUrl = res.installerBaseUrl;
+  if (res.windowsInstallerUrl) cfg.windowsInstallerUrl = res.windowsInstallerUrl;
+  if (res.macInstallerUrl) cfg.macInstallerUrl = res.macInstallerUrl;
   bridgeError = res.error || null;
   saveConfig(cfg);
-  if (cfg.updateBaseUrl && cfg.updateBaseUrl !== previousUpdateBaseUrl) startAutoUpdates({ reconfigure: true });
+  if (cfg.updateBaseUrl && (cfg.updateBaseUrl !== previousUpdateBaseUrl || bridgeUpdateRequired(cfg))) startAutoUpdates({ reconfigure: true });
   void flushPendingBrowserSession();
   refreshStatusWindow();
   updateTrayMenu();

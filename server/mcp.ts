@@ -9,9 +9,11 @@ import { createInterface } from "node:readline";
 import { resolve } from "node:path";
 import { callAction, listActions, type ActionContext } from "./actions.js";
 
-const DATA_DIR_ENV_VAR = "{{DATA_DIR_ENV_VAR}}";
-const APP_SLUG = "{{APP_NAME_KEBAB}}";
-const APP_VERSION = process.env["{{APP_NAME_KEBAB_UPPER}}_APP_VERSION"] ?? "{{VERSION}}";
+const DATA_DIR_ENV_VAR = process.env.BRIDGE_MCP_DATA_DIR_ENV_VAR ?? "{{DATA_DIR_ENV_VAR}}";
+const APP_SLUG = process.env.BRIDGE_MCP_SERVER_NAME ?? "{{APP_NAME_KEBAB}}";
+const APP_VERSION = process.env.BRIDGE_MCP_APP_VERSION ?? process.env["{{APP_NAME_KEBAB_UPPER}}_APP_VERSION"] ?? "{{VERSION}}";
+const MCP_PROXY_BASE_URL = process.env.BRIDGE_MCP_PROXY_BASE_URL?.replace(/\/+$/, "") ?? "";
+const MCP_PROXY_ACCESS_TOKEN = process.env.BRIDGE_MCP_PROXY_ACCESS_TOKEN ?? "";
 
 interface JsonRpcRequest {
   jsonrpc?: "2.0";
@@ -21,24 +23,39 @@ interface JsonRpcRequest {
 }
 
 function dataDir(): string {
-  return resolve(process.env[DATA_DIR_ENV_VAR] ?? "./data");
+  return resolve(process.env.BRIDGE_MCP_DATA_DIR ?? process.env[DATA_DIR_ENV_VAR] ?? "./data");
 }
 
 function toolNameForAction(actionId: string): string {
-  return `${APP_SLUG}__${actionId.replace(/\./g, "__")}`;
+  return actionId.replace(/\./g, "__");
 }
 
 function actionIdFromToolName(name: string): string | null {
-  const prefix = `${APP_SLUG}__`;
-  if (!name.startsWith(prefix)) return null;
-  return name.slice(prefix.length).replace(/__/g, ".");
+  const normalized = name.replace(/^prix[-_]achats[-_]be__/, "").replace(/^bridge__/, "");
+  return normalized.replace(/__/g, ".");
 }
 
-function toolsList() {
+async function toolsList() {
+  if (MCP_PROXY_BASE_URL) return proxyToolsList();
   return listActions().map((action) => ({
     name: toolNameForAction(action.id),
     description: action.description,
     inputSchema: action.inputJsonSchema,
+  }));
+}
+
+async function proxyToolsList() {
+  const res = await fetch(`${MCP_PROXY_BASE_URL}/api/actions`, {
+    headers: MCP_PROXY_ACCESS_TOKEN ? { Authorization: `Bearer ${MCP_PROXY_ACCESS_TOKEN}` } : {},
+  });
+  if (!res.ok) throw new Error(`Registry actions indisponible (${res.status})`);
+  const data = await res.json() as { actions?: Array<{ id: string; description?: string; inputSchema?: Record<string, unknown>; inputJsonSchema?: Record<string, unknown>; audit?: { dangerous?: boolean; adminOnly?: boolean } }> };
+  return (data.actions ?? []).map((action) => ({
+    name: toolNameForAction(action.id),
+    description: action.description ?? action.id,
+    inputSchema: action.inputSchema ?? action.inputJsonSchema ?? { type: "object", properties: {}, additionalProperties: false },
+    dangerous: action.audit?.dangerous,
+    adminOnly: action.audit?.adminOnly,
   }));
 }
 
@@ -76,14 +93,16 @@ async function handle(req: JsonRpcRequest) {
       });
 
     case "tools/list":
-      return result(req.id, { tools: toolsList() });
+      return result(req.id, { tools: await toolsList() });
 
     case "tools/call": {
       const name = String(req.params?.name ?? "");
       const actionId = actionIdFromToolName(name);
-      if (!actionId) return error(req.id, -32602, `Unknown tool prefix: ${name}`);
+      if (!actionId) return error(req.id, -32602, `Unknown tool: ${name}`);
       try {
-        const output = await callAction(actionId, ctx(), req.params?.arguments ?? {});
+        const output = MCP_PROXY_BASE_URL
+          ? await proxyCallAction(actionId, req.params?.arguments ?? {})
+          : await callAction(actionId, ctx(), req.params?.arguments ?? {});
         return result(req.id, {
           content: [
             {
@@ -111,6 +130,23 @@ async function handle(req: JsonRpcRequest) {
   }
 }
 
+async function proxyCallAction(actionId: string, args: unknown) {
+  if (!MCP_PROXY_ACCESS_TOKEN) throw new Error("Token Bridge manquant pour appeler le service MCP proxy.");
+  const res = await fetch(`${MCP_PROXY_BASE_URL}/api/actions/${encodeURIComponent(actionId)}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${MCP_PROXY_ACCESS_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(args ?? {}),
+  });
+  const data = await res.json().catch(() => ({})) as { ok?: boolean; output?: unknown; error?: string };
+  if (!res.ok || data.ok === false) {
+    throw new Error(data.error ?? `Action ${actionId} échouée (${res.status})`);
+  }
+  return data.output ?? data;
+}
+
 const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
 rl.on("line", (line) => {
   if (!line.trim()) return;
@@ -123,4 +159,4 @@ rl.on("line", (line) => {
   handle(req).catch((err) => error(req.id, -32000, err instanceof Error ? err.message : String(err)));
 });
 
-process.stderr.write(`[${APP_SLUG}:mcp] ready dataDir=${dataDir()}\n`);
+process.stderr.write(`[${APP_SLUG}:mcp] ready dataDir=${dataDir()} proxy=${MCP_PROXY_BASE_URL || "local"}\n`);

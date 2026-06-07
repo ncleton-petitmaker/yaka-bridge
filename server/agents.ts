@@ -197,6 +197,10 @@ export interface BuildArgsOptions {
    * l'agent a accès aux mêmes actions que l'UI). Défaut : true.
    */
   includeMcp?: boolean;
+  /** URL du service web dont le MCP local doit proxifier le registry /api/actions. */
+  mcpProxyBaseUrl?: string;
+  /** Jeton Bearer utilisé par le proxy MCP pour appeler le service web. */
+  mcpProxyAccessToken?: string;
   /** Conservé pour compatibilité d'API ; sans équivalent `codex exec`. */
   maxTurns?: number;
 }
@@ -214,7 +218,7 @@ const DATA_DIR_ENV_VAR = "PRIX_ACHATS_BE_DATA_DIR";
  * tout en overrides CLI (valeurs TOML : les strings JSON sont des strings
  * TOML valides, les arrays JSON des arrays TOML valides).
  */
-function buildMcpOverrides(): string[] {
+function buildMcpOverrides(opts: BuildArgsOptions = {}): string[] {
   const dataDir =
     process.env[DATA_DIR_ENV_VAR] ?? path.resolve(process.cwd(), "data");
   const packagedMcp = resolvePackagedMcpPath();
@@ -224,6 +228,12 @@ function buildMcpOverrides(): string[] {
   const command = isPackaged ? process.execPath : "npx";
   const cmdArgs = isPackaged && packagedMcp ? [packagedMcp] : ["tsx", devMcp];
   const env: Record<string, string> = { [DATA_DIR_ENV_VAR]: dataDir };
+  if (opts.mcpProxyBaseUrl) {
+    env.BRIDGE_MCP_PROXY_BASE_URL = opts.mcpProxyBaseUrl;
+  }
+  if (opts.mcpProxyAccessToken) {
+    env.BRIDGE_MCP_PROXY_ACCESS_TOKEN = opts.mcpProxyAccessToken;
+  }
   if (isPackaged) {
     env.ELECTRON_RUN_AS_NODE = process.env.ELECTRON_RUN_AS_NODE ?? "1";
   }
@@ -287,7 +297,7 @@ export function buildCodexArgs(opts: BuildArgsOptions = {}): string[] {
   }
 
   if (opts.includeMcp !== false) {
-    args.push(...buildMcpOverrides());
+    args.push(...buildMcpOverrides(opts));
   }
 
   return args;
