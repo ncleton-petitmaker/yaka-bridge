@@ -123,11 +123,13 @@ class BridgeRuntime implements BridgeRuntimeHandle {
 
     await refreshSupabaseSessionIfNeeded(this.cfg, this.options.configPath);
     const res = await this.client.poll(capabilities(this.cfg));
+    this.lastSyncAt = res.serverTime ?? new Date().toISOString();
     if (!res.jobs?.length) {
       this.lastError = undefined;
       this.emitState();
       return;
     }
+    console.log(`[bridge] ${res.jobs.length} job(s) reçu(s) du Control Plane.`);
 
     const maxGlobal = this.cfg.maxConcurrentJobs ?? 1;
     const runnable = res.jobs.filter((job) => {
@@ -136,10 +138,20 @@ class BridgeRuntime implements BridgeRuntimeHandle {
       const running = this.runningByService.get(service.serviceId) ?? 0;
       return running < (service.maxConcurrentJobs ?? 1);
     });
+    const capacity = Math.max(0, maxGlobal - this.state().activeJobs);
+    if (!runnable.length || capacity <= 0) {
+      console.warn(`[bridge] aucun job exécutable après bail: runnable=${runnable.length}, capacity=${capacity}.`);
+      await Promise.all(
+        res.jobs.map((job) =>
+          this.completeSkippedJob(job, runnable.length ? "Capacité Bridge saturée." : "Service Bridge local indisponible ou en pause.")
+        )
+      );
+      return;
+    }
 
     await Promise.all(
       runnable
-        .slice(0, Math.max(0, maxGlobal - this.state().activeJobs))
+        .slice(0, capacity)
         .map((job) => this.runCloudJob(job))
     );
   }
@@ -192,11 +204,10 @@ class BridgeRuntime implements BridgeRuntimeHandle {
       const dir = resolvePathRef(this.cfg, service, ref);
       if (dir) addDirs.add(dir);
     }
-    const assets = await prepareJobAssets(this.cfg, service, job);
-
     let localRunId = "";
     let seq = 0;
     try {
+      const assets = await prepareJobAssets(this.cfg, service, job);
       const run = startRun({
         prompt: payload.prompt,
         cwd,
@@ -279,6 +290,21 @@ class BridgeRuntime implements BridgeRuntimeHandle {
       service.lastSeenAt = new Date().toISOString();
       this.emitState();
     }
+  }
+
+  private async completeSkippedJob(job: CloudBridgeJob, error: string): Promise<void> {
+    await this.client.completeJob({
+      organizationId: job.organizationId,
+      serviceId: job.serviceId,
+      serviceInstanceId: job.serviceInstanceId,
+      deviceId: this.cfg.deviceId,
+      userId: job.userId ?? this.cfg.userId ?? this.cfg.account?.userId,
+      jobId: job.id,
+      leaseId: job.leaseId,
+      localRunId: "",
+      status: "failed",
+      error,
+    }).catch((err) => this.setError(err));
   }
 
   private incrementService(serviceId: string): void {
@@ -401,12 +427,26 @@ async function refreshSupabaseSessionIfNeeded(cfg: BridgeConfig, configPath: str
     body: JSON.stringify({ refresh_token: cfg.session.refreshToken }),
   });
   const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(json.error_description || json.msg || json.error || `Refresh HTTP ${res.status}`);
+  if (!res.ok) {
+    const message = json.error_description || json.msg || json.error || `Refresh HTTP ${res.status}`;
+    if (isInvalidRefreshTokenMessage(message)) {
+      delete cfg.session;
+      delete cfg.bridgeToken;
+      cfg.sessionInvalidAt = new Date().toISOString();
+      saveBridgeConfig(cfg, configPath);
+      throw new Error("Session Bridge expirée. Reconnecte ton compte Bridge dans l'onglet Identifiants.");
+    }
+    throw new Error(message);
+  }
   cfg.session.accessToken = json.access_token;
   cfg.session.refreshToken = json.refresh_token || cfg.session.refreshToken;
   cfg.session.expiresAt = json.expires_in ? new Date(Date.now() + Number(json.expires_in) * 1000).toISOString() : cfg.session.expiresAt;
   cfg.session.lastRefreshAt = new Date().toISOString();
   saveBridgeConfig(cfg, configPath);
+}
+
+function isInvalidRefreshTokenMessage(message: string): boolean {
+  return /invalid refresh token|refresh token not found|refresh_token_not_found|token not found/i.test(message);
 }
 
 export async function startBridgeRuntime(options: BridgeRuntimeOptions = {}): Promise<BridgeRuntimeHandle> {

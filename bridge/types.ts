@@ -8,7 +8,33 @@ export type BridgeServiceStatus =
   | "paused"
   | "reconnecting"
   | "active"
-  | "disconnected";
+  | "disconnected"
+  | "codex_unready"
+  | "cloud_stale"
+  | "site_unreachable"
+  | "local_unavailable";
+
+export type BridgeCodexState =
+  | "ready"
+  | "missing"
+  | "login_required"
+  | "error"
+  | "unknown";
+
+export interface BridgeCodexStatus {
+  ready: boolean;
+  state: BridgeCodexState;
+  label: string;
+  detail: string;
+  path?: string | null;
+  version?: string | null;
+  loggedIn?: boolean | null;
+  authPath?: string | null;
+  checkedAt: string;
+  installCommand: string;
+  loginCommand: string;
+  diagnostic?: string;
+}
 
 export type BridgeDataStrategy = "erp-core" | "service-supabase" | "external-api";
 
@@ -115,6 +141,7 @@ export interface BridgeConfig {
   userId?: string;
   account?: BridgeAccount;
   session?: BridgeSessionInfo;
+  sessionInvalidAt?: string;
   label?: string;
   dataDir: string;
   defaultModel?: string;
@@ -268,6 +295,7 @@ export interface BridgeRuntimeState {
   dataDir: string;
   controlPlaneConfigured: boolean;
   authenticated: boolean;
+  codex?: BridgeCodexStatus;
   demoMode: boolean;
   services: BridgeRuntimeServiceState[];
   erpBus: BridgeErpBusConfig;

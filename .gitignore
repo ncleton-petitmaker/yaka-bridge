@@ -69,3 +69,4 @@ package-lock.json.bak
 # TypeScript
 *.tsbuildinfo
 release/
+release-bridge/

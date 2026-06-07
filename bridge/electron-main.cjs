@@ -1,4 +1,5 @@
 const { app, BrowserWindow, Menu, nativeImage, shell, Tray, ipcMain, safeStorage } = require("electron");
+const { spawnSync } = require("node:child_process");
 const { createServer } = require("node:http");
 const path = require("node:path");
 const fs = require("node:fs");
@@ -17,6 +18,8 @@ process.env.APP_BRIDGE_VERSION = process.env.APP_BRIDGE_VERSION || app.getVersio
 const PRODUCT_NAME = "Bridge";
 const PROTOCOL_VERSION = 2;
 const HEALTH_PORT = Number(process.env.BRIDGE_HEALTH_PORT || process.env.APP_BRIDGE_HEALTH_PORT || "7707") || 7707;
+const BRIDGE_ONLINE_THRESHOLD_SECONDS =
+  Number(process.env.BRIDGE_ONLINE_THRESHOLD_SECONDS || "90") || 90;
 const CONFIG_PATH =
   process.env.BRIDGE_CONFIG ||
   process.env.APP_BRIDGE_CONFIG ||
@@ -40,6 +43,7 @@ let localActivity = [];
 let autoUpdateStarted = false;
 let autoUpdateInterval = null;
 let updateDownloaded = false;
+let codexStatusCache = null;
 let updateState = {
   enabled: false,
   status: "idle",
@@ -253,13 +257,16 @@ function createTray() {
 function updateTrayMenu() {
   if (!tray) return;
   const state = localStatusPayload();
+  const connectedCount = state.services.filter((service) => service.status === "connected" || service.status === "active").length;
+  const codexLabel = state.codex?.ready ? "Codex prêt" : `Codex: ${state.codex?.label || "à vérifier"}`;
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: "Afficher Bridge", click: () => showStatusWindow() },
     {
-      label: `${state.services.filter((service) => service.status === "connected" || service.status === "active").length}/${state.services.length} services connectés`,
+      label: `${connectedCount}/${state.services.length} services connectés`,
       enabled: false,
     },
     { label: localHealthReady ? "Bridge détectable localement" : "Démarrage local...", enabled: false },
+    { label: codexLabel, enabled: false },
     { label: updateState.enabled ? `Mises à jour: ${updateState.status}` : "Mises à jour: non configurées", enabled: false },
     { type: "separator" },
     { label: "Synchroniser", click: () => syncServices() },
@@ -333,11 +340,20 @@ function startLocalHealthServer() {
   localHealthServer.on("error", (err) => {
     localHealthReady = false;
     bridgeError = `Port local ${HEALTH_PORT} indisponible : ${err.message}`;
+    pushActivity(bridgeError);
+    try {
+      localHealthServer?.close();
+    } catch {
+      // no-op
+    }
+    localHealthServer = null;
     updateTrayMenu();
     refreshStatusWindow();
+    setTimeout(startLocalHealthServer, 5_000);
   });
   localHealthServer.listen(HEALTH_PORT, "127.0.0.1", () => {
     localHealthReady = true;
+    pushActivity(`Bridge détectable localement sur 127.0.0.1:${HEALTH_PORT}.`);
     updateTrayMenu();
     refreshStatusWindow();
   });
@@ -346,12 +362,13 @@ function startLocalHealthServer() {
 function localStatusPayload() {
   const cfg = loadConfig();
   const base = runtimeState || stateFromConfig(cfg);
+  const codex = getCodexStatus();
   return {
     ...base,
-    services: base.services.map((service) => ({
-      ...service,
-      status: localStatuses[service.serviceId] || service.status,
-    })),
+    codex,
+    authenticated: Boolean(base.authenticated && !isStoredSessionInvalid(cfg)),
+    controlPlaneConfigured: Boolean(base.controlPlaneConfigured && !isStoredSessionInvalid(cfg)),
+    services: base.services.map((service) => serviceWithDisplayStatus(base, service, codex)),
     localHealthReady,
     bridgeError,
     autoUpdate: updateState,
@@ -375,6 +392,7 @@ function stateFromConfig(cfg) {
     dataDir: cfg.dataDir,
     controlPlaneConfigured: Boolean(cfg.controlPlaneBaseUrl && (cfg.bridgeToken || cfg.session?.accessToken)),
     authenticated: Boolean(cfg.session?.accessToken || cfg.bridgeToken),
+    codex: getCodexStatus(),
     controlPlaneBaseUrl: cfg.controlPlaneBaseUrl || cfg.cloudBaseUrl || process.env.BRIDGE_DEFAULT_CONTROL_PLANE_URL || "",
     demoMode: cfg.demoMode === true,
     services: cfg.services.map((service) => ({
@@ -395,6 +413,200 @@ function stateFromConfig(cfg) {
     activeJobs: 0,
     ts: new Date().toISOString(),
   };
+}
+
+function getCodexStatus({ force = false } = {}) {
+  const now = Date.now();
+  if (!force && codexStatusCache && now - codexStatusCache.checkedMs < 15_000) {
+    return codexStatusCache.status;
+  }
+
+  const installCommand = "npm install -g @openai/codex";
+  const loginCommand = "codex login";
+  const checkedAt = new Date().toISOString();
+  const authPath = path.join(os.homedir(), ".codex", "auth.json");
+  const bin = findCodexExecutable();
+
+  const finish = (status) => {
+    codexStatusCache = {
+      checkedMs: now,
+      status: {
+        installCommand,
+        loginCommand,
+        checkedAt,
+        ...status,
+      },
+    };
+    return codexStatusCache.status;
+  };
+
+  if (!bin) {
+    return finish({
+      ready: false,
+      state: "missing",
+      label: "Codex non installé",
+      detail: "Installe Codex CLI puis connecte-le pour que Bridge puisse exécuter les agents.",
+      path: null,
+      version: null,
+      loggedIn: null,
+      authPath,
+    });
+  }
+
+  const versionProbe = runCodexProbe(bin, ["--version"], 5_000);
+  const versionOutput = `${versionProbe.stdout || ""}\n${versionProbe.stderr || ""}`.trim();
+  const version = versionOutput.match(/(\d+\.\d+\.\d+)/)?.[1] || versionOutput.split(/\s+/).find(Boolean) || null;
+  if (!versionProbe.ok) {
+    return finish({
+      ready: false,
+      state: "error",
+      label: "Codex à vérifier",
+      detail: "Codex est détecté, mais le test de version échoue.",
+      path: bin,
+      version,
+      loggedIn: null,
+      authPath,
+      diagnostic: compactProbeError(versionProbe),
+    });
+  }
+
+  const loginProbe = runCodexProbe(bin, ["login", "status"], 5_000);
+  const loginOutput = `${loginProbe.stdout || ""}\n${loginProbe.stderr || ""}`.trim();
+  const authFileExists = fs.existsSync(authPath);
+  const loggedIn =
+    loginProbe.ok ||
+    /logged in|connect[eé]|authenticated|chatgpt|api key/i.test(loginOutput) ||
+    (!/not logged|not authenticated|login required|no login|not signed/i.test(loginOutput) && authFileExists);
+
+  if (!loggedIn) {
+    return finish({
+      ready: false,
+      state: "login_required",
+      label: "Connexion Codex requise",
+      detail: "Codex est installé, mais il n'est pas connecté à un compte OpenAI.",
+      path: bin,
+      version,
+      loggedIn: false,
+      authPath,
+      diagnostic: loginOutput || "codex login status ne confirme pas de session active.",
+    });
+  }
+
+  return finish({
+    ready: true,
+    state: "ready",
+    label: "Codex prêt",
+    detail: "Codex CLI est installé et connecté. Les agents Bridge peuvent tourner sur cet ordinateur.",
+    path: bin,
+    version,
+    loggedIn: true,
+    authPath: authFileExists ? authPath : null,
+    diagnostic: loginOutput || undefined,
+  });
+}
+
+function resetCodexStatusCache() {
+  codexStatusCache = null;
+  return getCodexStatus({ force: true });
+}
+
+function buildCodexPath() {
+  const home = os.homedir();
+  const appData = process.env.APPDATA || (home ? path.join(home, "AppData", "Roaming") : "");
+  const localAppData = process.env.LOCALAPPDATA || (home ? path.join(home, "AppData", "Local") : "");
+  const programFiles = process.env.ProgramFiles || "C:\\Program Files";
+  const programFilesX86 = process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)";
+  const extras = [
+    "/usr/local/bin",
+    "/opt/homebrew/bin",
+    home ? path.join(home, ".local", "bin") : null,
+    home ? path.join(home, ".npm-global", "bin") : null,
+    home ? path.join(home, ".codex", "bin") : null,
+    appData ? path.join(appData, "npm") : null,
+    localAppData ? path.join(localAppData, "Programs", "nodejs") : null,
+    programFiles ? path.join(programFiles, "nodejs") : null,
+    programFilesX86 ? path.join(programFilesX86, "nodejs") : null,
+  ].filter(Boolean);
+  return [process.env.PATH, process.env.Path, ...extras].filter(Boolean).join(path.delimiter);
+}
+
+function findCodexExecutable() {
+  const enrichedPath = buildCodexPath();
+  const which = spawnSync(process.platform === "win32" ? "where" : "which", ["codex"], {
+    encoding: "utf8",
+    shell: false,
+    env: { ...process.env, PATH: enrichedPath, Path: enrichedPath },
+    timeout: 3_000,
+  });
+  if (which.status === 0) {
+    const found = String(which.stdout || "").split(/\r?\n/).map((line) => line.trim()).find(Boolean);
+    if (found && fs.existsSync(found)) return found;
+  }
+
+  for (const candidate of knownCodexPaths()) {
+    if (candidate && fs.existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+function knownCodexPaths() {
+  const home = os.homedir();
+  const appData = process.env.APPDATA || (home ? path.join(home, "AppData", "Roaming") : "");
+  const localAppData = process.env.LOCALAPPDATA || (home ? path.join(home, "AppData", "Local") : "");
+  if (process.platform === "win32") {
+    return [
+      appData ? path.join(appData, "npm", "codex.cmd") : null,
+      appData ? path.join(appData, "npm", "codex.ps1") : null,
+      localAppData ? path.join(localAppData, "Programs", "nodejs", "codex.cmd") : null,
+      home ? path.join(home, ".local", "bin", "codex.exe") : null,
+      home ? path.join(home, ".codex", "bin", "codex.exe") : null,
+    ].filter(Boolean);
+  }
+  return [
+    "/usr/local/bin/codex",
+    "/opt/homebrew/bin/codex",
+    home ? path.join(home, ".local", "bin", "codex") : null,
+    home ? path.join(home, ".npm-global", "bin", "codex") : null,
+    home ? path.join(home, ".codex", "bin", "codex") : null,
+  ].filter(Boolean);
+}
+
+function runCodexProbe(bin, args, timeout) {
+  const shellForCmd = process.platform === "win32" && /\.(cmd|bat)$/i.test(bin);
+  try {
+    const res = spawnSync(bin, args, {
+      encoding: "utf8",
+      shell: shellForCmd,
+      env: { ...process.env, PATH: buildCodexPath(), Path: buildCodexPath() },
+      timeout,
+    });
+    return {
+      ok: res.status === 0,
+      status: res.status,
+      stdout: res.stdout || "",
+      stderr: res.stderr || "",
+      error: res.error?.message || "",
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      status: null,
+      stdout: "",
+      stderr: "",
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+function compactProbeError(probe) {
+  return [probe.error, probe.stderr, probe.stdout]
+    .filter(Boolean)
+    .join("\n")
+    .slice(0, 500);
+}
+
+function isStoredSessionInvalid(cfg) {
+  return Boolean(cfg.sessionInvalidAt && !cfg.session?.accessToken && !cfg.bridgeToken);
 }
 
 function loadConfig() {
@@ -552,6 +764,160 @@ function cryptoRandomId() {
   return require("node:crypto").randomUUID();
 }
 
+function serviceWithDisplayStatus(base, service, codex = getCodexStatus()) {
+  const display = resolveServiceDisplayStatus(base, service, codex);
+  return {
+    ...service,
+    status: display.status,
+    cloudStatus: display.cloudStatus,
+    siteStatus: display.siteStatus,
+    statusReason: display.reason,
+    bridgeLastActivityAt: display.lastActivityAt,
+    bridgeLastActivityAgeSeconds: display.ageSeconds,
+  };
+}
+
+function resolveServiceDisplayStatus(base, service, codex = getCodexStatus()) {
+  const local = localStatuses[service.serviceId];
+  const lastActivityAt = latestIso(service.lastSeenAt, base.lastSyncAt);
+  const ageSeconds = isoAgeSeconds(lastActivityAt);
+  const cloudFresh = typeof ageSeconds === "number" && ageSeconds <= BRIDGE_ONLINE_THRESHOLD_SECONDS;
+
+  if (service.paused || local === "paused") {
+    return {
+      status: "paused",
+      cloudStatus: cloudFresh ? "fresh" : "stale",
+      siteStatus: local || "",
+      reason: "Service en pause.",
+      lastActivityAt,
+      ageSeconds,
+    };
+  }
+
+  if (!localHealthReady) {
+    return {
+      status: "local_unavailable",
+      cloudStatus: cloudFresh ? "fresh" : "stale",
+      siteStatus: local || "",
+      reason: `Le port local ${HEALTH_PORT} n'est pas prêt. Le site web ne peut pas détecter Bridge.`,
+      lastActivityAt,
+      ageSeconds,
+    };
+  }
+
+  if (serviceRequiresCodex(service) && !codex.ready) {
+    return {
+      status: "codex_unready",
+      cloudStatus: cloudFresh ? "fresh" : "stale",
+      siteStatus: local || "",
+      reason: codex.detail || "Codex n'est pas prêt sur cet ordinateur.",
+      lastActivityAt,
+      ageSeconds,
+    };
+  }
+
+  if (local === "active" || local === "reconnecting" || service.status === "active") {
+    return {
+      status: local === "reconnecting" ? "reconnecting" : "active",
+      cloudStatus: cloudFresh ? "fresh" : "stale",
+      siteStatus: local || "",
+      reason: "Bridge travaille sur ce service.",
+      lastActivityAt,
+      ageSeconds,
+    };
+  }
+
+  if (base.controlPlaneConfigured || base.authenticated) {
+    if (!lastActivityAt) {
+      return {
+        status: "cloud_stale",
+        cloudStatus: "missing",
+        siteStatus: local || "",
+        reason: "Aucun heartbeat cloud récent. Clique sur R ou reconnecte le compte Bridge.",
+        lastActivityAt,
+        ageSeconds,
+      };
+    }
+    if (!cloudFresh) {
+      return {
+        status: "cloud_stale",
+        cloudStatus: "stale",
+        siteStatus: local || "",
+        reason: `Dernier heartbeat cloud ${formatRelativeAge(lastActivityAt)}. Le site peut afficher Bridge à connecter.`,
+        lastActivityAt,
+        ageSeconds,
+      };
+    }
+  }
+
+  if (local === "site_unreachable" || local === "disconnected") {
+    return {
+      status: "site_unreachable",
+      cloudStatus: cloudFresh ? "fresh" : "stale",
+      siteStatus: "unreachable",
+      reason: "Bridge est actif, mais le site du service ne répond pas.",
+      lastActivityAt,
+      ageSeconds,
+    };
+  }
+
+  return {
+    status: "connected",
+    cloudStatus: cloudFresh ? "fresh" : "unknown",
+    siteStatus: local || "ok",
+    reason: lastActivityAt ? `Bridge vu ${formatRelativeAge(lastActivityAt)}.` : "Bridge local prêt.",
+    lastActivityAt,
+    ageSeconds,
+  };
+}
+
+function serviceRequiresCodex(service) {
+  const scopes = new Set([
+    ...(Array.isArray(service.scopes) ? service.scopes : []),
+    ...(Array.isArray(service.requiredScopes) ? service.requiredScopes : []),
+    ...(Array.isArray(service.actions)
+      ? service.actions.flatMap((action) => Array.isArray(action.requiredScopes) ? action.requiredScopes : [])
+      : []),
+  ].map((scope) => String(scope)));
+  if (scopes.has("bridge:jobs")) return true;
+  for (const scope of scopes) {
+    if (scope === "codex:run" || scope.startsWith("codex:")) return true;
+  }
+  return false;
+}
+
+function latestIso(...values) {
+  let latest = "";
+  let latestMs = 0;
+  for (const value of values) {
+    const ms = Date.parse(String(value || ""));
+    if (Number.isFinite(ms) && ms > latestMs) {
+      latest = String(value);
+      latestMs = ms;
+    }
+  }
+  return latest;
+}
+
+function isoAgeSeconds(value) {
+  const ms = Date.parse(String(value || ""));
+  if (!Number.isFinite(ms) || ms <= 0) return null;
+  return Math.max(0, Math.round((Date.now() - ms) / 1000));
+}
+
+function formatRelativeAge(value) {
+  const seconds = isoAgeSeconds(value);
+  if (seconds == null) return "jamais";
+  if (seconds < 5) return "à l'instant";
+  if (seconds < 60) return `il y a ${seconds} s`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `il y a ${minutes} min`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `il y a ${hours} h`;
+  const days = Math.round(hours / 24);
+  return `il y a ${days} j`;
+}
+
 async function refreshExternalStatuses() {
   const cfg = loadConfig();
   for (const service of cfg.services) {
@@ -560,16 +926,19 @@ async function refreshExternalStatuses() {
       continue;
     }
     if (!service.healthUrl) {
-      localStatuses[service.serviceId] = service.status || "connected";
+      if (localStatuses[service.serviceId] !== "active" && localStatuses[service.serviceId] !== "reconnecting") {
+        delete localStatuses[service.serviceId];
+      }
       continue;
     }
     const current = localStatuses[service.serviceId];
     if (current === "active" || current === "reconnecting") continue;
     try {
       const ok = await probe(service.healthUrl);
-      localStatuses[service.serviceId] = ok ? "connected" : "disconnected";
+      if (ok) delete localStatuses[service.serviceId];
+      else localStatuses[service.serviceId] = "site_unreachable";
     } catch {
-      localStatuses[service.serviceId] = "disconnected";
+      localStatuses[service.serviceId] = "site_unreachable";
     }
   }
   refreshStatusWindow();
@@ -636,6 +1005,7 @@ async function signIn(input = {}) {
     cfg.supabaseUrl = authConfig.supabaseUrl;
     cfg.supabaseAnonKey = authConfig.supabaseAnonKey;
     cfg.session = session;
+    delete cfg.sessionInvalidAt;
     cfg.account = {
       userId: session.user?.id || session.user?.sub || email,
       email,
@@ -718,13 +1088,34 @@ async function refreshSupabaseSessionIfNeeded(cfg) {
     body: JSON.stringify({ refresh_token: cfg.session.refreshToken }),
   });
   const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(json.error_description || json.msg || json.error || `Refresh HTTP ${res.status}`);
+  if (!res.ok) {
+    const message = json.error_description || json.msg || json.error || `Refresh HTTP ${res.status}`;
+    if (isInvalidRefreshTokenMessage(message)) {
+      clearExpiredBridgeSession(cfg, "Session Bridge expirée. Reconnecte ton compte Bridge.");
+      throw new Error("Session Bridge expirée. Reconnecte ton compte Bridge dans l'onglet Identifiants.");
+    }
+    throw new Error(message);
+  }
   cfg.session.accessToken = json.access_token;
   cfg.session.refreshToken = json.refresh_token || cfg.session.refreshToken;
   cfg.session.expiresAt = json.expires_in ? new Date(Date.now() + Number(json.expires_in) * 1000).toISOString() : cfg.session.expiresAt;
   cfg.session.lastRefreshAt = new Date().toISOString();
   saveConfig(cfg);
   return cfg;
+}
+
+function isInvalidRefreshTokenMessage(message) {
+  return /invalid refresh token|refresh token not found|refresh_token_not_found|token not found/i.test(String(message || ""));
+}
+
+function clearExpiredBridgeSession(cfg, reason) {
+  delete cfg.session;
+  delete cfg.bridgeToken;
+  cfg.sessionInvalidAt = new Date().toISOString();
+  bridgeError = reason;
+  saveConfig(cfg);
+  runtimeState = null;
+  pushActivity(reason);
 }
 
 async function syncServicesFromControlPlane(cfg) {
@@ -756,6 +1147,11 @@ async function openService(serviceId) {
   if (!target) return { ok: false, error: "service-url-invalid" };
   try {
     await refreshSupabaseSessionIfNeeded(cfg);
+    if (runtimeHandle?.syncOnce) {
+      await runtimeHandle.syncOnce().catch((err) => {
+        bridgeError = err instanceof Error ? err.message : String(err);
+      });
+    }
     if (cfg.controlPlaneBaseUrl && (cfg.bridgeToken || cfg.session?.accessToken)) {
       const ticket = await postControlPlane(cfg, "bridge/launch-ticket", {
         serviceId: service.serviceId,
@@ -768,7 +1164,7 @@ async function openService(serviceId) {
       }
     }
     await shell.openExternal(target);
-    localStatuses[serviceId] = "connected";
+    delete localStatuses[serviceId];
     pushActivity(`${service.name} ouvert.`);
     return { ok: true, launchUrl: target };
   } catch (err) {
@@ -807,7 +1203,13 @@ async function postControlPlane(cfg, route, payload) {
       payload,
     }),
   });
-  if (!res.ok) throw new Error(`${route} HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  if (!res.ok) {
+    const text = (await res.text()).slice(0, 300);
+    if (res.status === 401 && cfg.session?.accessToken) {
+      clearExpiredBridgeSession(cfg, "Session Bridge expirée. Reconnecte ton compte Bridge.");
+    }
+    throw new Error(`${route} HTTP ${res.status}: ${text}`);
+  }
   return res.json();
 }
 
@@ -872,6 +1274,13 @@ function showStatusWindow() {
     ipcMain.handle("bridge:sign-in", (_event, input) => signIn(input));
     ipcMain.handle("bridge:open-service", (_event, serviceId) => openService(serviceId));
     ipcMain.handle("bridge:reconnect-service", (_event, serviceId) => openService(serviceId));
+    ipcMain.handle("bridge:refresh-codex", () => {
+      const codex = resetCodexStatusCache();
+      refreshStatusWindow();
+      updateTrayMenu();
+      return codex;
+    });
+    ipcMain.handle("bridge:open-codex-help", () => shell.openExternal("https://help.openai.com/en/articles/11381614-api-codex-cli-and-sign-in-with-chatgpt"));
     ipcMain.handle("bridge:sign-out", () => signOut());
     ipcMain.handle("bridge:reveal-data-dir", () => revealDataDir());
   }
@@ -914,6 +1323,14 @@ function statusHtml() {
     .services { display: grid; gap: 8px; }
     .login-hero { min-height: 320px; display: grid; align-content: center; justify-content: center; }
     .login-hero .login-form { width: min(460px, calc(100vw - 64px)); }
+    .login-hero .codex-card { width: min(460px, calc(100vw - 64px)); margin-top: 10px; }
+    .codex-card { display: grid; grid-template-columns: 18px 1fr auto; gap: 12px; align-items: center; border: 1px solid var(--line); background: #fff; border-radius: 8px; padding: 12px; }
+    .codex-card .codex-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+    .codex-card.ready { border-color: #cfe6d7; background: #fbfffc; }
+    .codex-card.missing, .codex-card.login_required, .codex-card.error { border-color: #ead7bb; background: #fffaf1; }
+    .codex-card.ready .dot { background: var(--green); box-shadow: 0 0 0 4px #e2f2e8; }
+    .codex-card.missing .dot, .codex-card.login_required .dot, .codex-card.error .dot { background: var(--amber); box-shadow: 0 0 0 4px #f6eddc; }
+    .codex-card code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--fg); background: #f0f0ea; padding: 2px 4px; border-radius: 4px; }
     .service-row { display: grid; grid-template-columns: 18px 1fr auto; gap: 12px; align-items: center; border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 12px; min-height: 72px; position: relative; overflow: hidden; }
     .service-row.active::before, .service-row.reconnecting::before { content:""; position:absolute; left:-30%; right:-30%; bottom:0; height:2px; background: linear-gradient(90deg, transparent, var(--blue), transparent); animation: move 1.15s linear infinite; }
     @keyframes move { from { transform: translateX(-30%); } to { transform: translateX(30%); } }
@@ -921,7 +1338,11 @@ function statusHtml() {
     .connected .dot { background: var(--green); box-shadow: 0 0 0 4px #e2f2e8; }
     .service-row.active .dot, .service-row.reconnecting .dot { background: var(--blue); box-shadow: 0 0 0 4px #e3edf9; }
     .service-row.paused .dot { background: var(--grey); }
+    .service-row.cloud_stale .dot { background: var(--amber); box-shadow: 0 0 0 4px #f6eddc; }
     .service-row.disconnected .dot { background: var(--red); box-shadow: 0 0 0 4px #f5e6e3; }
+    .service-row.site_unreachable .dot { background: var(--red); box-shadow: 0 0 0 4px #f5e6e3; }
+    .service-row.local_unavailable .dot { background: var(--red); box-shadow: 0 0 0 4px #f5e6e3; }
+    .service-row.codex_unready .dot { background: var(--amber); box-shadow: 0 0 0 4px #f6eddc; }
     .service-main { min-width: 0; }
     .service-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
     .service-title strong { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -963,7 +1384,8 @@ function statusHtml() {
   </main>
   <script>
     let current = null;
-    const labels = { connected: "connecté", paused: "pause", reconnecting: "connexion", active: "actif", disconnected: "hors ligne" };
+    const labels = { connected: "connecté", paused: "pause", reconnecting: "connexion", active: "actif", disconnected: "hors ligne", codex_unready: "codex à connecter", site_unreachable: "site inaccessible", cloud_stale: "à vérifier", local_unavailable: "local indisponible" };
+    const codexLabels = { ready: "prêt", missing: "à installer", login_required: "connexion requise", error: "à vérifier", unknown: "inconnu" };
     function esc(value) { return String(value == null ? "" : value).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c])); }
     function render(state) {
       current = state;
@@ -973,24 +1395,33 @@ function statusHtml() {
       if (!state.authenticated) {
         ensureLoginHero(state);
       } else {
-        services.innerHTML = state.services.length ? state.services.map(service => {
+        services.innerHTML = codexCard(state.codex) + (state.services.length ? state.services.map(service => {
         const status = service.status || "disconnected";
         const scopes = (service.scopes || []).slice(0, 3).join(" · ");
+        const meta = service.statusReason || (status === "local_unavailable"
+          ? "Le port local 7707 n'est pas prêt. Le site web ne peut pas encore détecter Bridge."
+          : (scopes || service.baseUrl));
         const actionLabel = status === "active" || status === "reconnecting"
           ? "Ouverture..."
           : status === "connected"
             ? "Ouvrir"
+            : status === "codex_unready"
+              ? "Configurer Codex"
+            : status === "cloud_stale"
+              ? "Reconnecter"
             : service.lastSeenAt
               ? "Reconnecter"
               : "Connecter";
+        const actionAttr = status === "codex_unready" ? 'data-codex-help="1"' : 'data-open="' + esc(service.serviceId) + '"';
         return '<article class="service-row ' + esc(status) + '">' +
           '<span class="dot" aria-hidden="true"></span>' +
           '<div class="service-main"><div class="service-title"><strong>' + esc(service.name) + '</strong><span class="state">' + esc(labels[status] || status) + '</span></div>' +
-          '<div class="meta">' + esc(scopes || service.baseUrl) + '</div></div>' +
-          '<div class="service-actions"><button data-open="' + esc(service.serviceId) + '" class="primary">' + esc(actionLabel) + '</button></div>' +
+          '<div class="meta">' + esc(meta) + '</div></div>' +
+          '<div class="service-actions"><button ' + actionAttr + ' class="primary">' + esc(actionLabel) + '</button></div>' +
         '</article>';
-      }).join("") : '<p class="empty">Aucun service autorisé.</p>';
+      }).join("") : '<p class="empty">Aucun service autorisé.</p>');
         services.querySelectorAll("[data-open]").forEach(btn => btn.addEventListener("click", () => window.bridge.openService(btn.dataset.open)));
+        attachCodexActions(services);
       }
 
       const account = state.account || {};
@@ -1017,18 +1448,70 @@ function statusHtml() {
           ["Jobs actifs", String(state.activeJobs || 0)],
           ["Protocole", String(state.protocolVersion || 2)]
         ]) +
+        codexIdentityPanel(state.codex) +
         (state.authenticated ? '<div class="panel"><h2>Session</h2><button id="signout">Déconnecter</button></div>' : "");
       document.getElementById("signout")?.addEventListener("click", () => window.bridge.signOut());
+      attachCodexActions(document);
 
       const activity = state.activity || [];
       document.getElementById("activity-list").innerHTML = activity.length ? activity.map(item =>
         '<div class="activity-row"><span>' + new Date(item.ts).toLocaleTimeString("fr-FR") + '</span><strong>' + esc(item.message) + '</strong></div>'
       ).join("") : '<p class="empty">Aucune activité récente.</p>';
     }
+    function codexCard(codex = {}) {
+      const state = codex.state || "unknown";
+      const version = codex.version ? " · " + codex.version : "";
+      const command = state === "missing"
+        ? (codex.installCommand || "npm install -g @openai/codex") + "\\n" + (codex.loginCommand || "codex login")
+        : (codex.loginCommand || "codex login");
+      const action = codex.ready
+        ? '<button data-codex-refresh="1">Tester Codex</button>'
+        : '<button data-codex-copy="' + esc(command) + '">Copier commande</button><button data-codex-help="1">Aide Codex</button><button data-codex-refresh="1">Tester</button>';
+      return '<article class="codex-card ' + esc(state) + '">' +
+        '<span class="dot" aria-hidden="true"></span>' +
+        '<div class="service-main"><div class="service-title"><strong>Codex</strong><span class="state">' + esc(codexLabels[state] || state) + esc(version) + '</span></div>' +
+        '<div class="meta">' + esc(codex.detail || "Statut Codex non vérifié.") + '</div></div>' +
+        '<div class="codex-actions">' + action + '</div>' +
+      '</article>';
+    }
+    function codexIdentityPanel(codex = {}) {
+      return panel("Codex", [
+        ["État", codex.label || "Non vérifié"],
+        ["Version", codex.version || "-"],
+        ["Chemin", codex.path || "-"],
+        ["Session", codex.loggedIn === true ? "connectée" : codex.loggedIn === false ? "à connecter" : "-"]
+      ]);
+    }
+    function attachCodexActions(root) {
+      root.querySelectorAll("[data-codex-refresh]").forEach((btn) => {
+        if (btn.dataset.bound === "1") return;
+        btn.dataset.bound = "1";
+        btn.addEventListener("click", async () => {
+          btn.disabled = true;
+          await window.bridge.refreshCodex();
+          btn.disabled = false;
+        });
+      });
+      root.querySelectorAll("[data-codex-help]").forEach((btn) => {
+        if (btn.dataset.bound === "1") return;
+        btn.dataset.bound = "1";
+        btn.addEventListener("click", () => window.bridge.openCodexHelp());
+      });
+      root.querySelectorAll("[data-codex-copy]").forEach((btn) => {
+        if (btn.dataset.bound === "1") return;
+        btn.dataset.bound = "1";
+        btn.addEventListener("click", async () => {
+          await navigator.clipboard?.writeText?.(btn.dataset.codexCopy || "");
+          btn.textContent = "Copié";
+          setTimeout(() => { btn.textContent = "Copier commande"; }, 1500);
+        });
+      });
+    }
     function ensureLoginHero(state) {
       const services = document.getElementById("services");
       if (services.querySelector("#login-form-main")) return;
-      services.innerHTML = '<div class="login-hero">' + loginForm("main", state, readLoginDraft()) + '</div>';
+      services.innerHTML = '<div class="login-hero">' + loginForm("main", state, readLoginDraft()) + codexCard(state.codex) + '</div>';
+      attachCodexActions(services);
     }
     function ensureLoginPanel(container, suffix, state) {
       if (container.querySelector("#login-form-" + suffix)) return;
