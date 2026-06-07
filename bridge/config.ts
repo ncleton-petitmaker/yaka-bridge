@@ -237,6 +237,7 @@ function prepareBridgeConfigForDisk(cfg: BridgeConfig): PersistedBridgeConfig {
 
 function encryptBridgeSecrets(payload: BridgeSecretPayload): SecureBridgeSecrets | null {
   if (!payload.bridgeToken && !payload.session?.accessToken && !payload.session?.refreshToken) return null;
+  if (process.env.BRIDGE_USE_SAFE_STORAGE !== "1") return null;
   const safeStorage = electronSafeStorage();
   if (!safeStorage?.isEncryptionAvailable()) return null;
   const ciphertext = safeStorage.encryptString(JSON.stringify(payload)).toString("base64");
@@ -245,6 +246,7 @@ function encryptBridgeSecrets(payload: BridgeSecretPayload): SecureBridgeSecrets
 
 function decryptBridgeSecrets(secure: SecureBridgeSecrets): BridgeSecretPayload | null {
   if (secure.version !== 1 || secure.provider !== "electron-safe-storage" || !secure.ciphertext) return null;
+  if (process.env.BRIDGE_USE_SAFE_STORAGE !== "1") return null;
   const safeStorage = electronSafeStorage();
   if (!safeStorage?.isEncryptionAvailable()) return null;
   try {

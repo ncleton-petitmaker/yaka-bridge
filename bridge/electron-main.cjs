@@ -29,6 +29,17 @@ const DATA_DIR =
   process.env.BRIDGE_DATA_DIR ||
   process.env.APP_DATA_DIR ||
   path.join(os.homedir(), PRODUCT_NAME, "data");
+const USER_DATA_DIR =
+  process.env.BRIDGE_USER_DATA_DIR ||
+  process.env.APP_BRIDGE_USER_DATA_DIR ||
+  path.join(os.homedir(), PRODUCT_NAME, "electron-profile");
+
+try {
+  app.setName(PRODUCT_NAME);
+  app.setPath("userData", USER_DATA_DIR);
+} catch {
+  // Keep startup resilient even if Electron rejects a path override.
+}
 
 let statusWindow = null;
 let tray = null;
@@ -48,6 +59,7 @@ let codexStatusCache = null;
 let codexStatusProbeRunning = false;
 let lastCodexStatusRefreshMs = 0;
 let pendingBrowserSession = null;
+let lastConfigSnapshot = null;
 let updateState = {
   enabled: false,
   status: "idle",
@@ -125,7 +137,7 @@ function startAutoUpdates({ reconfigure = false } = {}) {
     updateState = { ...updateState, enabled: false, status: "disabled-dev" };
     return;
   }
-  const feedUrl = updateFeedBaseUrl(loadConfig());
+  const feedUrl = updateFeedBaseUrl(loadConfig({ hydrateSecrets: false }));
   if (!feedUrl) {
     updateState = { ...updateState, enabled: false, status: "missing-feed" };
     updateTrayMenu();
@@ -214,7 +226,7 @@ function compareSemverLike(a, b) {
   return 0;
 }
 
-function bridgeUpdateRequired(cfg = loadConfig()) {
+function bridgeUpdateRequired(cfg = loadConfig({ hydrateSecrets: false })) {
   return Boolean(cfg.minimumVersion && compareSemverLike(currentBridgeVersion(), cfg.minimumVersion) < 0);
 }
 
@@ -433,7 +445,7 @@ function startLocalHealthServer() {
     }
     if (req.method === "GET" && (req.url === "/api/health" || req.url === "/health")) {
       res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify(localStatusPayload()));
+      res.end(JSON.stringify(localStatusPayload({ localProbe: true })));
       return;
     }
     res.writeHead(404, { "content-type": "application/json; charset=utf-8" });
@@ -461,9 +473,11 @@ function startLocalHealthServer() {
   });
 }
 
-function localStatusPayload() {
-  const cfg = loadConfig();
-  const codex = getCodexStatus({ fast: true });
+function localStatusPayload(options = {}) {
+  const cfg = options.localProbe ? loadConfig({ hydrateSecrets: false }) : loadConfig({ hydrateSecrets: false });
+  const codex = options.localProbe
+    ? codexStatusCache?.status || placeholderCodexStatus()
+    : getCodexStatus({ fast: true });
   const base = runtimeState || stateFromConfig(cfg, codex);
   return {
     ...base,
@@ -583,13 +597,9 @@ function getCodexStatus({ force = false, fast = false } = {}) {
     });
   }
 
-  const loginProbe = runCodexProbe(bin, ["login", "status"], 5_000);
-  const loginOutput = `${loginProbe.stdout || ""}\n${loginProbe.stderr || ""}`.trim();
   const authFileExists = fs.existsSync(authPath);
-  const loggedIn =
-    loginProbe.ok ||
-    /logged in|connect[eé]|authenticated|chatgpt|api key/i.test(loginOutput) ||
-    (!/not logged|not authenticated|login required|no login|not signed/i.test(loginOutput) && authFileExists);
+  const loginOutput = authFileExists ? "auth.json présent." : "Aucun auth.json Codex détecté.";
+  const loggedIn = authFileExists;
 
   if (!loggedIn) {
     return finish({
@@ -756,14 +766,18 @@ function isStoredSessionInvalid(cfg) {
   return Boolean(cfg.sessionInvalidAt && !cfg.session?.accessToken && !cfg.bridgeToken);
 }
 
-function loadConfig() {
+function loadConfig(options = {}) {
+  const hydrateSecrets = options.hydrateSecrets !== false;
   const fallback = defaultConfig();
   try {
     if (!fs.existsSync(CONFIG_PATH)) return fallback;
-    const parsed = hydrateSecureBridgeSecrets(JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8")));
-    return normalizeConfig({ ...fallback, ...parsed });
+    const raw = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
+    const parsed = hydrateSecrets ? hydrateSecureBridgeSecrets(raw) : raw;
+    const cfg = normalizeConfig({ ...fallback, ...parsed });
+    if (hydrateSecrets) lastConfigSnapshot = cfg;
+    return cfg;
   } catch {
-    return fallback;
+    return lastConfigSnapshot || fallback;
   }
 }
 
@@ -771,13 +785,14 @@ function saveConfig(next) {
   const cfg = normalizeConfig(next);
   fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
   fs.writeFileSync(CONFIG_PATH, `${JSON.stringify(prepareBridgeConfigForDisk(cfg), null, 2)}\n`, "utf8");
+  lastConfigSnapshot = cfg;
   return cfg;
 }
 
 function hydrateSecureBridgeSecrets(input) {
   const secure = input?._secureSecrets;
   if (!secure || secure.version !== 1 || secure.provider !== "electron-safe-storage" || !secure.ciphertext) return input;
-  if (!safeStorage?.isEncryptionAvailable()) return input;
+  if (!shouldUseElectronSafeStorage()) return input;
   try {
     const payload = JSON.parse(safeStorage.decryptString(Buffer.from(secure.ciphertext, "base64")));
     return {
@@ -808,7 +823,7 @@ function prepareBridgeConfigForDisk(cfg) {
   const hasSecrets = Boolean(payload.bridgeToken || payload.session.accessToken || payload.session.refreshToken);
   const base = { ...cfg };
   delete base._secureSecrets;
-  if (!hasSecrets || !safeStorage?.isEncryptionAvailable()) {
+  if (!hasSecrets || !shouldUseElectronSafeStorage()) {
     return Object.fromEntries(Object.entries(base).filter(([, value]) => value !== undefined));
   }
 
@@ -830,6 +845,10 @@ function prepareBridgeConfigForDisk(cfg) {
     },
   };
   return Object.fromEntries(Object.entries(persisted).filter(([, value]) => value !== undefined));
+}
+
+function shouldUseElectronSafeStorage() {
+  return process.env.BRIDGE_USE_SAFE_STORAGE === "1" && Boolean(safeStorage?.isEncryptionAvailable());
 }
 
 function defaultConfig() {
@@ -1071,7 +1090,7 @@ function formatRelativeAge(value) {
 }
 
 async function refreshExternalStatuses() {
-  const cfg = loadConfig();
+  const cfg = loadConfig({ hydrateSecrets: false });
   for (const service of cfg.services) {
     if (service.paused) {
       localStatuses[service.serviceId] = "paused";
