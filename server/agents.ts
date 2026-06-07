@@ -215,7 +215,8 @@ const MCP_SERVER_NAME = "prix_achats_be";
 const CODEX_AUTH_FILES = ["auth.json", "auth-v2.json", "credentials.json"] as const;
 
 export function prepareIsolatedCodexHome(cwd: string): string {
-  const isolatedHome = path.resolve(cwd, ".codex-bridge");
+  const isolatedUserHome = path.resolve(cwd, ".codex-bridge-home");
+  const isolatedHome = path.join(isolatedUserHome, ".codex");
   mkdirSync(isolatedHome, { recursive: true });
 
   const currentCodexHome = process.env.CODEX_HOME
@@ -238,6 +239,10 @@ export function prepareIsolatedCodexHome(cwd: string): string {
     writeFileSync(configPath, "# Config isolee par Bridge. Les MCP sont passes par -c au lancement.\n", "utf8");
   }
   return isolatedHome;
+}
+
+export function isolatedUserHomeForCodexHome(codexHome: string): string {
+  return path.dirname(codexHome);
 }
 
 /**

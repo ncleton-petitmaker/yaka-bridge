@@ -4,7 +4,7 @@
  */
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { findCodexBin, buildCodexArgs, buildEnrichedPath, prepareIsolatedCodexHome, type BuildArgsOptions } from "./agents.js";
+import { findCodexBin, buildCodexArgs, buildEnrichedPath, isolatedUserHomeForCodexHome, prepareIsolatedCodexHome, type BuildArgsOptions } from "./agents.js";
 import { CodexStreamParser } from "./parse-stream.js";
 import { saveRunEvents } from "./run-history.js";
 import {
@@ -311,6 +311,7 @@ export function startRun(opts: StartRunOptions): RunRecord {
 
   const enrichedPath = buildEnrichedPath();
   const isolatedCodexHome = opts.includeMcp === false ? process.env.CODEX_HOME : prepareIsolatedCodexHome(opts.cwd);
+  const isolatedUserHome = isolatedCodexHome ? isolatedUserHomeForCodexHome(isolatedCodexHome) : undefined;
   const child = spawn(bin, args, {
     cwd: opts.cwd,
     stdio: ["pipe", "pipe", "pipe"],
@@ -318,6 +319,12 @@ export function startRun(opts: StartRunOptions): RunRecord {
     env: {
       ...process.env,
       CODEX_HOME: isolatedCodexHome,
+      ...(isolatedUserHome
+        ? {
+            HOME: isolatedUserHome,
+            USERPROFILE: isolatedUserHome,
+          }
+        : {}),
       PATH: enrichedPath,
       Path: enrichedPath,
       // Sortie sobre : pas de couleurs ANSI dans le flux JSONL ni sur stderr.
