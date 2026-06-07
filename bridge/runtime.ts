@@ -240,7 +240,7 @@ class BridgeRuntime implements BridgeRuntimeHandle {
         sandbox: normalizeJobSandbox(job, service),
         includeMcp: payload.includeMcp ?? false,
         mcpProxyBaseUrl: payload.mcpProxyBaseUrl ?? service.baseUrl,
-        mcpProxyAccessToken: this.cfg.session?.accessToken,
+        mcpProxyAccessToken: payload.mcpProxyAccessToken ?? this.cfg.bridgeToken ?? this.cfg.session?.accessToken,
         ephemeral: payload.ephemeral ?? true,
       });
       localRunId = run.id;

@@ -208,6 +208,7 @@ export interface BridgeJobPayload {
   sandbox?: "read-only" | "workspace-write" | "danger-full-access";
   includeMcp?: boolean;
   mcpProxyBaseUrl?: string;
+  mcpProxyAccessToken?: string;
   ephemeral?: boolean;
   tag?: string;
   metadata?: Record<string, unknown>;

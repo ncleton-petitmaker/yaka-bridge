@@ -5,7 +5,8 @@
  * ChatGPT (`codex login`), donc zéro clé API à gérer.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync, statSync, type Dirent } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync, type Dirent } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
 
 const CANDIDATES_BIN = ["codex"] as const;
@@ -210,6 +211,34 @@ export interface BuildArgsOptions {
  * c'est elle qui contient le path racine d'écriture (skills, audit-log, etc.).
  */
 const DATA_DIR_ENV_VAR = "PRIX_ACHATS_BE_DATA_DIR";
+const MCP_SERVER_NAME = "prix_achats_be";
+const CODEX_AUTH_FILES = ["auth.json", "auth-v2.json", "credentials.json"] as const;
+
+export function prepareIsolatedCodexHome(cwd: string): string {
+  const isolatedHome = path.resolve(cwd, ".codex-bridge");
+  mkdirSync(isolatedHome, { recursive: true });
+
+  const currentCodexHome = process.env.CODEX_HOME
+    ? path.resolve(process.env.CODEX_HOME)
+    : path.join(homedir(), ".codex");
+  if (path.resolve(currentCodexHome) !== isolatedHome) {
+    for (const file of CODEX_AUTH_FILES) {
+      const src = path.join(currentCodexHome, file);
+      if (!existsSync(src)) continue;
+      try {
+        copyFileSync(src, path.join(isolatedHome, file));
+      } catch {
+        // Si la copie échoue, Codex affichera l'erreur de login habituelle.
+      }
+    }
+  }
+
+  const configPath = path.join(isolatedHome, "config.toml");
+  if (!existsSync(configPath)) {
+    writeFileSync(configPath, "# Config isolee par Bridge. Les MCP sont passes par -c au lancement.\n", "utf8");
+  }
+  return isolatedHome;
+}
 
 /**
  * Construit les overrides `-c mcp_servers.*` qui exposent le serveur MCP
@@ -243,9 +272,12 @@ function buildMcpOverrides(opts: BuildArgsOptions = {}): string[] {
     .join(", ")}}`;
 
   return [
-    "-c", `mcp_servers.prix_achats_be.command=${JSON.stringify(command)}`,
-    "-c", `mcp_servers.prix_achats_be.args=${JSON.stringify(cmdArgs)}`,
-    "-c", `mcp_servers.prix_achats_be.env=${envToml}`,
+    "-c", `mcp_servers.${MCP_SERVER_NAME}.command=${JSON.stringify(command)}`,
+    "-c", `mcp_servers.${MCP_SERVER_NAME}.args=${JSON.stringify(cmdArgs)}`,
+    "-c", `mcp_servers.${MCP_SERVER_NAME}.env=${envToml}`,
+    "-c", `mcp_servers.${MCP_SERVER_NAME}.startup_timeout_sec=20`,
+    "-c", `mcp_servers.${MCP_SERVER_NAME}.tool_timeout_sec=120`,
+    "-c", `mcp_servers.${MCP_SERVER_NAME}.default_tools_approval_mode="approve"`,
   ];
 }
 

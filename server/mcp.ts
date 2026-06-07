@@ -46,7 +46,7 @@ async function toolsList() {
 
 async function proxyToolsList() {
   const res = await fetch(`${MCP_PROXY_BASE_URL}/api/actions`, {
-    headers: MCP_PROXY_ACCESS_TOKEN ? { Authorization: `Bearer ${MCP_PROXY_ACCESS_TOKEN}` } : {},
+    headers: proxyHeaders(),
   });
   if (!res.ok) throw new Error(`Registry actions indisponible (${res.status})`);
   const data = await res.json() as { actions?: Array<{ id: string; description?: string; inputSchema?: Record<string, unknown>; inputJsonSchema?: Record<string, unknown>; audit?: { dangerous?: boolean; adminOnly?: boolean } }> };
@@ -134,10 +134,7 @@ async function proxyCallAction(actionId: string, args: unknown) {
   if (!MCP_PROXY_ACCESS_TOKEN) throw new Error("Token Bridge manquant pour appeler le service MCP proxy.");
   const res = await fetch(`${MCP_PROXY_BASE_URL}/api/actions/${encodeURIComponent(actionId)}`, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${MCP_PROXY_ACCESS_TOKEN}`,
-      "Content-Type": "application/json",
-    },
+    headers: proxyHeaders({ json: true }),
     body: JSON.stringify(args ?? {}),
   });
   const data = await res.json().catch(() => ({})) as { ok?: boolean; output?: unknown; error?: string };
@@ -145,6 +142,16 @@ async function proxyCallAction(actionId: string, args: unknown) {
     throw new Error(data.error ?? `Action ${actionId} échouée (${res.status})`);
   }
   return data.output ?? data;
+}
+
+function proxyHeaders(opts: { json?: boolean } = {}): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (MCP_PROXY_ACCESS_TOKEN) {
+    headers.Authorization = `Bearer ${MCP_PROXY_ACCESS_TOKEN}`;
+    headers["x-bridge-token"] = MCP_PROXY_ACCESS_TOKEN;
+  }
+  if (opts.json) headers["Content-Type"] = "application/json";
+  return headers;
 }
 
 const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
