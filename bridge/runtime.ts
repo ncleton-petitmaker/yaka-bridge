@@ -1,6 +1,7 @@
+import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
-import { hostname, platform } from "node:os";
+import { hostname, homedir, platform } from "node:os";
 import { isAbsolute, relative, resolve } from "node:path";
 import { BridgeCloudClient } from "./client.js";
 import {
@@ -14,6 +15,7 @@ import {
 import {
   BRIDGE_PRODUCT_NAME,
   BRIDGE_PROTOCOL_VERSION,
+  type BridgeCodexStatus,
   type BridgeConfig,
   type BridgePathRef,
   type BridgeRuntimeServiceState,
@@ -29,7 +31,10 @@ import {
   startRun,
   waitForRun,
 } from "../server/runs.js";
+import { buildEnrichedPath, findCodexBin } from "../server/agents.js";
 import { setPricingDataDir } from "../server/pricing.js";
+
+let codexStatusCache: { checkedMs: number; status: BridgeCodexStatus } | null = null;
 
 export interface BridgeRuntimeOptions {
   command?: "run" | "once";
@@ -96,7 +101,10 @@ class BridgeRuntime implements BridgeRuntimeHandle {
       return;
     }
     await refreshSupabaseSessionIfNeeded(this.cfg, this.options.configPath);
-    const synced = await this.client.sync(this.state());
+    const synced = await this.client.sync(this.state()).catch((err) => {
+      this.handleAuthError(err);
+      throw err;
+    });
     if (synced.bridgeId && synced.bridgeId !== this.cfg.bridgeId) {
       this.cfg.bridgeId = synced.bridgeId;
     }
@@ -122,7 +130,10 @@ class BridgeRuntime implements BridgeRuntimeHandle {
     }
 
     await refreshSupabaseSessionIfNeeded(this.cfg, this.options.configPath);
-    const res = await this.client.poll(capabilities(this.cfg));
+    const res = await this.client.poll(capabilities(this.cfg)).catch((err) => {
+      this.handleAuthError(err);
+      throw err;
+    });
     this.lastSyncAt = res.serverTime ?? new Date().toISOString();
     if (!res.jobs?.length) {
       this.lastError = undefined;
@@ -131,12 +142,12 @@ class BridgeRuntime implements BridgeRuntimeHandle {
     }
     console.log(`[bridge] ${res.jobs.length} job(s) reçu(s) du Control Plane.`);
 
-    const maxGlobal = this.cfg.maxConcurrentJobs ?? 1;
+    const maxGlobal = this.cfg.maxConcurrentJobs ?? 10;
     const runnable = res.jobs.filter((job) => {
       const service = serviceForJob(this.cfg, job);
       if (!service || service.paused) return false;
       const running = this.runningByService.get(service.serviceId) ?? 0;
-      return running < (service.maxConcurrentJobs ?? 1);
+      return running < (service.maxConcurrentJobs ?? 10);
     });
     const capacity = Math.max(0, maxGlobal - this.state().activeJobs);
     if (!runnable.length || capacity <= 0) {
@@ -164,7 +175,10 @@ class BridgeRuntime implements BridgeRuntimeHandle {
 
   private async registerAndSync(): Promise<void> {
     await refreshSupabaseSessionIfNeeded(this.cfg, this.options.configPath);
-    const registered = await this.client.register(capabilities(this.cfg));
+    const registered = await this.client.register(capabilities(this.cfg)).catch((err) => {
+      this.handleAuthError(err);
+      throw err;
+    });
     if (registered.bridgeId && registered.bridgeId !== this.cfg.bridgeId) {
       this.cfg.bridgeId = registered.bridgeId;
       saveBridgeConfig(this.cfg, this.options.configPath);
@@ -290,6 +304,17 @@ class BridgeRuntime implements BridgeRuntimeHandle {
       service.lastSeenAt = new Date().toISOString();
       this.emitState();
     }
+  }
+
+  private handleAuthError(err: unknown): void {
+    const message = err instanceof Error ? err.message : String(err);
+    if (!isInvalidBridgeAuthMessage(message)) return;
+    delete this.cfg.session;
+    delete this.cfg.bridgeToken;
+    this.cfg.sessionInvalidAt = new Date().toISOString();
+    this.lastError = "Session Bridge expirée. Reconnecte ton compte Bridge dans l'onglet Identifiants.";
+    saveBridgeConfig(this.cfg, this.options.configPath);
+    this.emitState();
   }
 
   private async completeSkippedJob(job: CloudBridgeJob, error: string): Promise<void> {
@@ -429,7 +454,7 @@ async function refreshSupabaseSessionIfNeeded(cfg: BridgeConfig, configPath: str
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
     const message = json.error_description || json.msg || json.error || `Refresh HTTP ${res.status}`;
-    if (isInvalidRefreshTokenMessage(message)) {
+    if (isInvalidBridgeAuthMessage(message)) {
       delete cfg.session;
       delete cfg.bridgeToken;
       cfg.sessionInvalidAt = new Date().toISOString();
@@ -445,8 +470,8 @@ async function refreshSupabaseSessionIfNeeded(cfg: BridgeConfig, configPath: str
   saveBridgeConfig(cfg, configPath);
 }
 
-function isInvalidRefreshTokenMessage(message: string): boolean {
-  return /invalid refresh token|refresh token not found|refresh_token_not_found|token not found/i.test(message);
+function isInvalidBridgeAuthMessage(message: string): boolean {
+  return /invalid refresh token|refresh token not found|refresh_token_not_found|token not found|session_id claim in jwt does not exist/i.test(message);
 }
 
 export async function startBridgeRuntime(options: BridgeRuntimeOptions = {}): Promise<BridgeRuntimeHandle> {
@@ -501,6 +526,7 @@ function ensureRuntimeDirs(cfg: BridgeConfig): void {
 }
 
 function capabilities(cfg: BridgeConfig): Record<string, unknown> {
+  const codex = getRuntimeCodexStatus();
   return {
     app: BRIDGE_PRODUCT_NAME,
     productName: BRIDGE_PRODUCT_NAME,
@@ -508,7 +534,10 @@ function capabilities(cfg: BridgeConfig): Record<string, unknown> {
     version: process.env.APP_BRIDGE_VERSION ?? process.env.npm_package_version ?? "dev",
     host: hostname(),
     platform: platform(),
-    maxConcurrentJobs: cfg.maxConcurrentJobs ?? 1,
+    codexAvailable: codex.ready,
+    codexBin: codex.path ? "detected" : "missing",
+    codex,
+    maxConcurrentJobs: cfg.maxConcurrentJobs ?? 10,
     erpBus: cfg.erpBus,
     services: cfg.services.map((service) => ({
       serviceId: service.serviceId,
@@ -527,6 +556,135 @@ function capabilities(cfg: BridgeConfig): Record<string, unknown> {
       })),
     })),
   };
+}
+
+function getRuntimeCodexStatus({ force = false } = {}): BridgeCodexStatus {
+  const now = Date.now();
+  if (!force && codexStatusCache && now - codexStatusCache.checkedMs < 15_000) {
+    return codexStatusCache.status;
+  }
+
+  const installCommand = "npm install -g @openai/codex";
+  const loginCommand = "codex login";
+  const checkedAt = new Date().toISOString();
+  const authPath = resolve(homedir(), ".codex", "auth.json");
+  const bin = findCodexBin();
+
+  const finish = (status: Omit<BridgeCodexStatus, "installCommand" | "loginCommand" | "checkedAt">): BridgeCodexStatus => {
+    const next = {
+      installCommand,
+      loginCommand,
+      checkedAt,
+      ...status,
+    };
+    codexStatusCache = { checkedMs: now, status: next };
+    return next;
+  };
+
+  if (!bin) {
+    return finish({
+      ready: false,
+      state: "missing",
+      label: "Codex non installé",
+      detail: "Installe Codex CLI puis connecte-le pour que Bridge puisse exécuter les agents.",
+      path: null,
+      version: null,
+      loggedIn: null,
+      authPath,
+    });
+  }
+
+  const versionProbe = runCodexProbe(bin, ["--version"], 5_000);
+  const versionOutput = `${versionProbe.stdout || ""}\n${versionProbe.stderr || ""}`.trim();
+  const version = versionOutput.match(/(\d+\.\d+\.\d+)/)?.[1] || versionOutput.split(/\s+/).find(Boolean) || null;
+  if (!versionProbe.ok) {
+    return finish({
+      ready: false,
+      state: "error",
+      label: "Codex à vérifier",
+      detail: "Codex est détecté, mais le test de version échoue.",
+      path: bin,
+      version,
+      loggedIn: null,
+      authPath,
+      diagnostic: compactProbeError(versionProbe),
+    });
+  }
+
+  const loginProbe = runCodexProbe(bin, ["login", "status"], 5_000);
+  const loginOutput = `${loginProbe.stdout || ""}\n${loginProbe.stderr || ""}`.trim();
+  const authFileExists = existsSync(authPath);
+  const loggedIn =
+    loginProbe.ok ||
+    /logged in|connect[eé]|authenticated|chatgpt|api key/i.test(loginOutput) ||
+    (!/not logged|not authenticated|login required|no login|not signed/i.test(loginOutput) && authFileExists);
+
+  if (!loggedIn) {
+    return finish({
+      ready: false,
+      state: "login_required",
+      label: "Connexion Codex requise",
+      detail: "Codex est installé, mais il n'est pas connecté à un compte OpenAI.",
+      path: bin,
+      version,
+      loggedIn: false,
+      authPath,
+      diagnostic: loginOutput || "codex login status ne confirme pas de session active.",
+    });
+  }
+
+  return finish({
+    ready: true,
+    state: "ready",
+    label: "Codex prêt",
+    detail: "Codex CLI est installé et connecté. Les agents Bridge peuvent tourner sur cet ordinateur.",
+    path: bin,
+    version,
+    loggedIn: true,
+    authPath: authFileExists ? authPath : null,
+    diagnostic: loginOutput || undefined,
+  });
+}
+
+function runCodexProbe(bin: string, args: string[], timeout: number): {
+  ok: boolean;
+  status: number | null;
+  stdout: string;
+  stderr: string;
+  error: string;
+} {
+  const shellForCmd = process.platform === "win32" && /\.(cmd|bat)$/i.test(bin);
+  try {
+    const enrichedPath = buildEnrichedPath();
+    const res = spawnSync(bin, args, {
+      encoding: "utf8",
+      shell: shellForCmd,
+      env: { ...process.env, PATH: enrichedPath, Path: enrichedPath },
+      timeout,
+    });
+    return {
+      ok: res.status === 0,
+      status: res.status,
+      stdout: res.stdout || "",
+      stderr: res.stderr || "",
+      error: res.error?.message || "",
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      status: null,
+      stdout: "",
+      stderr: "",
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+function compactProbeError(probe: { error?: string; stderr?: string; stdout?: string }): string {
+  return [probe.error, probe.stderr, probe.stdout]
+    .filter(Boolean)
+    .join("\n")
+    .slice(0, 500);
 }
 
 function runtimeState(
@@ -553,6 +711,7 @@ function runtimeState(
     dataDir: cfg.dataDir,
     controlPlaneConfigured: Boolean(cfg.controlPlaneBaseUrl && (cfg.bridgeToken || cfg.session?.accessToken)),
     authenticated: Boolean(cfg.session?.accessToken || cfg.bridgeToken),
+    codex: getRuntimeCodexStatus(),
     demoMode: cfg.demoMode === true,
     services: cfg.services.map((service): BridgeRuntimeServiceState => {
       const runningJobs = runtime.runningByService.get(service.serviceId) ?? 0;

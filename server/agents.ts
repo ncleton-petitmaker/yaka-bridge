@@ -18,16 +18,24 @@ let cachedCodexBin: string | null = null;
  * installe Codex. Son `process.env.PATH` ne contient donc pas forcément les
  * dossiers d'install npm/homebrew.
  */
-function buildEnrichedPath(): string {
+export function buildEnrichedPath(): string {
   const home = process.env.HOME || process.env.USERPROFILE;
+  const appData = process.env.APPDATA || (home ? path.join(home, "AppData", "Roaming") : "");
+  const localAppData = process.env.LOCALAPPDATA || (home ? path.join(home, "AppData", "Local") : "");
+  const programFiles = process.env.ProgramFiles || "C:\\Program Files";
+  const programFilesX86 = process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)";
   const extras = [
     "/usr/local/bin",
     "/opt/homebrew/bin",
     home ? path.join(home, ".local", "bin") : null,
     home ? path.join(home, ".npm-global", "bin") : null,
     home ? path.join(home, ".codex", "bin") : null,
+    appData ? path.join(appData, "npm") : null,
+    localAppData ? path.join(localAppData, "Programs", "nodejs") : null,
+    programFiles ? path.join(programFiles, "nodejs") : null,
+    programFilesX86 ? path.join(programFilesX86, "nodejs") : null,
   ].filter(Boolean) as string[];
-  return [process.env.PATH, ...extras].filter(Boolean).join(path.delimiter);
+  return [process.env.PATH, process.env.Path, ...extras].filter(Boolean).join(path.delimiter);
 }
 
 function which(bin: string): string | null {
@@ -50,11 +58,16 @@ function which(bin: string): string | null {
  */
 function probeKnownPaths(): string | null {
   const home = process.env.HOME || process.env.USERPROFILE;
+  const appData = process.env.APPDATA || (home ? path.join(home, "AppData", "Roaming") : "");
+  const localAppData = process.env.LOCALAPPDATA || (home ? path.join(home, "AppData", "Local") : "");
   const isWin = process.platform === "win32";
   const candidates = isWin
     ? [
-        home ? path.join(home, "AppData", "Roaming", "npm", "codex.cmd") : null,
+        appData ? path.join(appData, "npm", "codex.cmd") : null,
+        appData ? path.join(appData, "npm", "codex.ps1") : null,
+        localAppData ? path.join(localAppData, "Programs", "nodejs", "codex.cmd") : null,
         home ? path.join(home, ".local", "bin", "codex.exe") : null,
+        home ? path.join(home, ".codex", "bin", "codex.exe") : null,
       ]
     : [
         "/usr/local/bin/codex",

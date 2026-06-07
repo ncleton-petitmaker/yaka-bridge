@@ -1090,7 +1090,7 @@ async function refreshSupabaseSessionIfNeeded(cfg) {
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
     const message = json.error_description || json.msg || json.error || `Refresh HTTP ${res.status}`;
-    if (isInvalidRefreshTokenMessage(message)) {
+    if (isInvalidBridgeAuthMessage(message)) {
       clearExpiredBridgeSession(cfg, "Session Bridge expirée. Reconnecte ton compte Bridge.");
       throw new Error("Session Bridge expirée. Reconnecte ton compte Bridge dans l'onglet Identifiants.");
     }
@@ -1104,8 +1104,8 @@ async function refreshSupabaseSessionIfNeeded(cfg) {
   return cfg;
 }
 
-function isInvalidRefreshTokenMessage(message) {
-  return /invalid refresh token|refresh token not found|refresh_token_not_found|token not found/i.test(String(message || ""));
+function isInvalidBridgeAuthMessage(message) {
+  return /invalid refresh token|refresh token not found|refresh_token_not_found|token not found|session_id claim in jwt does not exist/i.test(String(message || ""));
 }
 
 function clearExpiredBridgeSession(cfg, reason) {
@@ -1143,7 +1143,7 @@ async function openService(serviceId) {
   localStatuses[serviceId] = "reconnecting";
   refreshStatusWindow();
 
-  let target = cleanExternalUrl(service.baseUrl);
+  let target = serviceLaunchBaseUrl(service);
   if (!target) return { ok: false, error: "service-url-invalid" };
   try {
     await refreshSupabaseSessionIfNeeded(cfg);
@@ -1160,7 +1160,7 @@ async function openService(serviceId) {
       if (ticket.launchUrl) {
         const launchUrl = cleanExternalUrl(ticket.launchUrl);
         if (!launchUrl) throw new Error("Launch ticket URL invalide.");
-        target = launchUrl;
+        target = serviceLaunchUrl(service, launchUrl);
       }
     }
     await shell.openExternal(target);
@@ -1175,6 +1175,25 @@ async function openService(serviceId) {
   } finally {
     refreshStatusWindow();
   }
+}
+
+function serviceLaunchBaseUrl(service) {
+  if (service.serviceId === "achat") return "https://achat.rossinienergy.yaka-bridge.com";
+  return cleanExternalUrl(service.baseUrl);
+}
+
+function serviceLaunchUrl(service, launchUrl) {
+  if (service.serviceId !== "achat") return launchUrl;
+  try {
+    const parsed = new URL(launchUrl);
+    if (parsed.hostname === "rossinienergy.yaka-bridge.com") {
+      parsed.hostname = "achat.rossinienergy.yaka-bridge.com";
+      return parsed.toString();
+    }
+  } catch {
+    // Garde l'URL de base du service si le ticket est malformé.
+  }
+  return launchUrl;
 }
 
 async function postControlPlane(cfg, route, payload) {
@@ -1310,6 +1329,13 @@ function statusHtml() {
     h1 { font-size: 18px; line-height: 1.1; margin: 0; letter-spacing: 0; }
     .subtitle { color: var(--muted); font-size: 12px; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .top-actions { display: flex; gap: 8px; align-items: center; }
+    .status-pill { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; border: 1px solid var(--line); border-radius: 999px; background: #fff; padding: 4px 9px; font-size: 12px; font-weight: 700; color: var(--muted); white-space: nowrap; }
+    .status-pill::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--grey); }
+    .status-pill.ready { color: var(--green); border-color: #b8ddc7; background: #f4fbf7; }
+    .status-pill.ready::before { background: var(--green); }
+    .status-pill.warning { color: var(--amber); border-color: #ead7bb; background: #fffaf1; }
+    .status-pill.warning::before { background: var(--amber); }
+    .status-pill.version::before { display: none; }
     button { border: 1px solid var(--line); border-radius: 7px; background: #fff; color: var(--fg); padding: 8px 10px; font-size: 13px; font-weight: 650; cursor: pointer; min-height: 34px; }
     button:hover { border-color: #b9bbb3; }
     button:disabled { opacity: .55; cursor: progress; }
@@ -1371,7 +1397,7 @@ function statusHtml() {
   <main>
     <header>
       <div class="brand">${bridgeLogoSvg("mark")}<div><h1>Bridge</h1><div class="subtitle" id="subtitle"></div></div></div>
-      <div class="top-actions"><button class="icon" id="sync" title="Synchroniser" aria-label="Synchroniser">R</button><button id="folder">Dossier</button></div>
+      <div class="top-actions"><span class="status-pill version" id="version-pill"></span><span class="status-pill" id="codex-pill"></span><button class="icon" id="sync" title="Synchroniser" aria-label="Synchroniser">R</button><button id="folder">Dossier</button></div>
     </header>
     <nav>
       <button data-tab="bridges" class="active">Bridges</button>
@@ -1390,6 +1416,12 @@ function statusHtml() {
     function render(state) {
       current = state;
       document.getElementById("subtitle").textContent = (state.account?.email || "Compte Bridge non connecté") + " · " + state.services.length + " service(s)";
+      const versionPill = document.getElementById("version-pill");
+      versionPill.textContent = "v" + (state.version || "dev");
+      const codexPill = document.getElementById("codex-pill");
+      const codexState = state.codex?.state || "unknown";
+      codexPill.textContent = "Codex " + (codexLabels[codexState] || codexState);
+      codexPill.className = "status-pill " + (state.codex?.ready ? "ready" : "warning");
       document.getElementById("error").textContent = state.bridgeError || state.lastError || "";
       const services = document.getElementById("services");
       if (!state.authenticated) {
