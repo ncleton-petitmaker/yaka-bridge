@@ -275,6 +275,11 @@ function buildMcpOverrides(opts: BuildArgsOptions = {}): string[] {
     "-c", `mcp_servers.${MCP_SERVER_NAME}.command=${JSON.stringify(command)}`,
     "-c", `mcp_servers.${MCP_SERVER_NAME}.args=${JSON.stringify(cmdArgs)}`,
     "-c", `mcp_servers.${MCP_SERVER_NAME}.env=${envToml}`,
+    ...(opts.allowedTools?.length
+      ? ["-c", `mcp_servers.${MCP_SERVER_NAME}.enabled_tools=${JSON.stringify(opts.allowedTools)}`]
+      : []),
+    "-c", `mcp_servers.${MCP_SERVER_NAME}.enabled=true`,
+    "-c", `mcp_servers.${MCP_SERVER_NAME}.required=true`,
     "-c", `mcp_servers.${MCP_SERVER_NAME}.startup_timeout_sec=20`,
     "-c", `mcp_servers.${MCP_SERVER_NAME}.tool_timeout_sec=120`,
     "-c", `mcp_servers.${MCP_SERVER_NAME}.default_tools_approval_mode="approve"`,

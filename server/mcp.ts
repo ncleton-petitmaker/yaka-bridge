@@ -92,6 +92,15 @@ async function handle(req: JsonRpcRequest) {
         serverInfo: { name: APP_SLUG, version: APP_VERSION },
       });
 
+    case "resources/list":
+      return result(req.id, { resources: [] });
+
+    case "resources/templates/list":
+      return result(req.id, { resourceTemplates: [] });
+
+    case "prompts/list":
+      return result(req.id, { prompts: [] });
+
     case "tools/list":
       return result(req.id, { tools: await toolsList() });
 

@@ -1420,7 +1420,7 @@ function appendQueryParam(inputUrl, key, value) {
   }
 }
 
-async function postControlPlane(cfg, route, payload) {
+async function postControlPlane(cfg, route, payload, options = {}) {
   const url = `${String(cfg.controlPlaneBaseUrl).replace(/\/+$/, "")}/${route.replace(/^\/+/, "")}`;
   const headers = {
     "content-type": "application/json",
@@ -1448,7 +1448,11 @@ async function postControlPlane(cfg, route, payload) {
   });
   if (!res.ok) {
     const text = (await res.text()).slice(0, 300);
-    if (res.status === 401 && cfg.session?.accessToken) {
+    if (res.status === 401 && cfg.session?.refreshToken && !options.afterRefresh) {
+      await refreshSupabaseSessionIfNeeded(cfg);
+      return postControlPlane(cfg, route, payload, { afterRefresh: true });
+    }
+    if (res.status === 401 && cfg.session?.refreshToken) {
       clearExpiredBridgeSession(cfg, "Session Bridge expirée. Reconnecte ton compte Bridge.");
     }
     throw new Error(`${route} HTTP ${res.status}: ${text}`);
