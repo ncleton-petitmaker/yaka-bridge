@@ -1,6 +1,6 @@
 {
   "name": "bridge-erp-template",
-  "version": "0.0.1",
+  "version": "0.0.10",
   "private": true,
   "description": "Template Bridge + Supabase self-hosted pour ERP modulaire multi-services.",
   "engines": {

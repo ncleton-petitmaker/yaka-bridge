@@ -217,13 +217,12 @@ const DATA_DIR_ENV_VAR = "PRIX_ACHATS_BE_DATA_DIR";
 function buildMcpOverrides(): string[] {
   const dataDir =
     process.env[DATA_DIR_ENV_VAR] ?? path.resolve(process.cwd(), "data");
-  const root = process.cwd();
-  const packagedMcp = path.resolve(root, "dist", "mcp.cjs");
-  const devMcp = path.resolve(root, "server", "mcp.ts");
-  const isPackaged = existsSync(packagedMcp);
+  const packagedMcp = resolvePackagedMcpPath();
+  const devMcp = path.resolve(process.cwd(), "server", "mcp.ts");
+  const isPackaged = Boolean(packagedMcp);
 
   const command = isPackaged ? process.execPath : "npx";
-  const cmdArgs = isPackaged ? [packagedMcp] : ["tsx", devMcp];
+  const cmdArgs = isPackaged && packagedMcp ? [packagedMcp] : ["tsx", devMcp];
   const env: Record<string, string> = { [DATA_DIR_ENV_VAR]: dataDir };
   if (isPackaged) {
     env.ELECTRON_RUN_AS_NODE = process.env.ELECTRON_RUN_AS_NODE ?? "1";
@@ -238,6 +237,17 @@ function buildMcpOverrides(): string[] {
     "-c", `mcp_servers.prix_achats_be.args=${JSON.stringify(cmdArgs)}`,
     "-c", `mcp_servers.prix_achats_be.env=${envToml}`,
   ];
+}
+
+function resolvePackagedMcpPath(): string | null {
+  const candidates = [
+    process.env.BRIDGE_MCP_PATH,
+    path.resolve(process.cwd(), "dist", "mcp.cjs"),
+    path.resolve(process.cwd(), "mcp.cjs"),
+    typeof __dirname !== "undefined" ? path.resolve(__dirname, "mcp.cjs") : null,
+    typeof __dirname !== "undefined" ? path.resolve(__dirname, "..", "mcp.cjs") : null,
+  ].filter(Boolean) as string[];
+  return candidates.find((candidate) => existsSync(candidate)) ?? null;
 }
 
 /**

@@ -10,6 +10,7 @@ await mkdir(outdir, { recursive: true });
 for (const [entry, outfile] of [
   ["index.ts", "index.cjs"],
   ["runtime.ts", "runtime.cjs"],
+  ["../server/mcp.ts", "mcp.cjs"],
 ]) {
   await build({
     entryPoints: [resolve(root, "bridge", entry)],

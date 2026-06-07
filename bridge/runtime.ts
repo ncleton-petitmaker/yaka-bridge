@@ -257,6 +257,7 @@ class BridgeRuntime implements BridgeRuntimeHandle {
       });
       const finalRun = await waitForRun(run.id);
       service.status = finalRun?.status === "succeeded" ? "connected" : "disconnected";
+      const finalError = finalRun?.status === "failed" ? runFailureMessage(finalRun) : undefined;
       await this.client.completeJob({
         organizationId: job.organizationId,
         serviceId: service.serviceId,
@@ -267,6 +268,7 @@ class BridgeRuntime implements BridgeRuntimeHandle {
         leaseId: job.leaseId,
         localRunId: run.id,
         status: finalRun?.status ?? "failed",
+        error: finalError,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -678,6 +680,18 @@ function runCodexProbe(bin: string, args: string[], timeout: number): {
       error: err instanceof Error ? err.message : String(err),
     };
   }
+}
+
+function runFailureMessage(run: { events?: any[]; exitCode?: number | null } | null): string {
+  const events = Array.isArray(run?.events) ? run.events : [];
+  const parts = [...events]
+    .reverse()
+    .filter((event) => event?.kind === "error" || event?.kind === "stderr")
+    .map((event) => String(event.error ?? event.text ?? "").trim())
+    .filter(Boolean);
+  const message = parts.join("\n").trim();
+  if (message) return message.slice(0, 1000);
+  return `Run Codex échoué${run?.exitCode != null ? ` (code ${run.exitCode})` : ""}.`;
 }
 
 function compactProbeError(probe: { error?: string; stderr?: string; stdout?: string }): string {
