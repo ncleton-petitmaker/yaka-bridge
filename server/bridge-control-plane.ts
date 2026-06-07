@@ -70,6 +70,38 @@ export function registerBridgeControlPlaneRoutes(app: Hono, dataDir: string): vo
     return c.json({ ok: true, services: store.services, erpBus: store.erpBus, serverTime: new Date().toISOString() });
   });
 
+  app.post("/bridge/browser-session", async (c) => {
+    const envelope = await readEnvelope(c);
+    const payload = envelope.payload ?? {};
+    const browserSessionId = String(payload.browserSessionId ?? "").trim();
+    if (!/^[A-Za-z0-9_-]{24,160}$/.test(browserSessionId)) {
+      return c.json({ ok: false, error: "invalid-browser-session" }, 400);
+    }
+    const store = loadStore(dataDir);
+    const state = payload.state && typeof payload.state === "object" ? payload.state : {};
+    const existing = store.devices.find((candidate) =>
+      candidate.deviceId === (envelope.deviceId ?? payload.deviceId ?? envelope.installId ?? payload.installId)
+    );
+    upsertDevice(store, {
+      bridgeId: envelope.bridgeId ?? payload.bridgeId,
+      deviceId: envelope.deviceId ?? payload.deviceId ?? envelope.installId ?? payload.installId,
+      installId: envelope.installId ?? payload.installId,
+      label: payload.label ?? state.label,
+      capabilities: {
+        ...(existing?.capabilities ?? {}),
+        ...state,
+        browserSession: {
+          id: browserSessionId,
+          seen_at: new Date().toISOString(),
+          return_url: typeof payload.returnUrl === "string" ? payload.returnUrl.slice(0, 600) : null,
+        },
+      },
+      lastSeenAt: new Date().toISOString(),
+    });
+    saveStore(dataDir, store);
+    return c.json({ ok: true, serverTime: new Date().toISOString() });
+  });
+
   app.post("/bridge/launch-ticket", async (c) => {
     const envelope = await readEnvelope(c);
     const request = envelope.payload ?? {};
@@ -106,6 +138,17 @@ export function registerBridgeControlPlaneRoutes(app: Hono, dataDir: string): vo
     const serviceIds = new Set(Array.isArray(body.serviceIds) ? body.serviceIds : []);
     const store = loadStore(dataDir);
     const now = Date.now();
+    if (envelope.deviceId || envelope.installId || body.deviceId || body.installId) {
+      upsertDevice(store, {
+        bridgeId: envelope.bridgeId ?? body.bridgeId,
+        deviceId: envelope.deviceId ?? body.deviceId ?? envelope.installId ?? body.installId,
+        installId: envelope.installId ?? body.installId,
+        label: body.label,
+        capabilities: body.capabilities ?? {},
+        state: body.state,
+        lastSeenAt: new Date(now).toISOString(),
+      });
+    }
     const jobs = store.jobs
       .filter((job) => job.status === "queued")
       .filter((job) => serviceIds.size === 0 || serviceIds.has(job.serviceId))
@@ -128,7 +171,7 @@ export function registerBridgeControlPlaneRoutes(app: Hono, dataDir: string): vo
         };
       });
     saveStore(dataDir, store);
-    return c.json({ ok: true, jobs });
+    return c.json({ ok: true, jobs, serverTime: new Date(now).toISOString() });
   });
 
   app.post("/bridge/jobs/events", async (c) => {

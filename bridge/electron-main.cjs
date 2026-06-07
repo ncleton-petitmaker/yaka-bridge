@@ -45,6 +45,7 @@ let autoUpdateStarted = false;
 let autoUpdateInterval = null;
 let updateDownloaded = false;
 let codexStatusCache = null;
+let pendingBrowserSession = null;
 let updateState = {
   enabled: false,
   status: "idle",
@@ -59,14 +60,16 @@ const singleInstanceLock = app.requestSingleInstanceLock();
 if (!singleInstanceLock) {
   app.quit();
 } else {
-  app.on("second-instance", () => {
+  app.on("second-instance", (_event, argv) => {
+    handleProtocolArgs(argv);
     showStatusWindow();
     syncServices();
   });
 }
 
-app.on("open-url", (event) => {
+app.on("open-url", (event, url) => {
   event.preventDefault();
+  handleProtocolUrl(url);
   showStatusWindow();
   syncServices();
 });
@@ -218,7 +221,80 @@ function updateFeedBaseUrl(cfg) {
   const explicit = cleanExternalUrl(process.env.BRIDGE_UPDATE_BASE_URL || process.env.BRIDGE_AUTO_UPDATE_URL || cfg.updateBaseUrl);
   if (explicit) return explicit;
   const supabaseUrl = cleanExternalUrl(cfg.supabaseUrl);
-  return supabaseUrl ? `${supabaseUrl}/storage/v1/object/public/bridge-updates` : null;
+  if (supabaseUrl) return `${supabaseUrl}/storage/v1/object/public/bridge-updates`;
+  const controlPlane = cleanExternalUrl(cfg.controlPlaneBaseUrl || cfg.cloudBaseUrl);
+  if (controlPlane) {
+    try {
+      const url = new URL(controlPlane);
+      if (url.hostname.endsWith(".yaka-bridge.com")) {
+        return "https://api.rossinienergy.yaka-bridge.com/storage/v1/object/public/bridge-updates";
+      }
+    } catch {
+      // no-op
+    }
+  }
+  return null;
+}
+
+function handleProtocolArgs(argv) {
+  const args = Array.isArray(argv) ? argv : [];
+  const target = args.find((arg) => typeof arg === "string" && arg.startsWith("bridge://"));
+  if (target) handleProtocolUrl(target);
+}
+
+function handleProtocolUrl(rawUrl) {
+  if (!rawUrl) return;
+  let parsed;
+  try {
+    parsed = new URL(String(rawUrl));
+  } catch {
+    return;
+  }
+  if (parsed.protocol !== "bridge:") return;
+  const browserSessionId = parsed.searchParams.get("browserSessionId") || "";
+  const returnUrl = parsed.searchParams.get("returnUrl") || "";
+  if (browserSessionId) {
+    pendingBrowserSession = {
+      browserSessionId: String(browserSessionId).slice(0, 160),
+      returnUrl: String(returnUrl || "").slice(0, 600),
+      receivedAt: new Date().toISOString(),
+      attempts: 0,
+    };
+    pushActivity("Rendez-vous navigateur reçu.");
+    void flushPendingBrowserSession();
+  }
+}
+
+async function flushPendingBrowserSession() {
+  if (!pendingBrowserSession) return;
+  const current = pendingBrowserSession;
+  current.attempts = Number(current.attempts || 0) + 1;
+  const cfg = loadConfig();
+  if (!cfg.controlPlaneBaseUrl || (!cfg.bridgeToken && !cfg.session?.accessToken)) {
+    if (current.attempts <= 5) {
+      setTimeout(() => void flushPendingBrowserSession(), 1200);
+    } else {
+      pushActivity("Rendez-vous navigateur reçu, mais Bridge n'est pas connecté au cloud.");
+    }
+    return;
+  }
+  try {
+    await postControlPlane(cfg, "bridge/browser-session", {
+      browserSessionId: current.browserSessionId,
+      returnUrl: current.returnUrl,
+      state: localStatusPayload(),
+    });
+    if (pendingBrowserSession === current) pendingBrowserSession = null;
+    pushActivity("Rendez-vous navigateur confirmé au cloud.");
+    refreshStatusWindow();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (current.attempts <= 5 && /unauthorized|401|session|token|configuration|not-configured/i.test(message)) {
+      setTimeout(() => void flushPendingBrowserSession(), 1200);
+      return;
+    }
+    pushActivity(`Rendez-vous navigateur refusé: ${message}`);
+  }
 }
 
 function ensureDirs() {
@@ -1132,9 +1208,12 @@ async function syncServicesFromControlPlane(cfg) {
     cfg.organizationId = res.account.organizationId;
   }
   if (res.erpBus) cfg.erpBus = res.erpBus;
+  const previousUpdateBaseUrl = cfg.updateBaseUrl;
   if (res.updateBaseUrl) cfg.updateBaseUrl = res.updateBaseUrl;
   bridgeError = res.error || null;
   saveConfig(cfg);
+  if (cfg.updateBaseUrl && cfg.updateBaseUrl !== previousUpdateBaseUrl) startAutoUpdates({ reconfigure: true });
+  void flushPendingBrowserSession();
   refreshStatusWindow();
   updateTrayMenu();
   return res;
