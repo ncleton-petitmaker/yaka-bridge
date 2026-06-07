@@ -449,38 +449,80 @@ function assertSafeDownloadUrl(raw: string): string {
 
 async function refreshSupabaseSessionIfNeeded(cfg: BridgeConfig, configPath: string): Promise<void> {
   if (!cfg.session?.refreshToken || !cfg.supabaseUrl || !cfg.supabaseAnonKey) return;
-  const expiresAt = cfg.session.expiresAt ? Date.parse(cfg.session.expiresAt) : 0;
-  if (expiresAt && expiresAt - Date.now() > 60_000) return;
-  const res = await fetch(`${cfg.supabaseUrl.replace(/\/+$/, "")}/auth/v1/token?grant_type=refresh_token`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      apikey: cfg.supabaseAnonKey,
-      authorization: `Bearer ${cfg.supabaseAnonKey}`,
-    },
-    body: JSON.stringify({ refresh_token: cfg.session.refreshToken }),
-  });
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    const message = json.error_description || json.msg || json.error || `Refresh HTTP ${res.status}`;
-    if (isInvalidBridgeAuthMessage(message)) {
-      delete cfg.session;
-      delete cfg.bridgeToken;
-      cfg.sessionInvalidAt = new Date().toISOString();
-      saveBridgeConfig(cfg, configPath);
-      throw new Error("Session Bridge expirée. Reconnecte ton compte Bridge dans l'onglet Identifiants.");
+  await withSupabaseRefreshLock(async () => {
+    const fresh = loadBridgeConfig(configPath);
+    if (fresh.session?.refreshToken) {
+      const freshExpiresAt = fresh.session.expiresAt ? Date.parse(fresh.session.expiresAt) : 0;
+      if (fresh.session.refreshToken !== cfg.session?.refreshToken && (!freshExpiresAt || freshExpiresAt - Date.now() > 60_000)) {
+        Object.assign(cfg, fresh);
+        return;
+      }
+      if (freshExpiresAt && freshExpiresAt - Date.now() > 60_000) {
+        Object.assign(cfg, fresh);
+        return;
+      }
     }
-    throw new Error(message);
-  }
-  cfg.session.accessToken = json.access_token;
-  cfg.session.refreshToken = json.refresh_token || cfg.session.refreshToken;
-  cfg.session.expiresAt = json.expires_in ? new Date(Date.now() + Number(json.expires_in) * 1000).toISOString() : cfg.session.expiresAt;
-  cfg.session.lastRefreshAt = new Date().toISOString();
-  saveBridgeConfig(cfg, configPath);
+
+    const expiresAt = cfg.session?.expiresAt ? Date.parse(cfg.session.expiresAt) : 0;
+    if (expiresAt && expiresAt - Date.now() > 60_000) return;
+    const supabaseUrl = cfg.supabaseUrl;
+    const supabaseAnonKey = cfg.supabaseAnonKey;
+    const session = cfg.session;
+    const refreshToken = cfg.session?.refreshToken;
+    if (!session || !refreshToken || !supabaseUrl || !supabaseAnonKey) return;
+    const res = await fetch(`${supabaseUrl.replace(/\/+$/, "")}/auth/v1/token?grant_type=refresh_token`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        apikey: supabaseAnonKey,
+        authorization: `Bearer ${supabaseAnonKey}`,
+      },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const message = json.error_description || json.msg || json.error || `Refresh HTTP ${res.status}`;
+      if (isInvalidBridgeAuthMessage(message)) {
+        const latest = loadBridgeConfig(configPath);
+        const latestExpiresAt = latest.session?.expiresAt ? Date.parse(latest.session.expiresAt) : 0;
+        if (
+          latest.session?.refreshToken &&
+          latest.session.refreshToken !== refreshToken &&
+          (!latestExpiresAt || latestExpiresAt - Date.now() > 60_000)
+        ) {
+          Object.assign(cfg, latest);
+          return;
+        }
+        delete cfg.session;
+        delete cfg.bridgeToken;
+        cfg.sessionInvalidAt = new Date().toISOString();
+        saveBridgeConfig(cfg, configPath);
+        throw new Error("Session Bridge expirée. Reconnecte ton compte Bridge dans l'onglet Identifiants.");
+      }
+      throw new Error(message);
+    }
+    session.accessToken = json.access_token;
+    session.refreshToken = json.refresh_token || session.refreshToken;
+    session.expiresAt = json.expires_in ? new Date(Date.now() + Number(json.expires_in) * 1000).toISOString() : session.expiresAt;
+    session.lastRefreshAt = new Date().toISOString();
+    saveBridgeConfig(cfg, configPath);
+  });
 }
 
 function isInvalidBridgeAuthMessage(message: string): boolean {
   return /invalid refresh token|refresh token not found|refresh_token_not_found|token not found|session_id claim in jwt does not exist/i.test(message);
+}
+
+function withSupabaseRefreshLock(fn: () => Promise<void>): Promise<void> {
+  const key = "__bridgeSupabaseRefreshLock";
+  const globalState = globalThis as typeof globalThis & Record<string, Promise<void> | undefined>;
+  const previous = globalState[key] || Promise.resolve();
+  const next = previous.catch(() => undefined).then(fn);
+  const locked = next.finally(() => {
+    if (globalState[key] === locked) delete globalState[key];
+  });
+  globalState[key] = locked;
+  return next;
 }
 
 export async function startBridgeRuntime(options: BridgeRuntimeOptions = {}): Promise<BridgeRuntimeHandle> {

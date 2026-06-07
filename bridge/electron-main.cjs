@@ -45,6 +45,8 @@ let autoUpdateStarted = false;
 let autoUpdateInterval = null;
 let updateDownloaded = false;
 let codexStatusCache = null;
+let codexStatusProbeRunning = false;
+let lastCodexStatusRefreshMs = 0;
 let pendingBrowserSession = null;
 let updateState = {
   enabled: false,
@@ -91,14 +93,17 @@ app.on("window-all-closed", () => {
 
 app.whenReady().then(() => {
   ensureDirs();
-  registerBridgeProtocol();
-  createTray();
-  startRuntimeIfAvailable();
   startLocalHealthServer();
-  startAutoUpdates();
-  showStatusWindow();
-  refreshExternalStatuses();
-  setInterval(refreshExternalStatuses, 15_000);
+  setImmediate(() => {
+    registerBridgeProtocol();
+    createTray();
+    showStatusWindow();
+    startRuntimeIfAvailable();
+    startAutoUpdates();
+    refreshExternalStatuses();
+    scheduleCodexStatusRefresh();
+    setInterval(refreshExternalStatuses, 15_000);
+  });
 });
 
 app.on("activate", () => showStatusWindow());
@@ -458,8 +463,8 @@ function startLocalHealthServer() {
 
 function localStatusPayload() {
   const cfg = loadConfig();
-  const base = runtimeState || stateFromConfig(cfg);
-  const codex = getCodexStatus();
+  const codex = getCodexStatus({ fast: true });
+  const base = runtimeState || stateFromConfig(cfg, codex);
   return {
     ...base,
     codex,
@@ -479,7 +484,7 @@ function localStatusPayload() {
   };
 }
 
-function stateFromConfig(cfg) {
+function stateFromConfig(cfg, codex = getCodexStatus({ fast: true })) {
   return {
     ok: true,
     bridge: true,
@@ -495,7 +500,7 @@ function stateFromConfig(cfg) {
     dataDir: cfg.dataDir,
     controlPlaneConfigured: Boolean(cfg.controlPlaneBaseUrl && (cfg.bridgeToken || cfg.session?.accessToken)),
     authenticated: Boolean(cfg.session?.accessToken || cfg.bridgeToken),
-    codex: getCodexStatus(),
+    codex,
     controlPlaneBaseUrl: cfg.controlPlaneBaseUrl || cfg.cloudBaseUrl || process.env.BRIDGE_DEFAULT_CONTROL_PLANE_URL || "",
     demoMode: cfg.demoMode === true,
     services: cfg.services.map((service) => ({
@@ -518,10 +523,14 @@ function stateFromConfig(cfg) {
   };
 }
 
-function getCodexStatus({ force = false } = {}) {
+function getCodexStatus({ force = false, fast = false } = {}) {
   const now = Date.now();
-  if (!force && codexStatusCache && now - codexStatusCache.checkedMs < 15_000) {
+  if (!force && codexStatusCache && now - codexStatusCache.checkedMs < 60_000) {
     return codexStatusCache.status;
+  }
+  if (fast) {
+    scheduleCodexStatusRefresh();
+    return codexStatusCache?.status || placeholderCodexStatus();
   }
 
   const installCommand = "npm install -g @openai/codex";
@@ -607,6 +616,38 @@ function getCodexStatus({ force = false } = {}) {
     authPath: authFileExists ? authPath : null,
     diagnostic: loginOutput || undefined,
   });
+}
+
+function placeholderCodexStatus() {
+  return {
+    installCommand: "npm install -g @openai/codex",
+    loginCommand: "codex login",
+    checkedAt: "",
+    ready: false,
+    state: "checking",
+    label: "Codex en vérification",
+    detail: "Bridge vérifie Codex en arrière-plan.",
+    path: null,
+    version: null,
+    loggedIn: null,
+    authPath: path.join(os.homedir(), ".codex", "auth.json"),
+  };
+}
+
+function scheduleCodexStatusRefresh() {
+  const now = Date.now();
+  if (codexStatusProbeRunning || now - lastCodexStatusRefreshMs < 5_000) return;
+  codexStatusProbeRunning = true;
+  lastCodexStatusRefreshMs = now;
+  setTimeout(() => {
+    try {
+      getCodexStatus({ force: true });
+    } finally {
+      codexStatusProbeRunning = false;
+      refreshStatusWindow();
+      updateTrayMenu();
+    }
+  }, 0);
 }
 
 function resetCodexStatusCache() {
@@ -1202,32 +1243,69 @@ async function supabasePasswordSignIn(authConfig, email, password) {
 
 async function refreshSupabaseSessionIfNeeded(cfg) {
   if (!cfg.session?.refreshToken || !cfg.supabaseUrl || !cfg.supabaseAnonKey) return cfg;
-  const expiresAt = cfg.session.expiresAt ? Date.parse(cfg.session.expiresAt) : 0;
-  if (expiresAt && expiresAt - Date.now() > 60_000) return cfg;
-  const res = await fetch(`${cfg.supabaseUrl.replace(/\/+$/, "")}/auth/v1/token?grant_type=refresh_token`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      apikey: cfg.supabaseAnonKey,
-      authorization: `Bearer ${cfg.supabaseAnonKey}`,
-    },
-    body: JSON.stringify({ refresh_token: cfg.session.refreshToken }),
-  });
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    const message = json.error_description || json.msg || json.error || `Refresh HTTP ${res.status}`;
-    if (isInvalidBridgeAuthMessage(message)) {
-      clearExpiredBridgeSession(cfg, "Session Bridge expirée. Reconnecte ton compte Bridge.");
-      throw new Error("Session Bridge expirée. Reconnecte ton compte Bridge dans l'onglet Identifiants.");
+  return withSupabaseRefreshLock(async () => {
+    const fresh = loadConfig();
+    if (fresh.session?.refreshToken) {
+      const freshExpiresAt = fresh.session.expiresAt ? Date.parse(fresh.session.expiresAt) : 0;
+      if (fresh.session.refreshToken !== cfg.session.refreshToken && (!freshExpiresAt || freshExpiresAt - Date.now() > 60_000)) {
+        Object.assign(cfg, fresh);
+        return cfg;
+      }
+      if (freshExpiresAt && freshExpiresAt - Date.now() > 60_000) {
+        Object.assign(cfg, fresh);
+        return cfg;
+      }
     }
-    throw new Error(message);
-  }
-  cfg.session.accessToken = json.access_token;
-  cfg.session.refreshToken = json.refresh_token || cfg.session.refreshToken;
-  cfg.session.expiresAt = json.expires_in ? new Date(Date.now() + Number(json.expires_in) * 1000).toISOString() : cfg.session.expiresAt;
-  cfg.session.lastRefreshAt = new Date().toISOString();
-  saveConfig(cfg);
-  return cfg;
+
+    const expiresAt = cfg.session.expiresAt ? Date.parse(cfg.session.expiresAt) : 0;
+    if (expiresAt && expiresAt - Date.now() > 60_000) return cfg;
+    const refreshToken = cfg.session.refreshToken;
+    const res = await fetch(`${cfg.supabaseUrl.replace(/\/+$/, "")}/auth/v1/token?grant_type=refresh_token`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        apikey: cfg.supabaseAnonKey,
+        authorization: `Bearer ${cfg.supabaseAnonKey}`,
+      },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const message = json.error_description || json.msg || json.error || `Refresh HTTP ${res.status}`;
+      if (isInvalidBridgeAuthMessage(message)) {
+        const latest = loadConfig();
+        const latestExpiresAt = latest.session?.expiresAt ? Date.parse(latest.session.expiresAt) : 0;
+        if (
+          latest.session?.refreshToken &&
+          latest.session.refreshToken !== refreshToken &&
+          (!latestExpiresAt || latestExpiresAt - Date.now() > 60_000)
+        ) {
+          Object.assign(cfg, latest);
+          return cfg;
+        }
+        clearExpiredBridgeSession(cfg, "Session Bridge expirée. Reconnecte ton compte Bridge.");
+        throw new Error("Session Bridge expirée. Reconnecte ton compte Bridge dans l'onglet Identifiants.");
+      }
+      throw new Error(message);
+    }
+    cfg.session.accessToken = json.access_token;
+    cfg.session.refreshToken = json.refresh_token || cfg.session.refreshToken;
+    cfg.session.expiresAt = json.expires_in ? new Date(Date.now() + Number(json.expires_in) * 1000).toISOString() : cfg.session.expiresAt;
+    cfg.session.lastRefreshAt = new Date().toISOString();
+    saveConfig(cfg);
+    return cfg;
+  });
+}
+
+function withSupabaseRefreshLock(fn) {
+  const key = "__bridgeSupabaseRefreshLock";
+  const previous = globalThis[key] || Promise.resolve();
+  const next = previous.catch(() => null).then(fn);
+  const locked = next.finally(() => {
+    if (globalThis[key] === locked) delete globalThis[key];
+  });
+  globalThis[key] = locked;
+  return next;
 }
 
 function isInvalidBridgeAuthMessage(message) {
@@ -1279,6 +1357,7 @@ async function openService(serviceId) {
 
   let target = serviceLaunchBaseUrl(service);
   if (!target) return { ok: false, error: "service-url-invalid" };
+  const browserSessionId = createBrowserSessionId();
   try {
     await refreshSupabaseSessionIfNeeded(cfg);
     if (runtimeHandle?.syncOnce) {
@@ -1287,6 +1366,13 @@ async function openService(serviceId) {
       });
     }
     if (cfg.controlPlaneBaseUrl && (cfg.bridgeToken || cfg.session?.accessToken)) {
+      await postControlPlane(cfg, "bridge/browser-session", {
+        browserSessionId,
+        returnUrl: target,
+        state: localStatusPayload(),
+      }).catch((err) => {
+        bridgeError = err instanceof Error ? err.message : String(err);
+      });
       const ticket = await postControlPlane(cfg, "bridge/launch-ticket", {
         serviceId: service.serviceId,
         serviceInstanceId: service.serviceInstanceId,
@@ -1297,6 +1383,7 @@ async function openService(serviceId) {
         target = serviceLaunchUrl(service, launchUrl);
       }
     }
+    target = appendQueryParam(target, "browserSessionId", browserSessionId);
     await shell.openExternal(target);
     delete localStatuses[serviceId];
     pushActivity(`${service.name} ouvert.`);
@@ -1312,22 +1399,25 @@ async function openService(serviceId) {
 }
 
 function serviceLaunchBaseUrl(service) {
-  if (service.serviceId === "achat") return "https://achat.rossinienergy.yaka-bridge.com";
   return cleanExternalUrl(service.baseUrl);
 }
 
 function serviceLaunchUrl(service, launchUrl) {
-  if (service.serviceId !== "achat") return launchUrl;
-  try {
-    const parsed = new URL(launchUrl);
-    if (parsed.hostname === "rossinienergy.yaka-bridge.com") {
-      parsed.hostname = "achat.rossinienergy.yaka-bridge.com";
-      return parsed.toString();
-    }
-  } catch {
-    // Garde l'URL de base du service si le ticket est malformé.
-  }
   return launchUrl;
+}
+
+function createBrowserSessionId() {
+  return `bs_${cryptoRandomId().replace(/-/g, "")}`;
+}
+
+function appendQueryParam(inputUrl, key, value) {
+  try {
+    const url = new URL(inputUrl);
+    if (!url.searchParams.has(key)) url.searchParams.set(key, value);
+    return url.toString();
+  } catch {
+    return inputUrl;
+  }
 }
 
 async function postControlPlane(cfg, route, payload) {

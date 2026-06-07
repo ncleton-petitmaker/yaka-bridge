@@ -304,6 +304,8 @@ export function buildCodexArgs(opts: BuildArgsOptions = {}): string[] {
     "exec",
     "--json",
     "--skip-git-repo-check",
+    "--ignore-user-config",
+    "--ignore-rules",
     "--color", "never",
     "--sandbox", opts.sandbox ?? "read-only",
   ];
