@@ -5,7 +5,7 @@
  * ChatGPT (`codex login`), donc zéro clé API à gérer.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync, statSync, type Dirent } from "node:fs";
 import path from "node:path";
 
 const CANDIDATES_BIN = ["codex"] as const;
@@ -61,6 +61,8 @@ function probeKnownPaths(): string | null {
   const appData = process.env.APPDATA || (home ? path.join(home, "AppData", "Roaming") : "");
   const localAppData = process.env.LOCALAPPDATA || (home ? path.join(home, "AppData", "Local") : "");
   const isWin = process.platform === "win32";
+  const wingetCodex = isWin ? probeWingetCodexPackage() : null;
+  if (wingetCodex) return wingetCodex;
   const candidates = isWin
     ? [
         appData ? path.join(appData, "npm", "codex.cmd") : null,
@@ -77,6 +79,60 @@ function probeKnownPaths(): string | null {
       ];
   for (const c of candidates) {
     if (c && existsSync(c)) return c;
+  }
+  return null;
+}
+
+function probeWingetCodexPackage(): string | null {
+  const localAppData = process.env.LOCALAPPDATA;
+  if (!localAppData) return null;
+  const pkgRoot = path.join(localAppData, "Microsoft", "WinGet", "Packages");
+  let entries: string[] = [];
+  try {
+    entries = readdirSync(pkgRoot);
+  } catch {
+    return null;
+  }
+  const isCodexExe = (file: string) => {
+    const lower = file.toLowerCase();
+    if (!lower.endsWith(".exe")) return false;
+    if (lower.includes("command-runner") || lower.includes("sandbox-setup")) return false;
+    return lower === "codex.exe" || /^codex[-_]/.test(lower);
+  };
+  const findInDir = (dir: string, depth: number): string | null => {
+    let files: Dirent[];
+    try {
+      files = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return null;
+    }
+    for (const f of files) {
+      if (f.isFile() && isCodexExe(f.name)) return path.join(dir, f.name);
+    }
+    if (depth <= 0) return null;
+    for (const f of files) {
+      if (!f.isDirectory()) continue;
+      const found = findInDir(path.join(dir, f.name), depth - 1);
+      if (found) return found;
+    }
+    return null;
+  };
+  const packages = entries
+    .filter((entry) => /^OpenAI\.Codex/i.test(entry))
+    .map((entry) => {
+      const dir = path.join(pkgRoot, entry);
+      let mtime = 0;
+      try {
+        mtime = statSync(dir).mtimeMs;
+      } catch {
+        // ignore
+      }
+      return { dir, mtime };
+    })
+    .sort((a, b) => b.mtime - a.mtime);
+  for (const { dir } of packages) {
+    const found = findInDir(dir, 2);
+    if (found) return found;
   }
   return null;
 }

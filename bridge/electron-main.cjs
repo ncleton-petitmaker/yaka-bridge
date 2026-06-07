@@ -4,6 +4,7 @@ const { createServer } = require("node:http");
 const path = require("node:path");
 const fs = require("node:fs");
 const os = require("node:os");
+const { runCodexSetup, ensureCodexFileStore, findCodexBin: findInstalledCodexBin } = require("./provider-setup.cjs");
 
 let autoUpdater = null;
 try {
@@ -453,6 +454,7 @@ function getCodexStatus({ force = false } = {}) {
     });
   }
 
+  ensureCodexFileStore();
   const versionProbe = runCodexProbe(bin, ["--version"], 5_000);
   const versionOutput = `${versionProbe.stdout || ""}\n${versionProbe.stderr || ""}`.trim();
   const version = versionOutput.match(/(\d+\.\d+\.\d+)/)?.[1] || versionOutput.split(/\s+/).find(Boolean) || null;
@@ -531,6 +533,8 @@ function buildCodexPath() {
 }
 
 function findCodexExecutable() {
+  const installed = findInstalledCodexBin();
+  if (installed && fs.existsSync(installed)) return installed;
   const enrichedPath = buildCodexPath();
   const which = spawnSync(process.platform === "win32" ? "where" : "which", ["codex"], {
     encoding: "utf8",
@@ -1299,6 +1303,14 @@ function showStatusWindow() {
       updateTrayMenu();
       return codex;
     });
+    ipcMain.handle("bridge:setup-codex", async () => {
+      const result = await runCodexSetup();
+      const codex = resetCodexStatusCache();
+      pushActivity(codex.ready ? "Codex est prêt sur ce poste." : "Configuration Codex à terminer.");
+      refreshStatusWindow();
+      updateTrayMenu();
+      return { ...result, codex };
+    });
     ipcMain.handle("bridge:open-codex-help", () => shell.openExternal("https://help.openai.com/en/articles/11381614-api-codex-cli-and-sign-in-with-chatgpt"));
     ipcMain.handle("bridge:sign-out", () => signOut());
     ipcMain.handle("bridge:reveal-data-dir", () => revealDataDir());
@@ -1444,7 +1456,7 @@ function statusHtml() {
             : service.lastSeenAt
               ? "Reconnecter"
               : "Connecter";
-        const actionAttr = status === "codex_unready" ? 'data-codex-help="1"' : 'data-open="' + esc(service.serviceId) + '"';
+        const actionAttr = status === "codex_unready" ? 'data-codex-setup="1"' : 'data-open="' + esc(service.serviceId) + '"';
         return '<article class="service-row ' + esc(status) + '">' +
           '<span class="dot" aria-hidden="true"></span>' +
           '<div class="service-main"><div class="service-title"><strong>' + esc(service.name) + '</strong><span class="state">' + esc(labels[status] || status) + '</span></div>' +
@@ -1493,12 +1505,9 @@ function statusHtml() {
     function codexCard(codex = {}) {
       const state = codex.state || "unknown";
       const version = codex.version ? " · " + codex.version : "";
-      const command = state === "missing"
-        ? (codex.installCommand || "npm install -g @openai/codex") + "\\n" + (codex.loginCommand || "codex login")
-        : (codex.loginCommand || "codex login");
       const action = codex.ready
         ? '<button data-codex-refresh="1">Tester Codex</button>'
-        : '<button data-codex-copy="' + esc(command) + '">Copier commande</button><button data-codex-help="1">Aide Codex</button><button data-codex-refresh="1">Tester</button>';
+        : '<button data-codex-setup="1" class="primary">' + (state === "missing" ? "Installer Codex" : "Connecter Codex") + '</button><button data-codex-refresh="1">Tester</button>';
       return '<article class="codex-card ' + esc(state) + '">' +
         '<span class="dot" aria-hidden="true"></span>' +
         '<div class="service-main"><div class="service-title"><strong>Codex</strong><span class="state">' + esc(codexLabels[state] || state) + esc(version) + '</span></div>' +
@@ -1528,6 +1537,18 @@ function statusHtml() {
         if (btn.dataset.bound === "1") return;
         btn.dataset.bound = "1";
         btn.addEventListener("click", () => window.bridge.openCodexHelp());
+      });
+      root.querySelectorAll("[data-codex-setup]").forEach((btn) => {
+        if (btn.dataset.bound === "1") return;
+        btn.dataset.bound = "1";
+        btn.addEventListener("click", async () => {
+          btn.disabled = true;
+          const old = btn.textContent;
+          btn.textContent = "Configuration...";
+          await window.bridge.setupCodex();
+          btn.textContent = old || "Configurer Codex";
+          btn.disabled = false;
+        });
       });
       root.querySelectorAll("[data-codex-copy]").forEach((btn) => {
         if (btn.dataset.bound === "1") return;

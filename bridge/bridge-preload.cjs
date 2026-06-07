@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld("bridge", {
   openService: (serviceId) => ipcRenderer.invoke("bridge:open-service", serviceId),
   reconnectService: (serviceId) => ipcRenderer.invoke("bridge:reconnect-service", serviceId),
   refreshCodex: () => ipcRenderer.invoke("bridge:refresh-codex"),
+  setupCodex: () => ipcRenderer.invoke("bridge:setup-codex"),
   openCodexHelp: () => ipcRenderer.invoke("bridge:open-codex-help"),
   signOut: () => ipcRenderer.invoke("bridge:sign-out"),
   revealDataDir: () => ipcRenderer.invoke("bridge:reveal-data-dir"),
