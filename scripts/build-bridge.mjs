@@ -7,10 +7,10 @@ const outdir = resolve(root, "dist", "bridge");
 
 await mkdir(outdir, { recursive: true });
 
-for (const [entry, outfile] of [
-  ["index.ts", "index.cjs"],
-  ["runtime.ts", "runtime.cjs"],
-  ["../server/mcp.ts", "mcp.cjs"],
+for (const [entry, outfile, externalPackages] of [
+  ["index.ts", "index.cjs", true],
+  ["runtime.ts", "runtime.cjs", true],
+  ["../server/mcp.ts", "mcp.cjs", false],
 ]) {
   await build({
     entryPoints: [resolve(root, "bridge", entry)],
@@ -19,7 +19,7 @@ for (const [entry, outfile] of [
     platform: "node",
     format: "cjs",
     target: "node24",
-    packages: "external",
+    ...(externalPackages ? { packages: "external" } : {}),
     sourcemap: false,
     logLevel: "info",
   });
