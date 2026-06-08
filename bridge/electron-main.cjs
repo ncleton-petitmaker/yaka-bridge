@@ -60,6 +60,7 @@ let codexStatusProbeRunning = false;
 let lastCodexStatusRefreshMs = 0;
 let pendingBrowserSession = null;
 let lastConfigSnapshot = null;
+let protocolLaunchHandled = false;
 let updateState = {
   enabled: false,
   status: "idle",
@@ -75,8 +76,8 @@ if (!singleInstanceLock) {
   app.quit();
 } else {
   app.on("second-instance", (_event, argv) => {
-    handleProtocolArgs(argv);
-    showStatusWindow();
+    const handledProtocol = handleProtocolArgs(argv);
+    if (!handledProtocol) showStatusWindow();
     syncServices();
   });
 }
@@ -84,7 +85,6 @@ if (!singleInstanceLock) {
 app.on("open-url", (event, url) => {
   event.preventDefault();
   handleProtocolUrl(url);
-  showStatusWindow();
   syncServices();
 });
 
@@ -107,9 +107,10 @@ app.whenReady().then(() => {
   ensureDirs();
   startLocalHealthServer();
   setImmediate(() => {
+    const launchedByProtocol = handleProtocolArgs(process.argv) || protocolLaunchHandled;
     registerBridgeProtocol();
     createTray();
-    showStatusWindow();
+    if (!launchedByProtocol) showStatusWindow();
     startRuntimeIfAvailable();
     startAutoUpdates();
     refreshExternalStatuses();
@@ -276,18 +277,19 @@ function updateFeedBaseUrl(cfg) {
 function handleProtocolArgs(argv) {
   const args = Array.isArray(argv) ? argv : [];
   const target = args.find((arg) => typeof arg === "string" && arg.startsWith("bridge://"));
-  if (target) handleProtocolUrl(target);
+  return target ? handleProtocolUrl(target) : false;
 }
 
 function handleProtocolUrl(rawUrl) {
-  if (!rawUrl) return;
+  if (!rawUrl) return false;
   let parsed;
   try {
     parsed = new URL(String(rawUrl));
   } catch {
-    return;
+    return false;
   }
-  if (parsed.protocol !== "bridge:") return;
+  if (parsed.protocol !== "bridge:") return false;
+  protocolLaunchHandled = true;
   const browserSessionId = parsed.searchParams.get("browserSessionId") || "";
   const returnUrl = parsed.searchParams.get("returnUrl") || "";
   if (browserSessionId) {
@@ -300,6 +302,7 @@ function handleProtocolUrl(rawUrl) {
     pushActivity("Rendez-vous navigateur reçu.");
     void flushPendingBrowserSession();
   }
+  return true;
 }
 
 async function flushPendingBrowserSession() {
@@ -1575,10 +1578,10 @@ function statusHtml() {
   <title>Bridge</title>
   <style>
     * { box-sizing: border-box; }
-    :root { color-scheme: light; --bg:#f7f7f4; --fg:#171716; --muted:#6f726d; --line:#d9d9d2; --panel:#ffffff; --green:#1e8f56; --grey:#9b9f98; --amber:#ba7a18; --blue:#2b63a8; --red:#b34236; }
-    body { margin: 0; min-height: 100vh; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--bg); color: var(--fg); }
+    :root { color-scheme: light; --bg:#f7f5f0; --fg:#171716; --muted:#706c64; --soft:#9b978e; --line:#e4ded3; --panel:#ffffff; --paper:#fffdf8; --ink:#27221d; --rust:#c96442; --rust-strong:#a74f34; --teal:#2fb9a8; --green:#1e8f56; --grey:#9b9f98; --amber:#ba7a18; --blue:#2b63a8; --red:#b34236; --shadow:0 18px 44px rgba(39,34,29,.10), 0 3px 10px rgba(39,34,29,.06); }
+    body { margin: 0; min-height: 100vh; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: radial-gradient(circle at 12% -10%, #fffaf1 0, transparent 32%), var(--bg); color: var(--fg); }
     main { display: grid; grid-template-rows: auto auto 1fr; min-height: 100vh; }
-    header { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 18px 22px 14px; border-bottom: 1px solid var(--line); background: #fbfbf8; }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 18px 26px 14px; border-bottom: 1px solid var(--line); background: rgba(255,253,248,.84); backdrop-filter: blur(16px); position: sticky; top: 0; z-index: 5; }
     .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
     .mark { width: 34px; height: 34px; flex: 0 0 auto; display: block; }
     h1 { font-size: 18px; line-height: 1.1; margin: 0; letter-spacing: 0; }
@@ -1596,22 +1599,53 @@ function statusHtml() {
     button:disabled { opacity: .55; cursor: progress; }
     button.primary { background: #171716; color: #fff; border-color: #171716; }
     button.icon { width: 34px; padding: 0; display: grid; place-items: center; }
-    nav { display: flex; gap: 4px; padding: 10px 22px 0; background: #fbfbf8; }
+    nav { display: flex; gap: 4px; padding: 10px 26px 0; background: rgba(255,253,248,.72); }
     nav button { border-color: transparent; background: transparent; color: var(--muted); min-height: 32px; }
     nav button.active { color: var(--fg); background: #e8e8e1; border-color: #d0d0c8; }
-    section { display: none; padding: 18px 22px 22px; overflow: auto; }
+    section { display: none; padding: 18px 26px 26px; overflow: auto; }
     section.active { display: block; }
-    .services { display: grid; gap: 8px; }
+    .dashboard-intro { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 14px; align-items: stretch; margin-bottom: 22px; }
+    .hero-panel, .health-panel { border: 1px solid var(--line); background: rgba(255,253,248,.86); border-radius: 10px; padding: 16px; box-shadow: 0 1px 0 rgba(39,34,29,.03); }
+    .hero-panel h2 { font-size: 22px; margin: 0 0 5px; letter-spacing: 0; }
+    .hero-panel p, .health-panel p { margin: 0; color: var(--muted); font-size: 12px; }
+    .health-panel { display: grid; gap: 12px; }
+    .health-head { display: flex; justify-content: space-between; align-items: start; gap: 12px; }
+    .health-head strong { font-size: 13px; }
+    .health-score { display: inline-flex; align-items: center; gap: 6px; color: var(--green); font-weight: 800; font-size: 12px; }
+    .health-score.warning { color: var(--amber); }
+    .health-score::before { content:""; width: 9px; height: 9px; border-radius: 99px; background: currentColor; box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 14%, transparent); }
+    .health-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+    .health-stat { border: 1px solid var(--line); border-radius: 8px; padding: 9px; background: #fff; min-width: 0; }
+    .health-stat span { display: block; color: var(--muted); font-size: 11px; margin-bottom: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .health-stat strong { display: block; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .services { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 24px 28px; align-items: start; }
     .login-hero { min-height: 320px; display: grid; align-content: center; justify-content: center; }
     .login-hero .login-form { width: min(460px, calc(100vw - 64px)); }
     .login-hero .codex-card { width: min(460px, calc(100vw - 64px)); margin-top: 10px; }
-    .codex-card { display: grid; grid-template-columns: 18px 1fr auto; gap: 12px; align-items: center; border: 1px solid var(--line); background: #fff; border-radius: 8px; padding: 12px; }
+    .codex-card { display: grid; grid-template-columns: 18px 1fr auto; gap: 12px; align-items: center; border: 1px solid var(--line); background: #fff; border-radius: 8px; padding: 12px; margin-bottom: 12px; }
     .codex-card .codex-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
     .codex-card.ready { border-color: #cfe6d7; background: #fbfffc; }
     .codex-card.missing, .codex-card.login_required, .codex-card.error { border-color: #ead7bb; background: #fffaf1; }
     .codex-card.ready .dot { background: var(--green); box-shadow: 0 0 0 4px #e2f2e8; }
     .codex-card.missing .dot, .codex-card.login_required .dot, .codex-card.error .dot { background: var(--amber); box-shadow: 0 0 0 4px #f6eddc; }
     .codex-card code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--fg); background: #f0f0ea; padding: 2px 4px; border-radius: 4px; }
+    .app-card { appearance: none; border: 0; background: transparent; padding: 0; color: var(--fg); min-height: 0; display: grid; justify-items: center; gap: 10px; text-align: center; cursor: pointer; position: relative; }
+    .app-card:hover { text-decoration: none; }
+    .app-card:disabled { cursor: progress; opacity: .72; }
+    .app-icon { width: 112px; height: 112px; border-radius: 8px; background: var(--panel); box-shadow: var(--shadow); display: grid; place-items: center; border: 1px solid rgba(228,222,211,.72); position: relative; transition: transform .12s ease, box-shadow .12s ease; }
+    .app-card:hover .app-icon { transform: translateY(-2px); box-shadow: 0 22px 52px rgba(39,34,29,.14), 0 4px 12px rgba(39,34,29,.07); }
+    .app-icon svg { width: 74px; height: 74px; display: block; }
+    .app-card.active .app-icon::after, .app-card.reconnecting .app-icon::after { content:""; position:absolute; inset:auto 12px 10px; height:3px; border-radius:99px; background: linear-gradient(90deg, transparent, var(--blue), transparent); animation: move 1.15s linear infinite; }
+    .app-card.codex_unready .app-icon, .app-card.cloud_stale .app-icon { border-color: #ead7bb; }
+    .app-card.disconnected .app-icon, .app-card.site_unreachable .app-icon, .app-card.local_unavailable .app-icon { border-color: #efcbc4; }
+    .app-label { display: grid; gap: 2px; width: 100%; min-width: 0; }
+    .app-label strong { font-size: 16px; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .app-label span { color: var(--muted); font-size: 11px; text-transform: lowercase; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .app-badge { position: absolute; top: 8px; right: calc(50% - 54px); width: 12px; height: 12px; border-radius: 50%; background: var(--grey); border: 2px solid #fff; box-shadow: 0 1px 4px rgba(39,34,29,.20); }
+    .connected .app-badge { background: var(--green); }
+    .active .app-badge, .reconnecting .app-badge { background: var(--blue); }
+    .codex_unready .app-badge, .cloud_stale .app-badge { background: var(--amber); }
+    .disconnected .app-badge, .site_unreachable .app-badge, .local_unavailable .app-badge { background: var(--red); }
     .service-row { display: grid; grid-template-columns: 18px 1fr auto; gap: 12px; align-items: center; border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 12px; min-height: 72px; position: relative; overflow: hidden; }
     .service-row.active::before, .service-row.reconnecting::before { content:""; position:absolute; left:-30%; right:-30%; bottom:0; height:2px; background: linear-gradient(90deg, transparent, var(--blue), transparent); animation: move 1.15s linear infinite; }
     @keyframes move { from { transform: translateX(-30%); } to { transform: translateX(30%); } }
@@ -1646,6 +1680,15 @@ function statusHtml() {
     .activity-row strong { color: var(--fg); font-weight: 550; }
     .empty { color: var(--muted); font-size: 13px; padding: 18px 0; }
     .error { color: var(--red); font-size: 12px; margin-top: 8px; }
+    @media (max-width: 760px) {
+      .dashboard-intro { grid-template-columns: 1fr; }
+      .services { grid-template-columns: repeat(auto-fill, minmax(108px, 1fr)); gap: 20px 18px; }
+      .app-icon { width: 94px; height: 94px; }
+      .app-icon svg { width: 64px; height: 64px; }
+      .app-label strong { font-size: 14px; }
+      header { padding-inline: 18px; }
+      nav, section { padding-inline: 18px; }
+    }
   </style>
 </head>
 <body>
@@ -1655,11 +1698,11 @@ function statusHtml() {
       <div class="top-actions"><span class="status-pill version" id="version-pill"></span><span class="status-pill" id="codex-pill"></span><button class="icon" id="sync" title="Synchroniser" aria-label="Synchroniser">R</button><button id="folder">Dossier</button></div>
     </header>
     <nav>
-      <button data-tab="bridges" class="active">Bridges</button>
+      <button data-tab="bridges" class="active">Apps</button>
       <button data-tab="identity">Identifiants</button>
       <button data-tab="activity">Activité</button>
     </nav>
-    <section id="bridges" class="active"><div class="services" id="services"></div><p class="error" id="error"></p></section>
+    <section id="bridges" class="active"><div id="dashboard-overview"></div><div class="services" id="services"></div><p class="error" id="error"></p></section>
     <section id="identity"><div id="login-panel"></div><div class="grid" id="identity-grid"></div></section>
     <section id="activity"><div class="activity" id="activity-list"></div></section>
   </main>
@@ -1678,16 +1721,13 @@ function statusHtml() {
       codexPill.textContent = "Codex " + (codexLabels[codexState] || codexState);
       codexPill.className = "status-pill " + (state.codex?.ready ? "ready" : "warning");
       document.getElementById("error").textContent = state.bridgeError || state.lastError || "";
+      document.getElementById("dashboard-overview").innerHTML = state.authenticated ? dashboardOverview(state) : "";
       const services = document.getElementById("services");
       if (!state.authenticated) {
         ensureLoginHero(state);
       } else {
-        services.innerHTML = codexCard(state.codex) + (state.services.length ? state.services.map(service => {
+        services.innerHTML = state.services.length ? state.services.map(service => {
         const status = service.status || "disconnected";
-        const scopes = (service.scopes || []).slice(0, 3).join(" · ");
-        const meta = service.statusReason || (status === "local_unavailable"
-          ? "Le port local 7707 n'est pas prêt. Le site web ne peut pas encore détecter Bridge."
-          : (scopes || service.baseUrl));
         const actionLabel = status === "active" || status === "reconnecting"
           ? "Ouverture..."
           : status === "connected"
@@ -1700,14 +1740,21 @@ function statusHtml() {
               ? "Reconnecter"
               : "Connecter";
         const actionAttr = status === "codex_unready" ? 'data-codex-setup="1"' : 'data-open="' + esc(service.serviceId) + '"';
-        return '<article class="service-row ' + esc(status) + '">' +
-          '<span class="dot" aria-hidden="true"></span>' +
-          '<div class="service-main"><div class="service-title"><strong>' + esc(service.name) + '</strong><span class="state">' + esc(labels[status] || status) + '</span></div>' +
-          '<div class="meta">' + esc(meta) + '</div></div>' +
-          '<div class="service-actions"><button ' + actionAttr + ' class="primary">' + esc(actionLabel) + '</button></div>' +
-        '</article>';
-      }).join("") : '<p class="empty">Aucun service autorisé.</p>');
-        services.querySelectorAll("[data-open]").forEach(btn => btn.addEventListener("click", () => window.bridge.openService(btn.dataset.open)));
+        return '<button class="app-card ' + esc(status) + '" ' + actionAttr + ' title="' + esc(actionLabel + " " + service.name) + '">' +
+          '<span class="app-badge" aria-hidden="true"></span>' +
+          '<span class="app-icon" aria-hidden="true">' + appIcon(service) + '</span>' +
+          '<span class="app-label"><strong>' + esc(service.name) + '</strong><span>' + esc(labels[status] || status) + '</span></span>' +
+        '</button>';
+      }).join("") : '<p class="empty">Aucune app autorisée.</p>';
+        services.querySelectorAll("[data-open]").forEach(btn => {
+          if (btn.dataset.bound === "1") return;
+          btn.dataset.bound = "1";
+          btn.addEventListener("click", async () => {
+            btn.disabled = true;
+            await window.bridge.openService(btn.dataset.open);
+            btn.disabled = false;
+          });
+        });
         attachCodexActions(services);
       }
 
@@ -1744,6 +1791,67 @@ function statusHtml() {
       document.getElementById("activity-list").innerHTML = activity.length ? activity.map(item =>
         '<div class="activity-row"><span>' + new Date(item.ts).toLocaleTimeString("fr-FR") + '</span><strong>' + esc(item.message) + '</strong></div>'
       ).join("") : '<p class="empty">Aucune activité récente.</p>';
+    }
+    function dashboardOverview(state) {
+      const connected = state.services.filter(service => ["connected", "active", "reconnecting"].includes(service.status || "")).length;
+      const blocked = state.services.filter(service => ["disconnected", "site_unreachable", "local_unavailable", "codex_unready"].includes(service.status || "")).length;
+      const codexState = state.codex?.state || "unknown";
+      const codexOk = Boolean(state.codex?.ready);
+      return '<div class="dashboard-intro">' +
+        '<div class="hero-panel"><h2>Lancer une app</h2><p>' + esc(state.account?.organizationName || state.organizationId || "Bridge") + ' · ' + state.services.length + ' app(s) disponibles. Les tuiles ouvrent directement le module local ou reconnectent le service.</p></div>' +
+        '<div class="health-panel">' +
+          '<div class="health-head"><div><strong>Santé Codex</strong><p>' + esc(state.codex?.detail || "Statut Codex non vérifié.") + '</p></div><span class="health-score ' + (codexOk ? "" : "warning") + '">' + esc(codexLabels[codexState] || codexState) + '</span></div>' +
+          '<div class="health-grid">' +
+            healthStat("Apps prêtes", connected + "/" + state.services.length) +
+            healthStat("À revoir", String(blocked)) +
+            healthStat("Jobs", String(state.activeJobs || 0)) +
+          '</div>' +
+        '</div>' +
+      '</div>';
+    }
+    function healthStat(label, value) {
+      return '<div class="health-stat"><span>' + esc(label) + '</span><strong>' + esc(value) + '</strong></div>';
+    }
+    function appIcon(service = {}) {
+      const id = String(service.serviceId || service.slug || service.name || "").toLowerCase();
+      const name = String(service.name || "App").toLowerCase();
+      const key = id + " " + name;
+      if (key.includes("achat") || key.includes("purchase") || key.includes("supplier")) return iconPurchasing();
+      if (key.includes("crm") || key.includes("client") || key.includes("customer")) return iconCrm();
+      if (key.includes("dashboard") || key.includes("pilot")) return iconDashboard();
+      if (key.includes("doc") || key.includes("file")) return iconDocuments();
+      if (key.includes("vente") || key.includes("sale")) return iconSales();
+      if (key.includes("stock") || key.includes("invent")) return iconInventory();
+      if (key.includes("support") || key.includes("assist")) return iconSupport();
+      return iconGeneric(service.name || service.serviceId || "App");
+    }
+    function iconSvg(body) {
+      return '<svg viewBox="0 0 96 96" xmlns="http://www.w3.org/2000/svg">' + body + '</svg>';
+    }
+    function iconPurchasing() {
+      return iconSvg('<rect x="20" y="32" width="56" height="32" rx="7" fill="#9b5a87"/><path d="M20 32h56v10c0 6-5 11-11 11H31c-6 0-11-5-11-11V32Z" fill="#2fb9a8"/><path d="M20 53h56v11H20z" fill="#27221d" opacity=".22"/>');
+    }
+    function iconCrm() {
+      return iconSvg('<path d="M22 36h40c9 0 16 7 16 16v4H38c-9 0-16-7-16-16v-4Z" fill="#2fb9a8"/><path d="M54 36h20v18c0 8-6 14-14 14H40V50c0-8 6-14 14-14Z" fill="#9b5a87" opacity=".92"/><path d="M29 58 55 32" stroke="#27221d" stroke-width="9" stroke-linecap="round" opacity=".82"/>');
+    }
+    function iconDashboard() {
+      return iconSvg('<rect x="18" y="24" width="24" height="24" rx="5" fill="#9b5a87"/><rect x="52" y="24" width="26" height="14" rx="5" fill="#fb8a7d"/><rect x="18" y="58" width="22" height="18" rx="5" fill="#2b9fe8"/><rect x="48" y="50" width="12" height="26" rx="4" fill="#2fb9a8"/><rect x="66" y="50" width="12" height="26" rx="4" fill="#1e8f56"/>');
+    }
+    function iconDocuments() {
+      return iconSvg('<rect x="20" y="26" width="30" height="44" rx="7" fill="#2b9fe8"/><rect x="36" y="30" width="30" height="44" rx="7" fill="#c96442" opacity=".9" transform="rotate(8 51 52)"/><rect x="50" y="38" width="28" height="38" rx="7" fill="#f6b74b" transform="rotate(38 64 57)"/><path d="M43 31 31 68" stroke="#27221d" stroke-width="12" stroke-linecap="round" opacity=".54"/>');
+    }
+    function iconSales() {
+      return iconSvg('<rect x="24" y="54" width="16" height="24" rx="4" fill="#9b5a87"/><rect x="42" y="42" width="16" height="36" rx="4" fill="#c96442"/><rect x="60" y="24" width="16" height="54" rx="4" fill="#f6b74b"/><path d="M24 78h52" stroke="#27221d" stroke-width="5" stroke-linecap="round" opacity=".28"/>');
+    }
+    function iconInventory() {
+      return iconSvg('<path d="M48 16 76 32v32L48 80 20 64V32L48 16Z" fill="#f6b74b"/><path d="M48 16 76 32 48 48 20 32 48 16Z" fill="#ff8a3d"/><path d="M48 48v32L20 64V32l28 16Z" fill="#c96442"/><path d="M48 48v32l28-16V32L48 48Z" fill="#9b5a87"/>');
+    }
+    function iconSupport() {
+      return iconSvg('<rect x="28" y="22" width="40" height="52" rx="14" fill="#2fb9a8"/><rect x="46" y="22" width="22" height="52" rx="10" fill="#1d6f62"/><path d="M20 48h56M48 20v56" stroke="#fffdf8" stroke-width="11" stroke-linecap="round"/><path d="M20 48h56M48 20v56" stroke="#27221d" stroke-width="5" stroke-linecap="round" opacity=".14"/>');
+    }
+    function iconGeneric(label) {
+      const initial = esc(String(label || "A").trim().slice(0, 1).toUpperCase() || "A");
+      return iconSvg('<rect x="20" y="20" width="56" height="56" rx="16" fill="#fffdf8" stroke="#d8d3c8" stroke-width="2"/><circle cx="34" cy="36" r="12" fill="#f6b74b"/><path d="M29 64 64 29" stroke="#9b5a87" stroke-width="13" stroke-linecap="round"/><circle cx="62" cy="60" r="12" fill="#2fb9a8"/><text x="48" y="57" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="24" font-weight="800" fill="#27221d" opacity=".88">' + initial + '</text>');
     }
     function codexCard(codex = {}) {
       const state = codex.state || "unknown";
