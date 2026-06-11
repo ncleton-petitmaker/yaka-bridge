@@ -37,6 +37,7 @@ try {
   readFileSync(join(outputDir, "app", "design-system.css"), "utf8");
   readFileSync(join(outputDir, "bridge", "design-system.json"), "utf8");
   for (const skill of [
+    "yaka-bridge-onboard",
     "yaka-bridge-create-module",
     "yaka-bridge-new-client-vps",
     "yaka-bridge-refactor-design-system",

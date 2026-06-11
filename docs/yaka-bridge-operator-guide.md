@@ -54,6 +54,29 @@ npm run skills:sync
 npm run skills:check
 ```
 
+### Démarrer après import du repo
+
+Commande recommandée :
+
+```bash
+git clone https://github.com/<owner>/yaka-bridge.git
+cd yaka-bridge
+npm ci
+npm run codex:onboard
+```
+
+Si l'utilisateur utilise Codex Desktop, lancer :
+
+```bash
+npm --silent run codex:onboard:prompt
+```
+
+Puis coller le prompt imprimé dans Codex avec ce repo ouvert.
+
+Le skill `yaka-bridge-onboard` pose les questions de cadrage et route ensuite
+vers les skills spécialisés pour GitHub, modules, VPS OVH/existant, DNS,
+Supabase, Bridge et design system.
+
 ### Gérer les repos et versions de modules
 
 Utiliser avant tout travail module ou client :
