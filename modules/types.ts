@@ -15,6 +15,7 @@ export interface ErpModuleTable {
 
 export interface ErpModuleManifest {
   id: string;
+  version: string;
   labels: {
     fr: string;
     en: string;
@@ -46,4 +47,3 @@ export interface ErpModuleManifest {
     requiredScopes: string[];
   };
 }
-

@@ -11,6 +11,7 @@ Read:
 - [README.md](README.md)
 - [docs/yaka-bridge-operator-guide.md](docs/yaka-bridge-operator-guide.md)
 - [docs/module-catalog.md](docs/module-catalog.md)
+- [docs/repository-governance.md](docs/repository-governance.md)
 - [docs/cloud-security.md](docs/cloud-security.md)
 - [SECURITY.md](SECURITY.md)
 
@@ -23,6 +24,8 @@ Read:
 - Do not let UI code bypass server actions for business mutations.
 - Do not hardcode a module-specific visual language; use the active design
   system tokens and shared components.
+- Do not create or change a customer-specific module in the customer ERP repo
+  when a dedicated module repo is required.
 - Do not let clients provide arbitrary `organizationId` to business actions.
 - Do not weaken RLS, scopes, token validation or audit.
 
@@ -58,12 +61,14 @@ Read:
 
 ## Adding a module
 
-Use `skills-template/_global/yaka-bridge-create-module.skill.md` as the process
+Use `skills-template/_global/yaka-bridge-version-modules.skill.md` first, then
+`skills-template/_global/yaka-bridge-create-module.skill.md` as the process
 contract.
 
 A module contribution must include:
 
 - `modules/<moduleId>/module.config.json`;
+- SemVer `version` in the module manifest;
 - UI using the shared design system;
 - typed server actions;
 - HTTP/MCP parity for business operations;

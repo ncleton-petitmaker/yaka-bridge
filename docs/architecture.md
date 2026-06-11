@@ -49,6 +49,22 @@
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
+## Topologie des repos
+
+yaka-bridge utilise une topologie multi-repos :
+
+- `yaka-bridge` : template public, modules génériques et exemples anonymisés ;
+- `<clientSlug>-erp` : repo privé de contrôle production pour un client ;
+- `<clientSlug>-module-<moduleId>` : repo privé borné pour un module client.
+
+Un nouveau client crée toujours un repo ERP privé. Un nouveau module client crée
+un repo module privé par défaut, surtout si un contributeur non-développeur
+participe. Le repo client consomme des versions de modules via
+`modules.lock.json`; il ne sert pas d'atelier de coding pour les modules
+expérimentaux.
+
+Voir [`repository-governance.md`](repository-governance.md).
+
 ## Base de données Supabase
 
 Le template impose Supabase comme provider de base de données métier. Le daemon

@@ -26,6 +26,10 @@ try {
   if (!Array.isArray(meta.selectedModules) || meta.selectedModules.length !== 1 || meta.selectedModules[0] !== "purchasing") {
     throw new Error(`Invalid generated module selection: ${JSON.stringify(meta.selectedModules)}`);
   }
+  const purchasingManifest = meta.manifests?.find((manifest) => manifest.id === "purchasing");
+  if (purchasingManifest?.version !== "0.1.0") {
+    throw new Error(`Invalid generated purchasing module version: ${JSON.stringify(purchasingManifest?.version)}`);
+  }
   const design = JSON.parse(readFileSync(join(outputDir, "design-system.config.json"), "utf8"));
   if (design.active !== "claude") {
     throw new Error(`Invalid generated design system: ${JSON.stringify(design.active)}`);
