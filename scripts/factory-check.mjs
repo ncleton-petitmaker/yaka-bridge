@@ -36,8 +36,17 @@ try {
   }
   readFileSync(join(outputDir, "app", "design-system.css"), "utf8");
   readFileSync(join(outputDir, "bridge", "design-system.json"), "utf8");
+  for (const skill of [
+    "yaka-bridge-create-module",
+    "yaka-bridge-new-client-vps",
+    "yaka-bridge-refactor-design-system",
+    "yaka-bridge-version-modules",
+  ]) {
+    readFileSync(join(outputDir, ".codex", "skills", skill, "SKILL.md"), "utf8");
+  }
 
   run("npm", ["ci"], outputDir);
+  run("npm", ["run", "skills:check"], outputDir);
   run("npm", ["run", "typecheck"], outputDir);
   run("npm", ["run", "build"], outputDir);
   run("node", ["scripts/security-grep.mjs"], outputDir);
