@@ -12,6 +12,50 @@ const CODEX = {
   doneTitle: "Bridge est prêt avec Codex",
 };
 
+const DEFAULT_BRIDGE_DESIGN = {
+  bg: "#faf9f7",
+  panel: "#ffffff",
+  border: "#ebe8e1",
+  text: "#1a1916",
+  muted: "#746f66",
+  soft: "#9b958c",
+  accent: "#c96442",
+  accentTint: "#f0efeb",
+  green: "#2e7d32",
+  greenBg: "#eef8ef",
+  red: "#b23b2d",
+  redBg: "#fff0ee",
+  secondary: "#ebe8e1",
+  logBg: "#f4f2ed",
+  logoText: "B",
+};
+
+function loadBridgeDesign() {
+  const candidates = [
+    path.join(__dirname, "design-system.json"),
+    path.join(process.cwd(), "bridge", "design-system.json"),
+  ];
+  for (const candidate of candidates) {
+    try {
+      if (!fs.existsSync(candidate)) continue;
+      const parsed = JSON.parse(fs.readFileSync(candidate, "utf8"));
+      return { ...DEFAULT_BRIDGE_DESIGN, ...parsed };
+    } catch {
+      // Keep Bridge bootable even if a generated design file is unavailable.
+    }
+  }
+  return DEFAULT_BRIDGE_DESIGN;
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 async function runCodexSetup() {
   return showCodexSetupWindow();
 }
@@ -364,6 +408,7 @@ function accountIdFromJwt(jwt) {
 function showCodexSetupWindow() {
   const needsInstall = !findCodexBin();
   const alreadyAuthenticated = !needsInstall && codexAuthenticated();
+  const design = loadBridgeDesign();
   return new Promise((resolve) => {
     const win = new BrowserWindow({
       width: 560,
@@ -373,7 +418,7 @@ function showCodexSetupWindow() {
       maximizable: false,
       center: true,
       title: "Configuration Codex",
-      backgroundColor: "#faf9f7",
+      backgroundColor: design.bg,
       show: true,
       webPreferences: {
         nodeIntegration: true,
@@ -383,7 +428,7 @@ function showCodexSetupWindow() {
     win.setMenuBarVisibility(false);
     const channel = `codex-setup-action-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const { ipcMain } = require("electron");
-    win.loadURL(`data:text/html;charset=utf-8;base64,${Buffer.from(setupHtml(needsInstall, alreadyAuthenticated, channel), "utf8").toString("base64")}`);
+    win.loadURL(`data:text/html;charset=utf-8;base64,${Buffer.from(setupHtml(needsInstall, alreadyAuthenticated, channel, design), "utf8").toString("base64")}`);
 
     const send = (state) => {
       if (win.isDestroyed()) return;
@@ -460,7 +505,7 @@ function showCodexSetupWindow() {
   });
 }
 
-function setupHtml(needsInstall, alreadyAuthenticated, channel) {
+function setupHtml(needsInstall, alreadyAuthenticated, channel, design) {
   return `<!doctype html>
 <html lang="fr">
 <head>
@@ -468,7 +513,7 @@ function setupHtml(needsInstall, alreadyAuthenticated, channel) {
   <title>Configuration Codex</title>
   <style>
     * { box-sizing: border-box; }
-    :root { --bg: #faf9f7; --panel: #fff; --border: #ebe8e1; --text: #1a1916; --muted: #746f66; --soft: #9b958c; --accent: ${CODEX.accent}; --accent-tint: #f0efeb; --green: #2e7d32; --green-bg: #eef8ef; --red: #b23b2d; --red-bg: #fff0ee; }
+    :root { --bg: ${design.bg}; --panel: ${design.panel}; --border: ${design.border}; --text: ${design.text}; --muted: ${design.muted}; --soft: ${design.soft}; --accent: ${design.accent || CODEX.accent}; --accent-tint: ${design.accentTint}; --green: ${design.green}; --green-bg: ${design.greenBg}; --red: ${design.red}; --red-bg: ${design.redBg}; --secondary: ${design.secondary}; --log-bg: ${design.logBg}; }
     body { margin: 0; height: 100vh; overflow: hidden; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
     header { height: 76px; padding: 18px 28px; display: flex; align-items: center; gap: 12px; background: var(--panel); border-bottom: 1px solid var(--border); }
     .logo { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; background: var(--accent); color: #fff; font-weight: 800; }
@@ -478,7 +523,7 @@ function setupHtml(needsInstall, alreadyAuthenticated, channel) {
     footer { height: 68px; padding: 16px 28px; background: var(--panel); border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 10px; }
     .steps { display: grid; gap: 16px; }
     .step { display: flex; gap: 14px; align-items: flex-start; }
-    .step-icon { width: 34px; height: 34px; border-radius: 50%; flex: 0 0 auto; display: grid; place-items: center; font-size: 14px; font-weight: 800; background: #f0ede8; color: var(--soft); }
+    .step-icon { width: 34px; height: 34px; border-radius: 50%; flex: 0 0 auto; display: grid; place-items: center; font-size: 14px; font-weight: 800; background: var(--secondary); color: var(--soft); }
     .step-icon.running { background: var(--accent-tint); color: var(--accent); animation: pulse 1.3s ease-in-out infinite; }
     .step-icon.done { background: var(--green-bg); color: var(--green); animation: none; }
     .step-icon.error { background: var(--red-bg); color: var(--red); animation: none; }
@@ -488,20 +533,20 @@ function setupHtml(needsInstall, alreadyAuthenticated, channel) {
     .step-title.muted { color: var(--soft); }
     .step-desc { color: var(--muted); font-size: 12.5px; line-height: 1.55; }
     .progress-wrap { display: none; margin-top: 10px; }
-    .progress-track { height: 10px; overflow: hidden; border-radius: 999px; background: #ebe8e1; }
+    .progress-track { height: 10px; overflow: hidden; border-radius: 999px; background: var(--secondary); }
     .progress-fill { height: 100%; width: 0%; border-radius: 999px; background: var(--accent); transition: width .25s ease; }
     .progress-fill.indeterminate { width: 35%; animation: slide 1.5s ease-in-out infinite; }
     @keyframes slide { 0% { transform: translateX(-180%); } 100% { transform: translateX(340%); } }
     .progress-status { margin-top: 5px; display: flex; justify-content: space-between; color: var(--muted); font-size: 11.5px; }
-    .log { display: none; max-height: 82px; overflow: auto; margin-top: 8px; padding: 7px 8px; border-radius: 7px; background: #f4f2ed; color: var(--soft); font: 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; }
+    .log { display: none; max-height: 82px; overflow: auto; margin-top: 8px; padding: 7px 8px; border-radius: 7px; background: var(--log-bg); color: var(--soft); font: 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; }
     .code { display: inline-block; margin: 10px 0; padding: 10px 18px; border-radius: 8px; background: var(--accent-tint); color: var(--accent); font: 700 26px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: 3px; user-select: all; }
     button { border: 0; border-radius: 7px; padding: 8px 17px; font: inherit; font-size: 13px; font-weight: 650; cursor: pointer; }
     .primary { background: var(--accent); color: #fff; }
-    .secondary { background: #ebe8e1; color: var(--text); }
+    .secondary { background: var(--secondary); color: var(--text); }
   </style>
 </head>
 <body>
-  <header><div class="logo">C</div><div><div class="eyebrow">Bridge</div><h1>Configuration Codex</h1></div></header>
+  <header><div class="logo">${escapeHtml(design.logoText || "B")}</div><div><div class="eyebrow">Bridge</div><h1>Configuration Codex</h1></div></header>
   <main>
     <div class="steps">
       <div class="step"><div class="step-icon ${needsInstall ? "running" : "done"}" id="icon-install">${needsInstall ? "1" : "✓"}</div><div class="step-body"><div class="step-title" id="title-install">${CODEX.installTitle}</div><div class="step-desc" id="desc-install">${needsInstall ? "Installation automatique en cours..." : "Déjà installé sur ce poste."}</div><div class="progress-wrap" id="progress-wrap"><div class="progress-track"><div class="progress-fill indeterminate" id="progress-fill"></div></div><div class="progress-status"><span id="progress-stage">Démarrage...</span><span id="progress-pct"></span></div></div><div class="log" id="log-install"></div></div></div>

@@ -10,6 +10,11 @@ and focus on operationally relevant changes.
 ### Added
 
 - Public `yaka-bridge` repository identity.
+- Importable design system contract with default `claude` system.
+- `DESIGN_SYSTEM` and `DESIGN_SYSTEM_SOURCE` brief fields.
+- `scripts/apply-design-system.mjs` and `npm run design:apply`.
+- `yaka-bridge-refactor-design-system` skill for app, module and Bridge visual
+  migrations.
 - Production-hardening baseline for auth, Bridge tokens, Supabase RLS, CI and
   dependency audit.
 - Generic `purchasing` module with manifest, demo seeds and Supabase migration.

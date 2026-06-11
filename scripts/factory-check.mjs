@@ -26,6 +26,12 @@ try {
   if (!Array.isArray(meta.selectedModules) || meta.selectedModules.length !== 1 || meta.selectedModules[0] !== "purchasing") {
     throw new Error(`Invalid generated module selection: ${JSON.stringify(meta.selectedModules)}`);
   }
+  const design = JSON.parse(readFileSync(join(outputDir, "design-system.config.json"), "utf8"));
+  if (design.active !== "claude") {
+    throw new Error(`Invalid generated design system: ${JSON.stringify(design.active)}`);
+  }
+  readFileSync(join(outputDir, "app", "design-system.css"), "utf8");
+  readFileSync(join(outputDir, "bridge", "design-system.json"), "utf8");
 
   run("npm", ["ci"], outputDir);
   run("npm", ["run", "typecheck"], outputDir);

@@ -29,6 +29,7 @@ NEXT_PORT: 3200
 DAEMON_PORT: 7556
 DATA_DIR_NAME: Demo-Calibre
 PROJECT_MODE: adapt-existing
+DESIGN_SYSTEM: claude
 SOURCE_PROJECT_DIR: /Users/nicolascleton/Documents/marcelle-calibre-prototype
 ADAPTATION_BRIEF: |
   Reprendre les drivers Maestro et les règles de scoring déjà codés, mais migrer
@@ -93,6 +94,8 @@ MCP_ACTIONS:
 | Champ            | Type                | Description                                                                                                | Exemple                                                |
 | ---------------- | ------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
 | `PROJECT_MODE`   | `new` \| `adapt-existing` | `new` pour un projet neuf ; `adapt-existing` si on part d'un repo/prototype existant. Défaut : `new`. | `adapt-existing`                                      |
+| `DESIGN_SYSTEM`  | string              | Design system appliqué au premier setup. Défaut : `claude`. Voir [`docs/design-systems.md`](design-systems.md). | `claude` |
+| `DESIGN_SYSTEM_SOURCE` | string        | Dossier externe d'un design system importé, déjà adapté au contrat yaka-bridge.                     | `/Users/.../design-system` |
 | `SOURCE_PROJECT_DIR` | string          | Dossier du projet existant à auditer si `PROJECT_MODE=adapt-existing`.                                    | `/Users/.../mon-projet`                                |
 | `ADAPTATION_BRIEF` | string            | Ce qu'il faut reprendre, migrer, préserver ou éviter dans le projet existant.                              | _(bloc YAML `\|`)_                                    |
 | `ENTITY_PLURAL`  | string              | Pluriel de `ENTITY`. Si absent, déduit par ajout de `s` (sauf si singular finit déjà par `s` → identique). | `batches`                                              |
@@ -248,6 +251,8 @@ const BriefSchema = z.object({
   GIT_BINDING: z.string().optional(),
   EXTRA_ROUTES: z.array(z.string()).optional(),
   SKILLS: z.array(z.string()).optional(),
+  DESIGN_SYSTEM: z.string().optional().default("claude"),
+  DESIGN_SYSTEM_SOURCE: z.string().optional(),
 });
 ```
 
@@ -258,6 +263,8 @@ Règles supplémentaires (vérifiées hors schéma) :
    `http-api`, `cli-custom`), un **warning** est loggé mais le brief reste
    valide (cas custom autorisé).
 3. Si un `ENTITY` non listé apparaît dans `EXTRA_ROUTES`, warning aussi.
+4. Si `DESIGN_SYSTEM_SOURCE` est absent, `DESIGN_SYSTEM` doit exister dans
+   `design-systems/<id>/`.
 
 En cas d'erreur de validation, l'orchestrateur affiche les `.issues` Zod
 formatés (champ + raison) puis exit `1`. Aucun scaffolding n'est lancé.
@@ -275,6 +282,7 @@ formatés (champ + raison) puis exit `1`. Aucun scaffolding n'est lancé.
    - demande confirmation interactive
    - clone le template dans `output-dir`
    - lance `init-from-template.mjs` avec les valeurs du brief
+   - applique `DESIGN_SYSTEM`
    - spawne les agents F.2 séquentiellement avec des prompts construits depuis
      le brief (`app-scaffolder` → `domain-modeler` → `subprocess-driver` →
      `ui-page-generator` → `skill-author`)

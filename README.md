@@ -60,6 +60,7 @@ Current production posture:
 - [Repository layout](#repository-layout)
 - [Quick start](#quick-start)
 - [Generate a demo ERP](#generate-a-demo-erp)
+- [Design systems](#design-systems)
 - [Create a new module](#create-a-new-module)
 - [Create a new client/VPS](#create-a-new-clientvps)
 - [Security model](#security-model)
@@ -97,6 +98,8 @@ Core concepts:
   and audit.
 - **Customer repos** are private production implementations derived from this
   template.
+- **Design systems** are selected at setup time and apply to app, modules and
+  Bridge through a manifest, tokens and assets.
 
 ## Repository layout
 
@@ -105,6 +108,7 @@ app/                       Next.js App Router pages
 bridge/                    Bridge runtime and local job execution
 components/                Shared ERP UI components and design system pieces
 data-template/             Default runtime data and Claude/Codex context
+design-systems/            Importable design systems and tokens
 docs/                      Architecture, security, VPS and factory docs
 modules/                   Catalog ERP modules
 scripts/                   Factory, build, security and token tooling
@@ -172,6 +176,39 @@ The repository CI runs a stricter version through:
 ```bash
 npm run factory:check
 ```
+
+## Design systems
+
+The default design system is `claude`, but every generated ERP can select or
+import another design system at first setup:
+
+```yaml
+DESIGN_SYSTEM: claude
+```
+
+Apply a design system manually:
+
+```bash
+npm run design:apply -- --design-system claude
+```
+
+Imported systems use the yaka-bridge contract:
+
+```text
+design-systems/<id>/
+  DESIGN.md
+  design-system.config.json
+  tokens.css
+  assets/app-mark.svg
+  assets/bridge-mark.svg
+```
+
+For new visual directions, the recommended workflow is to create or explore the
+system with [nexu-io/open-design](https://github.com/nexu-io/open-design),
+adapt it to the yaka-bridge contract, then run the
+`yaka-bridge-refactor-design-system` skill across app, modules and Bridge.
+
+See [docs/design-systems.md](docs/design-systems.md).
 
 ## Create a new module
 
@@ -267,6 +304,7 @@ Start here:
 
 - [Operator guide](docs/yaka-bridge-operator-guide.md)
 - [Architecture](docs/architecture.md)
+- [Design systems](docs/design-systems.md)
 - [Module catalog](docs/module-catalog.md)
 - [Cloud security](docs/cloud-security.md)
 - [Client/template workflow](docs/client-template-workflow.md)

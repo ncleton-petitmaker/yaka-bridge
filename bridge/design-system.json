@@ -1,0 +1,17 @@
+{
+  "bg": "#faf9f7",
+  "panel": "#ffffff",
+  "border": "#ebe8e1",
+  "text": "#1a1916",
+  "muted": "#746f66",
+  "soft": "#9b958c",
+  "accent": "#c96442",
+  "accentTint": "#f0efeb",
+  "green": "#2e7d32",
+  "greenBg": "#eef8ef",
+  "red": "#b23b2d",
+  "redBg": "#fff0ee",
+  "secondary": "#ebe8e1",
+  "logBg": "#f4f2ed",
+  "logoText": "B"
+}

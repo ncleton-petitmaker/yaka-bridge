@@ -17,6 +17,8 @@ yaka-bridge est pensé pour trois usages combinés :
   exécuter les jobs autorisés et dialoguer avec ChatGPT au bon moment.
 - Agentic-first : chaque action visible dans l'UI possède une action serveur
   typée, exposable en HTTP et en MCP, avec audit et scopes.
+- Design-system-first : chaque ERP choisit un système visuel au setup, puis les
+  modules et Bridge consomment les mêmes tokens et assets.
 
 L'approche économique consiste à exploiter l'abonnement ChatGPT des
 collaborateurs pour les tâches agentiques, plutôt que de transformer tous les
@@ -85,6 +87,30 @@ La skill force :
 - Bridge installers, updates, tokens et entitlements ;
 - sauvegardes, restore drill et observabilité ;
 - tests production avant livraison.
+
+### Changer le design system
+
+Utiliser :
+
+```text
+Utilise la skill yaka-bridge-refactor-design-system pour importer ce design
+system, puis refondre tous les modules, l'admin et Bridge.
+```
+
+La skill force :
+
+- choix du repo cible ;
+- choix ou création du design system ;
+- contrat `design-systems/<id>/` ;
+- application par `npm run design:apply` ;
+- refonte de `app/`, `components/`, `modules/`, `bridge/` et `public/` ;
+- build Bridge ;
+- vérification visuelle et tests production.
+
+Pour créer un nouveau design system, utiliser
+[`nexu-io/open-design`](https://github.com/nexu-io/open-design) comme atelier de
+cadrage, puis adapter la sortie au contrat yaka-bridge documenté dans
+[`docs/design-systems.md`](design-systems.md).
 
 ## Bonne méthode module client puis template
 

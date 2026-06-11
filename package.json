@@ -90,6 +90,7 @@
     "bridge:build": "node scripts/build-bridge.mjs",
     "bridge:pack:mac": "npm run bridge:build && electron-builder --mac --config electron-builder.bridge.cjs",
     "bridge:pack:win": "npm run bridge:build && electron-builder --win --x64 --config electron-builder.bridge.cjs --config.npmRebuild=false",
+    "design:apply": "node scripts/apply-design-system.mjs",
     "dev:local": "node scripts/dev.mjs",
     "dev:cloud": "NEXT_PUBLIC_APP_API_MODE=cloud next dev -p {{NEXT_PORT}}",
     "start:mcp": "tsx server/mcp.ts",

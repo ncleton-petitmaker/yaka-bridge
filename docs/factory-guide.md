@@ -49,6 +49,11 @@ services sans authZ stricte, modules qui ne respectent pas la parité UI/MCP.
 │   (rebrand)                        │  app name, ports, modules
 └──────┬─────────────────────────────┘
        │
+       ▼
+┌────────────────────────────────────┐
+│ scripts/apply-design-system.mjs    │  applique DESIGN_SYSTEM
+└──────┬─────────────────────────────┘
+       │
        ▼  séquentiel, un agent à la fois
 ┌────────────────────────────────────┐
 │  0. existing-project-auditor        │  seulement si PROJECT_MODE=adapt-existing
@@ -98,7 +103,11 @@ DOMAIN_BRIEF: |
 Champs obligatoires : `APP_NAME`, `APP_ID`, `NEXT_PORT`, `DAEMON_PORT`,
 `DATA_DIR_NAME`, `ENTITY`, `SUBPROCESS`, `DOMAIN_BRIEF`. Champs optionnels :
 `ENTITY_PLURAL`, `ENTITIES`, `METRICS`, `GIT_BINDING`, `EXTRA_ROUTES`,
-`SKILLS`.
+`SKILLS`, `DESIGN_SYSTEM`, `DESIGN_SYSTEM_SOURCE`.
+
+`DESIGN_SYSTEM` vaut `claude` par défaut. Voir
+[`docs/design-systems.md`](design-systems.md) pour importer ou créer une charte
+client.
 
 ## 4. Les agents
 

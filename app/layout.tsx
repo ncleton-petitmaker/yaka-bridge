@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "./design-system.css";
 import { CloudAuthGate } from "@/components/CloudAuthGate";
 import { BridgeStatusProvider } from "@/components/BridgeStatusProvider";
 import { OpenReplayProvider } from "@/components/OpenReplayProvider";
