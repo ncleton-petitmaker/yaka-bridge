@@ -103,11 +103,16 @@ DOMAIN_BRIEF: |
 Champs obligatoires : `APP_NAME`, `APP_ID`, `NEXT_PORT`, `DAEMON_PORT`,
 `DATA_DIR_NAME`, `ENTITY`, `SUBPROCESS`, `DOMAIN_BRIEF`. Champs optionnels :
 `ENTITY_PLURAL`, `ENTITIES`, `METRICS`, `GIT_BINDING`, `EXTRA_ROUTES`,
-`SKILLS`, `DESIGN_SYSTEM`, `DESIGN_SYSTEM_SOURCE`.
+`SKILLS`, `MODULES`, `DESIGN_SYSTEM`, `DESIGN_SYSTEM_SOURCE`.
 
 `DESIGN_SYSTEM` vaut `claude` par défaut. Voir
 [`docs/design-systems.md`](design-systems.md) pour importer ou créer une charte
 client.
+
+`MODULES` doit référencer des modules catalogue existants. Chaque manifest
+`modules/<id>/module.config.json` doit contenir une version SemVer. Voir
+[`docs/repository-governance.md`](repository-governance.md) pour la politique de
+repos et de promotion des modules client.
 
 ## 4. Les agents
 

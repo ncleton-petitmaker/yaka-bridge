@@ -45,6 +45,25 @@ Sources à vérifier avant tout usage commercial :
 Les skills de pilotage sont dans `skills-template/_global/` et sont copiés dans
 `data/.claude/skills/_global/` au postinstall.
 
+### Gérer les repos et versions de modules
+
+Utiliser avant tout travail module ou client :
+
+```text
+Utilise la skill yaka-bridge-version-modules pour choisir le repo, vérifier les
+droits GitHub, protéger main, versionner le module et préparer la promotion.
+```
+
+La skill force :
+
+- nouveau client = repo privé `<clientSlug>-erp` ;
+- nouveau module client = repo privé `<clientSlug>-module-<moduleId>` ;
+- module par non-développeur = repo module séparé obligatoire ;
+- version SemVer dans `module.config.json` ;
+- release/tag avant promotion ;
+- `modules.lock.json` dans le repo client ;
+- protections GitHub avant travail ou livraison.
+
 ### Créer un module
 
 Utiliser :
@@ -56,6 +75,7 @@ Demande-moi le client cible, puis produis la version template et l'implémentati
 
 La skill force :
 
+- préflight `yaka-bridge-version-modules` ;
 - choix du client cible ;
 - id technique anglais ;
 - labels FR/EN ;
@@ -116,14 +136,17 @@ cadrage, puis adapter la sortie au contrat yaka-bridge documenté dans
 
 Quand le travail démarre pour un client réel :
 
-1. Construire dans le repo client privé si les règles métier, données ou
+1. Utiliser `yaka-bridge-version-modules` pour choisir le repo.
+2. Construire dans un repo module privé si les règles métier, données ou
    libellés sont spécifiques.
-2. Garder dans le repo client tout ce qui est privé : domaines, données, règles
-   propres, secrets, prompts client et overrides.
-3. Dès que la structure devient générique, extraire vers yaka-bridge :
+3. Garder dans les repos privés tout ce qui est privé : domaines, données,
+   règles propres, secrets, prompts client et overrides.
+4. Publier une version du module et l'épingler dans le repo client via
+   `modules.lock.json`.
+5. Dès que la structure devient générique, extraire vers yaka-bridge :
    manifest, migrations, actions, UI, tests et seeds demo anonymisés.
-4. Rebrancher le repo client sur cette structure générique.
-5. Porter dans yaka-bridge toute correction de sécurité, maintenance ou modèle
+6. Rebrancher le repo client sur cette structure générique.
+7. Porter dans yaka-bridge toute correction de sécurité, maintenance ou modèle
    découverte en production.
 
 Quand le module est clairement générique dès le départ, commencer dans

@@ -14,6 +14,21 @@ Objectif : livrer un module production-ready, agentic-first, compatible Bridge,
 auditable humainement, et réutilisable dans le template public sans donnée
 client.
 
+## Préflight versioning obligatoire
+
+Avant d'écrire du code pour un module client, utilise d'abord
+`yaka-bridge-version-modules`.
+
+Cette étape choisit le bon repo :
+
+- `yaka-bridge` pour un module générique anonymisé ;
+- `<clientSlug>-erp` pour activer/configurer une version déjà stable ;
+- `<clientSlug>-module-<moduleId>` pour un module client nouveau, spécifique,
+  sensible ou développé par un non-développeur.
+
+Ne code pas directement un nouveau module client dans le repo ERP client si un
+repo module séparé est requis.
+
 ## Questions obligatoires
 
 Avant d'écrire du code, pose ces questions si elles ne sont pas déjà résolues :
@@ -33,6 +48,8 @@ Avant d'écrire du code, pose ces questions si elles ne sont pas déjà résolue
 7. Quels services web ou sous-domaines sont nécessaires ?
 8. Le module doit-il respecter le design system actif ou existe-t-il une
    contrainte design client à garder privée ?
+9. Le préflight `yaka-bridge-version-modules` a-t-il confirmé le repo, les
+   droits, la branche et la version cible ?
 
 Si l'utilisateur demande d'avancer sans réponse complète, choisis la variante
 la plus robuste en production et documente l'hypothèse dans le journal de
@@ -46,6 +63,7 @@ travail.
 - Les ids techniques restent en anglais ; les labels UI sont bilingues.
 - Chaque module possède `modules/<moduleId>/module.config.json` comme contrat
   canonique.
+- Chaque manifest module possède une version SemVer.
 - Chaque module consomme le design system actif via tokens/classes partagés ; il
   ne crée pas sa propre charte locale.
 - Toute mutation visible dans l'UI possède une action serveur typée exposée en
@@ -70,6 +88,7 @@ travail.
    - `modules/purchasing/module.config.json`
 2. Créer `modules/<moduleId>/module.config.json` avec :
    - `id`
+   - `version`
    - `labels`
    - `routes`
    - `dashboard`
@@ -117,24 +136,29 @@ travail.
 
 Si un client est associé au module :
 
-1. Vérifier que le repo client privé existe et n'a pas de remote public non
+1. Vérifier la décision `yaka-bridge-version-modules`.
+2. Si le module est nouveau, spécifique ou développé par un non-développeur,
+   travailler dans `<clientSlug>-module-<moduleId>`.
+3. Si le module catalogue est déjà stable, l'activer dans `<clientSlug>-erp`
+   en mettant à jour `modules.lock.json`.
+4. Vérifier que le repo client privé existe et n'a pas de remote public non
    prévu.
-2. Importer le module générique depuis yaka-bridge sans copier de secrets dans
+5. Importer le module générique depuis yaka-bridge sans copier de secrets dans
    le template.
-3. Ajouter uniquement dans le repo client :
+6. Ajouter uniquement dans le repo client :
    - domaines réels
    - variables d'environnement réelles
    - données privées
    - libellés ou règles strictement client
    - overrides de configuration
-4. Appliquer les migrations sur l'environnement client contrôlé.
-5. Configurer les entitlements et services Bridge du client.
-6. Tester les URLs client :
+7. Appliquer les migrations sur l'environnement client contrôlé.
+8. Configurer les entitlements et services Bridge du client.
+9. Tester les URLs client :
    - admin
    - module/service
    - API Supabase
    - Bridge polling
-7. Reporter dans yaka-bridge toute correction structurelle générique découverte
+10. Reporter dans yaka-bridge toute correction structurelle générique découverte
    côté client.
 
 ## Sous-domaines et DNS
@@ -176,3 +200,4 @@ Ne jamais annoncer le module terminé si une de ces étapes échoue.
 - Parité HTTP/MCP/Bridge.
 - Docs courtes d'usage et de maintenance.
 - Notes d'implémentation client privé si un client est associé.
+- Version SemVer et, côté client, mise à jour de `modules.lock.json`.

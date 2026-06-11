@@ -61,6 +61,7 @@ Current production posture:
 - [Quick start](#quick-start)
 - [Generate a demo ERP](#generate-a-demo-erp)
 - [Design systems](#design-systems)
+- [Repository governance](#repository-governance)
 - [Create a new module](#create-a-new-module)
 - [Create a new client/VPS](#create-a-new-clientvps)
 - [Security model](#security-model)
@@ -100,6 +101,8 @@ Core concepts:
   template.
 - **Design systems** are selected at setup time and apply to app, modules and
   Bridge through a manifest, tokens and assets.
+- **Module repos** isolate customer-specific module work, especially when a
+  trained operator or agent builds the module.
 
 ## Repository layout
 
@@ -210,6 +213,29 @@ adapt it to the yaka-bridge contract, then run the
 
 See [docs/design-systems.md](docs/design-systems.md).
 
+## Repository governance
+
+yaka-bridge uses a multi-repository production model:
+
+- `yaka-bridge`: public template and anonymized catalog modules;
+- `<clientSlug>-erp`: private production control repo for one customer;
+- `<clientSlug>-module-<moduleId>`: private bounded workspace for a
+  customer-specific module.
+
+A new customer always gets a new private ERP repo. A new customer-specific
+module gets a private module repo by default, and this is mandatory when a
+trained non-developer is involved. Customer ERP repos consume released module
+versions through `modules.lock.json`.
+
+Use the shipped versioning skill before module work:
+
+```text
+Use the yaka-bridge-version-modules skill to choose the repo, verify GitHub
+protections, bump the module version and promote it safely.
+```
+
+See [docs/repository-governance.md](docs/repository-governance.md).
+
 ## Create a new module
 
 Use the shipped operator skill:
@@ -222,6 +248,7 @@ client implementation.
 
 The skill enforces:
 
+- versioning and repo-topology preflight;
 - client target selection;
 - English technical id and bilingual UI labels;
 - module manifest;
@@ -306,6 +333,7 @@ Start here:
 - [Architecture](docs/architecture.md)
 - [Design systems](docs/design-systems.md)
 - [Module catalog](docs/module-catalog.md)
+- [Repository governance](docs/repository-governance.md)
 - [Cloud security](docs/cloud-security.md)
 - [Client/template workflow](docs/client-template-workflow.md)
 - [Bridge multi-services](docs/bridge-multiservices.md)

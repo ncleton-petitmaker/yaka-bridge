@@ -52,6 +52,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const DEFAULT_TEMPLATE_DIR = resolve(__dirname, "..");
 const AGENT_TIMEOUT_MS = 5 * 60 * 1000; // 5 min per agent
+const SEMVER_RE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
 // ----- Brief schema -----
 
@@ -234,6 +235,10 @@ function validateBrief(raw, templateDir = DEFAULT_TEMPLATE_DIR, options = {}) {
   if (unknownModules.length) {
     throw new Error(`MODULES contient des modules inconnus: ${unknownModules.join(", ")}`);
   }
+  const modulesDir = resolve(templateDir, "modules");
+  for (const moduleId of brief.MODULES) {
+    assertModuleManifestVersion(readModuleManifest(modulesDir, moduleId), moduleId);
+  }
   if (!brief.DESIGN_SYSTEM_SOURCE) {
     const knownDesignSystems = availableDesignSystemIds(templateDir);
     if (!knownDesignSystems.includes(brief.DESIGN_SYSTEM)) {
@@ -257,6 +262,20 @@ function availableModuleIds(templateDir) {
       return existsSync(configPath) && statSync(configPath).isFile();
     })
     .sort();
+}
+
+function readModuleManifest(modulesDir, moduleId) {
+  const manifestPath = join(modulesDir, moduleId, "module.config.json");
+  return JSON.parse(readFileSync(manifestPath, "utf8"));
+}
+
+function assertModuleManifestVersion(manifest, moduleId) {
+  if (manifest.id !== moduleId) {
+    throw new Error(`Module manifest mismatch: expected ${moduleId}, got ${manifest.id}`);
+  }
+  if (typeof manifest.version !== "string" || !SEMVER_RE.test(manifest.version)) {
+    throw new Error(`Module ${moduleId} must define a SemVer version in module.config.json`);
+  }
 }
 
 function availableDesignSystemIds(templateDir) {
@@ -693,8 +712,9 @@ function configureModules(brief, outputDir, opts) {
     writeModuleRegistry(modulesDir, selected);
   }
   const manifests = selected.map((moduleId) => {
-    const manifestPath = join(modulesDir, moduleId, "module.config.json");
-    return JSON.parse(readFileSync(manifestPath, "utf8"));
+    const manifest = readModuleManifest(modulesDir, moduleId);
+    assertModuleManifestVersion(manifest, moduleId);
+    return manifest;
   });
   writeFileSync(
     join(outputDir, ".factory-modules.json"),

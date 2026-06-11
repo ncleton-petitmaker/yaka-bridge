@@ -1,5 +1,6 @@
 {
   "id": "purchasing",
+  "version": "0.1.0",
   "labels": {
     "fr": "Achats",
     "en": "Purchasing"
@@ -84,4 +85,3 @@
     ]
   }
 }
-

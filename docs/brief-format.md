@@ -104,6 +104,7 @@ MCP_ACTIONS:
 | `GIT_BINDING`    | string              | Description du binding avec un repo Git externe (capture SHA, checkout, etc.).                             | `capture marcelle-app/ HEAD per batch`                 |
 | `EXTRA_ROUTES`   | array of string     | Signatures HTTP des routes additionnelles à scaffolder, format libre `<METHOD> <path> <comment>`.          | `- GET /api/git/log marcelle-app`                      |
 | `SKILLS`         | array of string     | Liste de slugs de skills à générer dans `skills-template/_global/`. L'agent `skill-author` les remplit.    | `- system-prompt-staff-default`                        |
+| `MODULES`        | array of string     | Modules catalogue à conserver/activer dans le projet généré. Chaque manifest doit avoir une version SemVer. | `- purchasing`                                         |
 | `AGENTIC_FIRST`  | boolean             | Si `true` (défaut), impose la parité UI ↔ serveur ↔ MCP pour toutes les actions métier.                    | `true`                                                 |
 | `MCP_ACTIONS`    | array of string     | Actions MCP explicitement attendues en plus des actions CRUD/run/cancel déduites des entités/routes.       | `- batch.create`                                       |
 
@@ -251,6 +252,7 @@ const BriefSchema = z.object({
   GIT_BINDING: z.string().optional(),
   EXTRA_ROUTES: z.array(z.string()).optional(),
   SKILLS: z.array(z.string()).optional(),
+  MODULES: z.array(z.string()).optional().default(["purchasing"]),
   DESIGN_SYSTEM: z.string().optional().default("claude"),
   DESIGN_SYSTEM_SOURCE: z.string().optional(),
 });
@@ -265,6 +267,8 @@ Règles supplémentaires (vérifiées hors schéma) :
 3. Si un `ENTITY` non listé apparaît dans `EXTRA_ROUTES`, warning aussi.
 4. Si `DESIGN_SYSTEM_SOURCE` est absent, `DESIGN_SYSTEM` doit exister dans
    `design-systems/<id>/`.
+5. Chaque entrée `MODULES` doit exister dans `modules/<id>/module.config.json`
+   et définir une version SemVer.
 
 En cas d'erreur de validation, l'orchestrateur affiche les `.issues` Zod
 formatés (champ + raison) puis exit `1`. Aucun scaffolding n'est lancé.
@@ -283,6 +287,7 @@ formatés (champ + raison) puis exit `1`. Aucun scaffolding n'est lancé.
    - clone le template dans `output-dir`
    - lance `init-from-template.mjs` avec les valeurs du brief
    - applique `DESIGN_SYSTEM`
+   - conserve seulement les modules `MODULES` et écrit `.factory-modules.json`
    - spawne les agents F.2 séquentiellement avec des prompts construits depuis
      le brief (`app-scaffolder` → `domain-modeler` → `subprocess-driver` →
      `ui-page-generator` → `skill-author`)

@@ -3,14 +3,16 @@
 The template uses a small module catalog to compose ERP projects.
 
 When creating a new module, start with
-`skills-template/_global/yaka-bridge-create-module.skill.md`. The skill keeps
-the template version and any private client implementation aligned.
+`skills-template/_global/yaka-bridge-version-modules.skill.md`, then use
+`skills-template/_global/yaka-bridge-create-module.skill.md`. The versioning
+skill chooses the correct repo and release path before implementation starts.
 
 ## Module shape
 
 A module lives in `modules/<moduleId>/` and must include:
 
 - `module.config.json`: canonical manifest used by the factory and docs.
+- `version`: SemVer module contract version inside the manifest.
 - UI components/routes that use the shared design system.
 - Server actions exposed through `server/actions.ts` and MCP parity.
 - Supabase migrations with `organization_id` and RLS.
@@ -18,6 +20,11 @@ A module lives in `modules/<moduleId>/` and must include:
 
 Technical ids are English (`purchasing`, `stock`, `crm`). UI labels can be
 localized in the manifest.
+
+Customer-specific modules should be developed in private
+`<clientSlug>-module-<moduleId>` repositories and promoted into customer ERP
+repos through `modules.lock.json`. Only anonymized reusable structure belongs in
+this public catalog. See [repository-governance.md](repository-governance.md).
 
 ## Security model
 
