@@ -12,12 +12,12 @@ const prompt = `Utilise la skill yaka-bridge-onboard.
 Tu es dans le repo yaka-bridge. Objectif : guider un utilisateur novice qui vient
 d'importer le repo pour le rendre opérationnel avec Codex.
 
-Commence par vérifier les skills repo-local, puis pose les questions de cadrage :
-client, GitHub, modules, design system, VPS OVH ou VPS existant, domaine, DNS,
-Supabase, Bridge, sauvegardes et sécurité. Ne demande jamais de secrets dans le
-chat. Si besoin, délègue aux skills yaka-bridge-version-modules,
-yaka-bridge-new-client-vps, yaka-bridge-create-module et
-yaka-bridge-refactor-design-system.`;
+Commence par vérifier les skills repo-local et le dossier Projets/, puis pose
+les questions de cadrage : dossier entreprise local, client, GitHub, modules,
+design system, VPS OVH ou VPS existant, domaine, DNS, Supabase, Bridge,
+sauvegardes et sécurité. Ne demande jamais de secrets dans le chat. Si besoin,
+délègue aux skills yaka-bridge-version-modules, yaka-bridge-new-client-vps,
+yaka-bridge-create-module et yaka-bridge-refactor-design-system.`;
 
 if (!SKIP_SYNC) {
   run("node", ["scripts/sync-codex-skills.mjs"], {

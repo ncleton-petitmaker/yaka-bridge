@@ -77,6 +77,26 @@ Le skill `yaka-bridge-onboard` pose les questions de cadrage et route ensuite
 vers les skills spécialisés pour GitHub, modules, VPS OVH/existant, DNS,
 Supabase, Bridge et design system.
 
+### Organiser les dossiers clients
+
+Le template public reste à la racine. Les entreprises clientes vivent localement
+dans :
+
+```text
+Projets/<CompanyFolder>/
+```
+
+Commandes utiles :
+
+```bash
+npm run projects:list
+npm run projects:check
+npm run projects:init -- --company "Example Company" --slug example-company
+```
+
+Ces dossiers sont ignorés par git. Ne jamais y forcer l'ajout de secrets,
+documents client ou états de déploiement dans le repo public.
+
 ### Gérer les repos et versions de modules
 
 Utiliser avant tout travail module ou client :

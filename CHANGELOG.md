@@ -21,6 +21,8 @@ and focus on operationally relevant changes.
   `skills:sync` and `skills:check`.
 - `yaka-bridge-onboard` setup assistant and `codex:onboard` command for guided
   GitHub, OVH/VPS, DNS, Supabase, module, design system and Bridge setup.
+- Local private customer workspace convention under `Projets/<CompanyFolder>/`
+  with `projects:list`, `projects:check` and `projects:init`.
 - Production-hardening baseline for auth, Bridge tokens, Supabase RLS, CI and
   dependency audit.
 - Generic `purchasing` module with manifest, demo seeds and Supabase migration.

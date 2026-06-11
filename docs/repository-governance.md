@@ -10,6 +10,9 @@ is not a security boundary.
 
 ## Repository topology
 
+Local private work is grouped under `Projets/<CompanyFolder>/`. Those folders
+are ignored by git and are not part of the public template.
+
 | Repository | Visibility | Purpose | Who can write |
 | --- | --- | --- | --- |
 | `yaka-bridge` | Public | Reusable template, generic modules, docs, skills and anonymized examples. | Template maintainers only. |
@@ -19,6 +22,8 @@ is not a security boundary.
 ## Mandatory decisions
 
 - A new ERP customer always gets a new private `<clientSlug>-erp` repository.
+- A new ERP customer also gets a local private
+  `Projets/<CompanyFolder>/` workspace.
 - A new customer-specific module gets a private
   `<clientSlug>-module-<moduleId>` repository by default.
 - A module built by a trained non-developer must live in its own module

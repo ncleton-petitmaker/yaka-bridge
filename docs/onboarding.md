@@ -27,6 +27,7 @@ Copy the printed prompt into Codex while this repository is the active project.
 The onboarding assistant asks for:
 
 - local demo, new customer, or existing customer;
+- local company folder under `Projets/<CompanyFolder>/`;
 - GitHub owner or organization;
 - customer name and technical slug;
 - module list and design system;
@@ -43,6 +44,8 @@ It then routes the work to the specialized skills:
 
 ## Safety rules
 
+- Customer folders under `Projets/<CompanyFolder>/` are private and ignored by
+  git.
 - Do not paste secrets, passwords, private keys or Supabase service role keys
   into chat.
 - Customer repos and customer module repos stay private.
