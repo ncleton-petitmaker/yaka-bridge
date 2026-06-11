@@ -23,6 +23,8 @@ Commence par vérifier le contexte local :
 pwd
 git status --short --branch
 npm run skills:check
+npm run projects:check
+npm run projects:list
 node --version
 npm --version
 codex --version
@@ -30,20 +32,22 @@ gh auth status
 ```
 
 Si `npm run skills:check` échoue, lance `npm run skills:sync`, puis relance le
-check. Si `codex` ou `gh` manque, explique l'installation minimale avant de
-continuer. Ne lance aucune opération VPS ou GitHub destructive sans validation
-explicite.
+check. Si `npm run projects:check` échoue, corrige d'abord le modèle local
+`Projets/` pour que les dossiers clients restent ignorés par git. Si `codex` ou
+`gh` manque, explique l'installation minimale avant de continuer. Ne lance
+aucune opération VPS ou GitHub destructive sans validation explicite.
 
 ## Première réponse attendue
 
 Ne commence pas par un long cours. Pose d'abord ces questions en bloc court :
 
 1. Est-ce un test local, un nouveau client, ou un client existant ?
-2. Nom du client et slug technique souhaité ?
-3. Domaine principal et provider DNS : OVH, Cloudflare, autre ?
-4. VPS : nouveau VPS OVH à créer, VPS existant, ou pas encore décidé ?
-5. GitHub : owner/organisation qui hébergera les repos privés ?
-6. Modules initiaux et design system : `purchasing` + `claude` par défaut ?
+2. Quel dossier entreprise local utiliser dans `Projets/<CompanyFolder>/` ?
+3. Nom du client et slug technique souhaité ?
+4. Domaine principal et provider DNS : OVH, Cloudflare, autre ?
+5. VPS : nouveau VPS OVH à créer, VPS existant, ou pas encore décidé ?
+6. GitHub : owner/organisation qui hébergera les repos privés ?
+7. Modules initiaux et design system : `purchasing` + `claude` par défaut ?
 
 Ensuite, adapte le parcours.
 
@@ -53,6 +57,7 @@ Ensuite, adapte le parcours.
 
 Collecte :
 
+- dossier entreprise local `Projets/<CompanyFolder>/` ;
 - nom client public ;
 - slug technique ;
 - modules initiaux ;
@@ -65,18 +70,29 @@ Si le client n'existe pas encore, prépare un brief `MODULES` et
 `DESIGN_SYSTEM`. Si un module client doit être créé, délègue à
 `yaka-bridge-version-modules` avant `yaka-bridge-create-module`.
 
+Si le dossier entreprise local n'existe pas, propose :
+
+```bash
+npm run projects:init -- --company "<Company Name>" --slug <client-slug> --folder <CompanyFolder>
+npm run projects:check
+```
+
 ### 2. GitHub et repos
 
 Utilise `yaka-bridge-version-modules`.
 
 Règle :
 
+- local privé = `Projets/<CompanyFolder>/<subproject>/` ;
 - nouveau client = repo privé `<clientSlug>-erp` ;
 - nouveau module client = repo privé `<clientSlug>-module-<moduleId>` par
   défaut ;
 - non-développeur impliqué = repo module séparé obligatoire ;
 - repo client = `modules.lock.json`, config, DNS, déploiement, pas atelier de
   coding module.
+
+Les sous-projets locaux peuvent avoir des noms lisibles, mais le repo GitHub et
+les manifests doivent garder des ids techniques propres et stables.
 
 Vérifie `gh auth status`, visibilité privée, `main` protégée, PR obligatoire,
 checks CI obligatoires, force-push bloqué.

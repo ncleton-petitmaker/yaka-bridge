@@ -17,6 +17,7 @@ auditable et reproductible.
 
 ## Règle figée
 
+- Dossier local client = `Projets/<CompanyFolder>/`, ignoré par git.
 - Nouveau client ERP = nouveau repo privé `<clientSlug>-erp`.
 - Nouveau module client = nouveau repo privé
   `<clientSlug>-module-<moduleId>` par défaut.
@@ -36,17 +37,18 @@ auditable et reproductible.
 Avant toute action Git ou code, clarifie ce qui manque :
 
 1. Client cible et slug technique.
-2. Owner GitHub ou organisation GitHub.
-3. Module concerné et id technique anglais.
-4. Type de travail : nouveau client, nouveau module, modification, release,
+2. Dossier entreprise local dans `Projets/<CompanyFolder>/`.
+3. Owner GitHub ou organisation GitHub.
+4. Module concerné et id technique anglais.
+5. Type de travail : nouveau client, nouveau module, modification, release,
    promotion vers client, extraction vers template.
-5. Qui va coder : mainteneur senior, agent supervisé, employé formé au vibe
+6. Qui va coder : mainteneur senior, agent supervisé, employé formé au vibe
    coding, autre.
-6. Le module contient-il des règles, données, prompts, domaines ou intégrations
+7. Le module contient-il des règles, données, prompts, domaines ou intégrations
    privées ?
-7. Repos existants : `yaka-bridge`, `<clientSlug>-erp`,
+8. Repos existants : `yaka-bridge`, `<clientSlug>-erp`,
    `<clientSlug>-module-<moduleId>`.
-8. Version cible ou nature du changement : breaking, ajout compatible, patch.
+9. Version cible ou nature du changement : breaking, ajout compatible, patch.
 
 Si l'utilisateur veut avancer vite, choisis la voie la plus restrictive :
 repo module privé séparé, PR obligatoire, release avant promotion.
@@ -72,6 +74,8 @@ vérification critique échoue.
 ```bash
 git status --short --branch
 git remote -v
+npm run projects:check
+npm run projects:list
 gh auth status
 gh repo view <owner>/<repo> --json nameWithOwner,visibility,isPrivate,defaultBranchRef
 gh api repos/<owner>/<repo>/branches/main/protection
@@ -106,13 +110,15 @@ gh repo create <owner>/<clientSlug>-module-<moduleId> --private --description "y
 
 Après création :
 
-1. Initialiser `main`.
-2. Ajouter CI minimale.
-3. Ajouter README sobre avec le périmètre privé.
-4. Ajouter `CODEOWNERS` quand le mainteneur ou l'équipe GitHub est connu.
-5. Protéger `main`.
-6. Donner au contributeur module uniquement l'accès au repo module.
-7. Vérifier qu'aucun secret ou donnée client réelle n'a été commité.
+1. Créer ou confirmer `Projets/<CompanyFolder>/`.
+2. Cloner ou générer le repo dans `Projets/<CompanyFolder>/<subproject>/`.
+3. Initialiser `main`.
+4. Ajouter CI minimale.
+5. Ajouter README sobre avec le périmètre privé.
+6. Ajouter `CODEOWNERS` quand le mainteneur ou l'équipe GitHub est connu.
+7. Protéger `main`.
+8. Donner au contributeur module uniquement l'accès au repo module.
+9. Vérifier qu'aucun secret ou donnée client réelle n'a été commité.
 
 ## Protection minimale
 

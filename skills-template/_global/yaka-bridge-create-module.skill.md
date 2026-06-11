@@ -25,6 +25,7 @@ Cette étape choisit le bon repo :
 - `<clientSlug>-erp` pour activer/configurer une version déjà stable ;
 - `<clientSlug>-module-<moduleId>` pour un module client nouveau, spécifique,
   sensible ou développé par un non-développeur.
+- `Projets/<CompanyFolder>/<subproject>/` pour le rangement local privé.
 
 Ne code pas directement un nouveau module client dans le repo ERP client si un
 repo module séparé est requis.
@@ -38,17 +39,18 @@ Avant d'écrire du code, pose ces questions si elles ne sont pas déjà résolue
    - chemin d'un repo client privé existant si le module doit être installé en
      production pour un client.
    - `new-client` si le client n'existe pas encore.
-2. Quel est l'id technique anglais du module ?
+2. Quel est le dossier entreprise local `Projets/<CompanyFolder>/` ?
+3. Quel est l'id technique anglais du module ?
    - Exemples valides : `stock`, `crm`, `quality`, `planning`.
    - Refuser les accents, espaces et noms client.
-3. Quels sont les labels UI FR/EN ?
-4. Quels workflows humains doivent exister dans l'UI ?
-5. Quelles actions doivent être pilotables par agent via MCP et Bridge ?
-6. Quelles données doivent rester privées côté client ?
-7. Quels services web ou sous-domaines sont nécessaires ?
-8. Le module doit-il respecter le design system actif ou existe-t-il une
+4. Quels sont les labels UI FR/EN ?
+5. Quels workflows humains doivent exister dans l'UI ?
+6. Quelles actions doivent être pilotables par agent via MCP et Bridge ?
+7. Quelles données doivent rester privées côté client ?
+8. Quels services web ou sous-domaines sont nécessaires ?
+9. Le module doit-il respecter le design system actif ou existe-t-il une
    contrainte design client à garder privée ?
-9. Le préflight `yaka-bridge-version-modules` a-t-il confirmé le repo, les
+10. Le préflight `yaka-bridge-version-modules` a-t-il confirmé le repo, les
    droits, la branche et la version cible ?
 
 Si l'utilisateur demande d'avancer sans réponse complète, choisis la variante

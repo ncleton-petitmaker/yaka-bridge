@@ -17,6 +17,7 @@ module creation, release or promotion.
 The repository topology is fixed:
 
 - a new customer ERP always gets a private `<clientSlug>-erp` repo;
+- a new customer also gets a local private `Projets/<CompanyFolder>/` folder;
 - a new customer-specific module gets a private
   `<clientSlug>-module-<moduleId>` repo by default;
 - a module touched by a trained non-developer must stay in its own module repo
@@ -30,7 +31,8 @@ See [repository-governance.md](repository-governance.md).
 
 1. Create or verify the private `<clientSlug>-erp` repo through
    `yaka-bridge-version-modules`.
-2. Write a brief with `MODULES`, for example:
+2. Create or verify `Projets/<CompanyFolder>/` with `npm run projects:check`.
+3. Write a brief with `MODULES`, for example:
 
    ```yaml
    APP_NAME: Customer ERP
@@ -47,7 +49,7 @@ See [repository-governance.md](repository-governance.md).
    DOMAIN_BRIEF: Customer ERP using the purchasing module.
    ```
 
-3. Run:
+4. Run:
 
    ```bash
 node scripts/new-app-from-brief.mjs \
@@ -57,8 +59,8 @@ node scripts/new-app-from-brief.mjs \
   --skip-agents
 ```
 
-4. Run `npm ci`, `npm run typecheck`, `npm run build` in the generated app.
-5. Configure Supabase, auth origins and Bridge deployment secrets outside git.
+5. Run `npm ci`, `npm run typecheck`, `npm run build` in the generated app.
+6. Configure Supabase, auth origins and Bridge deployment secrets outside git.
 
 Choose the design system during this first setup. `claude` is the default. A
 client-specific design system must stay in the private client repo unless it is
@@ -66,7 +68,8 @@ generic enough to anonymize and promote back into the template.
 
 ## Add a module to an existing client ERP
 
-1. Run `yaka-bridge-version-modules` to classify the work.
+1. Run `yaka-bridge-version-modules` to classify the work and confirm the local
+   `Projets/<CompanyFolder>/` workspace.
 2. If the module depends on customer-specific rules, build it first in a
    private `<clientSlug>-module-<moduleId>` repo.
 3. Keep customer prompts, names, domains and data in private repos only.

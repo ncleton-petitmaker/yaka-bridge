@@ -26,8 +26,12 @@ data/
 # Évaluations sortantes (sensibles)
 evaluations/
 
-# Factory crash tests / apps générées localement
-Projets/
+# Customer/company workspaces (private, local only)
+Projets/*
+!Projets/.gitkeep
+!Projets/README.md
+!Projets/_template/
+!Projets/_template/**
 .pi/
 .factory-meta.json
 .factory-error.json

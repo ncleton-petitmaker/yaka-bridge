@@ -20,19 +20,20 @@ Ne commence pas l'installation tant que ces entrées ne sont pas connues ou
 explicitement décidées :
 
 1. Nom public du client et slug technique privé.
-2. Owner GitHub ou organisation GitHub qui hébergera les repos privés.
-3. Domaine principal contrôlé par le client.
-4. Provider DNS et accès disponibles.
-5. VPS provider, IPv4, utilisateur SSH, système d'exploitation.
-6. Email technique pour TLS et notifications.
-7. Premier administrateur ERP.
-8. Modules initiaux (`MODULES`), par défaut `["purchasing"]` si le client veut
+2. Dossier entreprise local `Projets/<CompanyFolder>/`.
+3. Owner GitHub ou organisation GitHub qui hébergera les repos privés.
+4. Domaine principal contrôlé par le client.
+5. Provider DNS et accès disponibles.
+6. VPS provider, IPv4, utilisateur SSH, système d'exploitation.
+7. Email technique pour TLS et notifications.
+8. Premier administrateur ERP.
+9. Modules initiaux (`MODULES`), par défaut `["purchasing"]` si le client veut
    le socle démontrable.
-9. Design system initial : `claude`, design system existant ou création avec
+10. Design system initial : `claude`, design system existant ou création avec
    `nexu-io/open-design`.
-10. Services attendus et sous-domaines publics.
-11. Politique de sauvegarde : cible externe, rétention, test restore.
-12. Contraintes métier et d'usage : qui utilise ChatGPT, qui installe Bridge,
+11. Services attendus et sous-domaines publics.
+12. Politique de sauvegarde : cible externe, rétention, test restore.
+13. Contraintes métier et d'usage : qui utilise ChatGPT, qui installe Bridge,
     quels documents transitent, quels workflows sont sensibles.
 
 Si un secret est fourni dans le chat, demande sa rotation et ne l'écris jamais
@@ -91,42 +92,44 @@ public, dashboard proxy sans auth séparée.
 
 1. Utiliser `yaka-bridge-version-modules` pour créer ou vérifier le repo privé
    `<clientSlug>-erp`, ses protections GitHub et sa politique de versioning.
-2. Créer le repo privé client depuis yaka-bridge avec un brief `MODULES` et
+2. Créer ou vérifier le dossier local `Projets/<CompanyFolder>/` avec
+   `npm run projects:check`.
+3. Créer le repo privé client depuis yaka-bridge avec un brief `MODULES` et
    `DESIGN_SYSTEM`.
-3. Initialiser le VPS :
+4. Initialiser le VPS :
    - mises à jour système ;
    - utilisateur non-root si demandé par la politique client ;
    - SSH durci ;
    - firewall minimal ;
    - Docker et compose ;
    - proxy HTTPS type Traefik/Coolify.
-4. Installer Supabase self-hosted :
+5. Installer Supabase self-hosted :
    - Kong/API exposé via `api.<client-domain>` ;
    - Postgres privé ;
    - Auth avec signup fermé ;
    - SMTP réel ;
    - Storage pour Bridge installers et updates ;
    - secrets dans `/opt/supabase/.env` ou vault, jamais git.
-5. Appliquer toutes les migrations yaka-bridge en ordre lexical.
-6. Déployer les services web :
+6. Appliquer toutes les migrations yaka-bridge en ordre lexical.
+7. Déployer les services web :
    - admin ;
    - ERP principal ;
    - chaque module exposé ;
    - variables serveur et navigateur cohérentes ;
    - `REQUIRE_AUTH=1`.
-7. Configurer Bridge :
+8. Configurer Bridge :
    - buckets installers et updates ;
    - build signé/notarisé quand applicable ;
    - service records ;
    - entitlements ;
    - token Bridge signé, expirant, révocable ;
    - tests polling/job/complete.
-8. Configurer sauvegardes :
+9. Configurer sauvegardes :
    - dump Postgres ;
    - archive Storage ;
    - copie externe chiffrée ;
    - restore drill documenté.
-9. Configurer observabilité :
+10. Configurer observabilité :
    - logs proxy ;
    - logs app ;
    - audit events ;

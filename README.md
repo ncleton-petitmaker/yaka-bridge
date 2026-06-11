@@ -61,6 +61,7 @@ Current production posture:
 - [Quick start](#quick-start)
 - [Generate a demo ERP](#generate-a-demo-erp)
 - [Design systems](#design-systems)
+- [Project workspaces](#project-workspaces)
 - [Repository governance](#repository-governance)
 - [Create a new module](#create-a-new-module)
 - [Create a new client/VPS](#create-a-new-clientvps)
@@ -144,6 +145,9 @@ If you are using Codex Desktop instead of the CLI, run
 `npm --silent run codex:onboard:prompt` and paste the prompt into Codex with
 this repo open.
 
+Customer/company work is organized locally under `Projets/<CompanyFolder>/`.
+Real customer folders are ignored by git.
+
 Install and verify the template:
 
 ```bash
@@ -225,6 +229,24 @@ adapt it to the yaka-bridge contract, then run the
 `yaka-bridge-refactor-design-system` skill across app, modules and Bridge.
 
 See [docs/design-systems.md](docs/design-systems.md).
+
+## Project workspaces
+
+The template root stays public and reusable. Local customer work lives under:
+
+```text
+Projets/<CompanyFolder>/
+```
+
+Useful commands:
+
+```bash
+npm run projects:list
+npm run projects:check
+npm run projects:init -- --company "Example Company" --slug example-company
+```
+
+See [docs/project-workspaces.md](docs/project-workspaces.md).
 
 ## Repository governance
 
@@ -362,6 +384,7 @@ Start here:
 - [Onboarding](docs/onboarding.md)
 - [Architecture](docs/architecture.md)
 - [Design systems](docs/design-systems.md)
+- [Project workspaces](docs/project-workspaces.md)
 - [Module catalog](docs/module-catalog.md)
 - [Repository governance](docs/repository-governance.md)
 - [Cloud security](docs/cloud-security.md)
