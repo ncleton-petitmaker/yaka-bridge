@@ -79,6 +79,8 @@
     "typecheck": "tsc --noEmit",
     "test": "tsx --test tests/**/*.test.ts",
     "security:grep": "node scripts/security-grep.mjs",
+    "skills:sync": "node scripts/sync-codex-skills.mjs",
+    "skills:check": "node scripts/sync-codex-skills.mjs --check",
     "factory:check": "node scripts/factory-check.mjs",
     "deploy-data": "node scripts/postinstall.mjs",
     "lint": "next lint",

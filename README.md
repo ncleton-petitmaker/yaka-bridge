@@ -236,6 +236,19 @@ protections, bump the module version and promote it safely.
 
 See [docs/repository-governance.md](docs/repository-governance.md).
 
+## Repo-local skills
+
+This repository ships Codex skills under `.codex/skills/`. They are generated
+from `skills-template/_global/` so the same operator workflows are available to
+Codex in this repo and to generated yaka-bridge apps at runtime.
+
+Synchronize after editing a shipped skill:
+
+```bash
+npm run skills:sync
+npm run skills:check
+```
+
 ## Create a new module
 
 Use the shipped operator skill:

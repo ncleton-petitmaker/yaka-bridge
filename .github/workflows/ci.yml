@@ -17,6 +17,7 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      - run: npm run skills:check
       - run: npm run build
       - run: npm audit --audit-level=high
       - run: npm run security:grep

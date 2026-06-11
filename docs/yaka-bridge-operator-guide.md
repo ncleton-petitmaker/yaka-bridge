@@ -45,6 +45,15 @@ Sources à vérifier avant tout usage commercial :
 Les skills de pilotage sont dans `skills-template/_global/` et sont copiés dans
 `data/.claude/skills/_global/` au postinstall.
 
+Les mêmes skills sont activés pour Codex dans ce repo via
+`.codex/skills/<skill>/SKILL.md`. Cette copie est générée depuis
+`skills-template/_global/` :
+
+```bash
+npm run skills:sync
+npm run skills:check
+```
+
 ### Gérer les repos et versions de modules
 
 Utiliser avant tout travail module ou client :
