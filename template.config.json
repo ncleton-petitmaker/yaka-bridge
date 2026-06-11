@@ -1,7 +1,7 @@
 {
   "templateVersion": "1.0.0",
-  "templateName": "claude-electron-app",
-  "description": "Template Electron + Hono daemon + Next.js + Claude Code subprocess + skills YAML. Sert de base aux apps métier produites par la factory.",
+  "templateName": "yaka-bridge",
+  "description": "Template ERP cloud modulaire avec Next.js, Hono, Supabase, Bridge local, MCP et skills. Sert de base aux ERP clients produits par la factory.",
   "placeholders": [
     {
       "key": "APP_NAME",

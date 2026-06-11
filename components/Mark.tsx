@@ -24,12 +24,12 @@ export function Mark({ size = 22, className }: { size?: number; className?: stri
         flexShrink: 0,
         overflow: "hidden",
       }}
-      aria-label="Bridge ERP Template"
+      aria-label="yaka-bridge"
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src="/app-mark.svg"
-        alt="Bridge ERP Template"
+        alt="yaka-bridge"
         style={{
           width: "100%",
           height: "100%",

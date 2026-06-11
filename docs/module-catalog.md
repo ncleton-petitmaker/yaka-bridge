@@ -2,6 +2,10 @@
 
 The template uses a small module catalog to compose ERP projects.
 
+When creating a new module, start with
+`skills-template/_global/yaka-bridge-create-module.skill.md`. The skill keeps
+the template version and any private client implementation aligned.
+
 ## Module shape
 
 A module lives in `modules/<moduleId>/` and must include:

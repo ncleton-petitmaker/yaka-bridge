@@ -9,8 +9,10 @@ Collect these values before touching the server:
 - VPS IPv4 and SSH user.
 - Public Supabase API domain, for example `api.customer.example`.
 - Public app/admin domains, for example `erp.customer.example` and `admin.customer.example`.
+- Public service domains, for example `purchasing.customer.example`.
 - Email for TLS certificates.
 - Organization name and first Bridge admin email.
+- Initial module list, for example `MODULES: ["purchasing"]`.
 
 Do not put secrets in the repo. Secrets belong in `/opt/supabase/.env`, Coolify secret storage, or the customer's CI/CD vault.
 
@@ -22,6 +24,8 @@ Create DNS records before testing browser flows:
 api.customer.example       A     <vps-ipv4>
 erp.customer.example       A     <vps-ipv4>
 admin.customer.example     A     <vps-ipv4>
+purchasing.customer.example A    <vps-ipv4>
+bridge-updates.customer.example A <vps-ipv4>
 ```
 
 Without DNS, server-side checks can still use SSH tunnels or `curl --resolve`, but Supabase Auth and browser sessions are not production-valid.
@@ -47,18 +51,19 @@ supabase-db on 127.0.0.1:5432 only
 
 ## Supabase Foundation
 
-After Supabase is running, apply the template migrations:
+After Supabase is running, apply every template migration in lexical order:
 
 ```bash
-docker exec -i supabase-db psql -U postgres -d postgres -v ON_ERROR_STOP=1 \
-  < supabase/migrations/20260606120000_bridge_control_plane.sql
-
-docker exec -i supabase-db psql -U postgres -d postgres -v ON_ERROR_STOP=1 \
-  < supabase/migrations/20260606123000_modular_erp_core.sql
-
-docker exec -i supabase-db psql -U postgres -d postgres -v ON_ERROR_STOP=1 \
-  < supabase/migrations/20260606150000_bridge_observability.sql
+for migration in supabase/migrations/*.sql; do
+  echo "Applying $migration"
+  docker exec -i supabase-db psql -U postgres -d postgres -v ON_ERROR_STOP=1 \
+    < "$migration"
+done
 ```
+
+This includes shared `bridge_*`, `erp_*` tables and catalog module migrations
+such as `purchasing_*`. Do not skip module migrations: the catalog entry alone
+is not enough for production.
 
 Verify the shared ERP modules:
 
@@ -192,7 +197,7 @@ Update `/opt/supabase/.env`:
 
 ```dotenv
 SITE_URL=https://erp.customer.example
-ADDITIONAL_REDIRECT_URLS=https://erp.customer.example/**,https://admin.customer.example/**
+ADDITIONAL_REDIRECT_URLS=https://erp.customer.example/**,https://admin.customer.example/**,https://purchasing.customer.example/**
 ```
 
 Then restart Auth:

@@ -1,6 +1,6 @@
-# Bridge ERP Demo - Agent Context
+# yaka-bridge - Agent Context
 
-You are the agentic assistant for a demo ERP workspace.
+You are the agentic assistant for a yaka-bridge ERP workspace.
 
 ## Posture
 

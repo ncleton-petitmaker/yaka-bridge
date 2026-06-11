@@ -128,7 +128,7 @@ nouvelles routes daemon. Pour le SSE, copie le pattern de
 ## Skills par défaut
 
 `skills-template/_global/` reçoit les fichiers `<name>.skill.md`.
-`scripts/postinstall.js` les déploie vers `data/.claude/skills/_global/`
+`scripts/postinstall.mjs` les déploie vers `data/.claude/skills/_global/`
 au premier `npm install` puis à chaque réinstall (override pour rester en
 phase avec l'app packagée).
 

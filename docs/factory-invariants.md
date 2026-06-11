@@ -2,11 +2,11 @@
 
 ## Vue d'ensemble
 
-Mapping de ce que le template (`claude-electron-app-template`) fournit en
+Mapping de ce que le template (`yaka-bridge`) fournit en
 standard vs ce qu'une app domain-specific doit ajouter, et **quel agent factory
 génère chaque morceau** (cf. plan `noble-scribbling-candy.md`, Phase F.2).
 
-Référence d'audit : comparaison `claude-electron-app-template/` (post Part T,
+Référence d'audit : comparaison `yaka-bridge/` (post Part T,
 state au 2026-05-17) vs `/tmp/oif-base/oif-eval/` (clone full, base de
 référence). oif-eval est le seul exemple d'app cible existante au moment de la
 conception : la factory est dimensionnée pour ne pas sur-abstraire ces patterns
@@ -29,7 +29,7 @@ desktop "Electron + daemon Hono + subprocess + skills".
 - `scripts/build-server.mjs` — bundling esbuild `server/index.ts → dist/server.cjs`.
 - `scripts/prepare-pack.mjs`, `scripts/electron-builder-after-pack.cjs` —
   packaging.
-- `scripts/postinstall.js` — déploiement `data-template/` → `data/`.
+- `scripts/postinstall.mjs` — déploiement `data-template/` → `data/`.
 
 ### 1.2 Daemon Hono — orchestration générique
 - `server/index.ts` — Hono boot, CORS, audit middleware, routes

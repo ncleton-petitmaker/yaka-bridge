@@ -1,17 +1,15 @@
-# Factory Guide — claude-electron-app-template
+# Factory Guide - yaka-bridge
 
 ## 1. Vue d'ensemble
 
 La **factory** est un méta-outil bâti au-dessus du template
-`claude-electron-app-template`. Là où le template fournit les invariants
-techniques d'une app desktop (Electron + Hono + Next.js + spawn Claude + skills
-YAML + audit log + packaging), la factory automatise la *spécialisation* de ce
-template pour un domaine métier précis (calibration, comparaison de prompts,
-évaluation OIF, …). On part d'un **brief markdown** que l'utilisateur rédige
-(ou que Claude collecte interactivement via la skill `electron-claude-app`),
-on lance un orchestrateur, et on obtient une app fonctionnelle prête à
-typer + booter, avec entités, drivers subprocess, pages UI, skills et routes
-métier déjà scaffoldés.
+`yaka-bridge`. Le template fournit les invariants techniques d'un ERP
+modulaire cloud/Bridge : Next.js, Hono, Supabase, Bridge local, skills,
+actions agentic-first, audit, packaging et module catalog. La factory automatise
+la spécialisation de ce template pour un ERP client ou un service métier précis.
+On part d'un **brief markdown**, on lance un orchestrateur, et on obtient une
+app fonctionnelle prête à typer + booter, avec modules, routes, skills et
+contrats métier déjà scaffoldés.
 
 La cible : **passer d'un brief à un scaffold cohérent en quelques minutes**
 plutôt qu'en plusieurs jours de copier-coller depuis une app de référence
@@ -27,9 +25,9 @@ Invariant ajouté : **agentic-first**. Toute action faisable dans l'interface
 doit être disponible par MCP via une action serveur typée partagée par l'UI,
 les routes Hono et le serveur MCP. Voir [`docs/agentic-first.md`](agentic-first.md).
 
-Utilisateurs visés : développeurs template maintainers qui construisent une nouvelle
-app Electron-Hono-Claude. Anti-cible : apps web/SaaS classiques, apps sans
-subprocess local, apps non desktop.
+Utilisateurs visés : mainteneurs du template et agents qui construisent un ERP
+client ou un nouveau module yaka-bridge. Anti-cible : prototypes jetables,
+services sans authZ stricte, modules qui ne respectent pas la parité UI/MCP.
 
 ## 2. Workflow en un coup d'œil
 
@@ -48,7 +46,7 @@ subprocess local, apps non desktop.
        ▼
 ┌────────────────────────────────────┐
 │ scripts/init-from-template.mjs     │  remplace les placeholders
-│   (rebrand)                        │  Bridge ERP Demo, 3307, …
+│   (rebrand)                        │  app name, ports, modules
 └──────┬─────────────────────────────┘
        │
        ▼  séquentiel, un agent à la fois
@@ -248,7 +246,7 @@ et le brief produit est cohérent avec le format attendu.
 ### 6.2 En CLI direct
 
 ```bash
-cd /path/to/claude-electron-app-template
+cd /path/to/yaka-bridge
 node scripts/new-app-from-brief.mjs \
   --brief /path/to/brief.md \
   --output-dir /path/to/new-app
@@ -412,7 +410,7 @@ Pistes d'évolution (cf. plan `noble-scribbling-candy.md`) :
 
 ## 12. Liens
 
-- Repo template : <https://github.com/example/bridge-erp-template>
+- Repo template : <https://github.com/example/yaka-bridge>
 - Plan de référence : `/Users/marcelle/.claude/plans/noble-scribbling-candy.md`
 - Audit invariants : [`docs/factory-invariants.md`](factory-invariants.md)
 - Format brief : [`docs/brief-format.md`](brief-format.md)

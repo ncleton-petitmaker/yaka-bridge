@@ -47,6 +47,7 @@ const SKILLS_DST = resolve(DATA, ".claude", "skills", "_global");
 if (existsSync(SKILLS_TEMPLATE)) {
   if (!existsSync(SKILLS_DST)) mkdirSync(SKILLS_DST, { recursive: true });
   for (const entry of readdirSync(SKILLS_TEMPLATE)) {
+    if (!entry.endsWith(".skill.md")) continue;
     const src = join(SKILLS_TEMPLATE, entry);
     const dst = join(SKILLS_DST, entry);
     // pour les skills, on écrase systématiquement (source de vérité = skills-template/)

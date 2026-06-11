@@ -214,6 +214,7 @@ function applyReplacements(content, values) {
     }
   }
   const demoRuntimeDefaults = {
+    "yaka-bridge": values.APP_NAME_KEBAB,
     "Bridge ERP Demo": values.APP_NAME,
     "bridge-erp-demo": values.APP_NAME_KEBAB,
     "Template ERP modulaire cloud/bridge": values.DOMAIN_BRIEF,

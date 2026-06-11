@@ -3,6 +3,11 @@
 This public template must stay client-neutral. Real customer implementations
 belong in private repositories.
 
+Use `skills-template/_global/yaka-bridge-create-module.skill.md` when creating
+or extracting a module. Use
+`skills-template/_global/yaka-bridge-new-client-vps.skill.md` when creating a
+new customer ERP or provisioning a VPS.
+
 ## Create a new ERP client
 
 1. Write a brief with `MODULES`, for example:
@@ -36,13 +41,17 @@ node scripts/new-app-from-brief.mjs \
 
 ## Add a module to an existing client ERP
 
-1. Build the module inside the private client repo.
+1. If the module depends on customer-specific rules, build it first inside the
+   private client repo.
 2. Keep customer prompts, names, domains and data in that private repo.
-3. When the module is stable, copy only the generic structure into
+3. When the module is stable, extract only the generic structure into
    `modules/<moduleId>/` in this template.
 4. Replace all customer records with demo/anonymized data.
 5. Add or update migrations, actions, manifest, seeds and docs.
 6. Run the template CI checks before considering the module reusable.
+
+If the module is already generic, create it in this template first and install
+it in the private client repo through configuration and client-only overrides.
 
 `MODULES` is required for catalog-based projects. Use `--legacy-entity` only
 for an old ENTITY-only scaffold that is not backed by a catalog module.

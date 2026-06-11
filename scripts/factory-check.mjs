@@ -6,7 +6,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const outputDir = mkdtempSync(join(tmpdir(), "bridge-erp-template-factory-"));
+const outputDir = mkdtempSync(join(tmpdir(), "yaka-bridge-factory-"));
 
 try {
   run("node", [
@@ -27,6 +27,9 @@ try {
     throw new Error(`Invalid generated module selection: ${JSON.stringify(meta.selectedModules)}`);
   }
 
+  run("npm", ["ci"], outputDir);
+  run("npm", ["run", "typecheck"], outputDir);
+  run("npm", ["run", "build"], outputDir);
   run("node", ["scripts/security-grep.mjs"], outputDir);
   console.log(`Factory check passed: ${outputDir}`);
 } finally {

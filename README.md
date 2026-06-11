@@ -1,10 +1,16 @@
-# Bridge ERP Template
+# yaka-bridge
 
 Template cloud/Bridge pour créer des ERP métier modulaires avec Next.js,
-Supabase, Bridge local et workflows agentiques.
+Supabase, services web par module, Bridge local et workflows agentiques.
 
-Le template public ne contient aucun cas client réel. Les modules fournis ici
-utilisent uniquement des données demo anonymisées.
+Le repo public `yaka-bridge` ne contient aucun cas client réel. Les modules
+fournis ici utilisent uniquement des données demo anonymisées.
+
+yaka-bridge est un ERP en ligne évolutif pensé pour fonctionner avec
+l'abonnement ChatGPT de chaque collaborateur plutôt qu'avec une dépendance
+exclusive aux appels API. L'application Bridge installée localement orchestre
+les échanges entre les services ERP, ChatGPT, les MCP et les jobs autorisés, au
+bon moment et avec audit.
 
 ## What is included
 
@@ -16,6 +22,7 @@ utilisent uniquement des données demo anonymisées.
 - Agentic-first action registry with HTTP and MCP parity.
 - Module catalog starting with `purchasing`.
 - Factory script for generating new ERP projects from briefs.
+- Global skills for creating new modules and provisioning new clients.
 - Production maintenance guardrails: auth, audit, CI, dependency automation.
 
 ## Quick start
@@ -67,6 +74,19 @@ Current module:
 
 - `purchasing` / Achats: suppliers, quotes, comparison and decision workflows.
 
+## Operator skills
+
+Two global skills are shipped in `skills-template/_global/` and copied to
+`data/.claude/skills/_global/` by `npm install`:
+
+- `yaka-bridge-create-module`: create a new ERP module in the template and, when
+  a client is selected, apply it in the private client repo.
+- `yaka-bridge-new-client-vps`: create a new client ERP on a VPS, including
+  DNS, Supabase, services, Bridge, backups and production checks.
+
+For novice-friendly operating instructions, see
+[docs/yaka-bridge-operator-guide.md](docs/yaka-bridge-operator-guide.md).
+
 ## Client workflow
 
 Real customer implementations live in private repositories. Stable generic
@@ -81,6 +101,7 @@ modules can be anonymized and copied back into this template. See
 - [docs/vps-provisioning-runbook.md](docs/vps-provisioning-runbook.md)
 - [docs/cloud-security.md](docs/cloud-security.md)
 - [docs/module-catalog.md](docs/module-catalog.md)
+- [docs/yaka-bridge-operator-guide.md](docs/yaka-bridge-operator-guide.md)
 
 ## License
 

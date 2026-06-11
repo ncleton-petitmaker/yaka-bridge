@@ -1,8 +1,8 @@
 {
-  "name": "bridge-erp-template",
+  "name": "yaka-bridge",
   "version": "0.0.43",
   "private": true,
-  "description": "Template Bridge + Supabase self-hosted pour ERP modulaire multi-services.",
+  "description": "Template yaka-bridge pour ERP cloud modulaire avec Supabase, Bridge local, MCP et workflows agentiques.",
   "engines": {
     "node": ">=24"
   },
@@ -69,7 +69,7 @@
     }
   },
   "scripts": {
-    "postinstall": "node scripts/postinstall.js",
+    "postinstall": "node scripts/postinstall.mjs",
     "dev": "node scripts/dev.mjs",
     "build": "next build",
     "start:daemon": "tsx server/index.ts",
@@ -79,7 +79,7 @@
     "test": "tsx --test tests/**/*.test.ts",
     "security:grep": "node scripts/security-grep.mjs",
     "factory:check": "node scripts/factory-check.mjs",
-    "deploy-data": "node scripts/postinstall.js",
+    "deploy-data": "node scripts/postinstall.mjs",
     "lint": "next lint",
     "electron": "electron electron/main.cjs",
     "electron:pack:mac": "node scripts/prepare-pack.mjs && electron-builder --mac",

@@ -1,6 +1,7 @@
 # Supabase VPS Architecture
 
-This template targets a repeatable Bridge + Supabase self-hosted architecture for modular ERP projects.
+yaka-bridge targets a repeatable Bridge + Supabase self-hosted architecture
+for modular ERP projects.
 
 ## Reference Shape
 
@@ -21,6 +22,23 @@ https://api.customer.example
 ```
 
 Do not rely on the server IP as a browser Supabase URL. Traefik routes by host, TLS certificates are host-bound, and Supabase Auth redirects need stable domains.
+
+## DNS Model
+
+Use explicit DNS records for every public surface:
+
+```text
+api.customer.example              Supabase API / Kong
+admin.customer.example            ERP administration
+erp.customer.example              ERP portal
+bridge-updates.customer.example   Bridge update artifacts
+purchasing.customer.example       purchasing service
+<module>.customer.example         any additional module service
+```
+
+All records point to the VPS/proxy target. Every service domain must also be
+present in the proxy router, CORS allowlist, Supabase Auth redirect URLs and
+Bridge service manifest.
 
 ## Data Model
 
