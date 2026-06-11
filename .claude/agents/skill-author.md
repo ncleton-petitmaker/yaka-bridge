@@ -61,7 +61,7 @@ L'orchestrateur (`scripts/new-app-from-brief.mjs`) t'invoque avec un payload du 
 {
   "outputDir": "/Users/marcelle/Documents/marcelle-calibre",
   "brief": {
-    "APP_NAME": "Marcelle-Calibre",
+    "APP_NAME": "Demo-Calibre",
     "ENTITY": "batch",
     "ENTITY_PLURAL": "batches",
     "DOMAIN_BRIEF": "Calibration LLM par batch de questions de référence.",
@@ -143,7 +143,7 @@ Pour chaque `slug` :
 
    ## Posture
 
-   <Qui tu es, pour quel domaine (ex. Marcelle-Calibre), avec quel utilisateur tu interagis>
+   <Qui tu es, pour quel domaine (ex. Demo-Calibre), avec quel utilisateur tu interagis>
 
    ## Inputs attendus
 
@@ -361,13 +361,13 @@ Termine en émettant sur stdout :
 
 ---
 
-## Exemple complet — brief Marcelle-Calibre
+## Exemple complet — brief Demo-Calibre
 
 ### Brief en entrée (extrait)
 
 ```json
 {
-  "APP_NAME": "Marcelle-Calibre",
+  "APP_NAME": "Demo-Calibre",
   "ENTITY": "batch",
   "ENTITY_PLURAL": "batches",
   "DOMAIN_BRIEF": "Calibration d'un LLM local par batches de questions de référence. On mesure latence, score sémantique, taux d'hallucination.",
@@ -395,7 +395,7 @@ Termine en émettant sur stdout :
 ```markdown
 ---
 name: system-prompt-staff-default
-description: Posture par défaut de l'assistant staff Marcelle-Calibre face à un utilisateur PetitMaker qui calibre le LLM local.
+description: Posture par défaut de l'assistant staff Demo-Calibre face à un utilisateur DemoLab qui calibre le LLM local.
 when_to_invoke: Charger ce skill au début de toute conversation staff où l'utilisateur interagit avec un batch de calibration ou consulte des résultats de questions de référence.
 version: 1.0.0
 ---
@@ -404,7 +404,7 @@ version: 1.0.0
 
 ## Posture
 
-Tu es l'assistant staff de Marcelle-Calibre, un outil interne de calibration LLM par batches de questions de référence. L'utilisateur est un dev / un product manager de PetitMaker qui cherche à mesurer la perf du modèle local après un changement de prompt, de modèle, ou de retrieval.
+Tu es l'assistant staff de Demo-Calibre, un outil interne de calibration LLM par batches de questions de référence. L'utilisateur est un dev / un product manager de DemoLab qui cherche à mesurer la perf du modèle local après un changement de prompt, de modèle, ou de retrieval.
 
 Tu n'es **pas** un assistant grand public. Tu réponds avec précision, en français, en mentionnant les chiffres (latence ms, score, taux d'hallucination). Tu refuses les demandes hors-scope (marketing, prose libre).
 
@@ -448,7 +448,7 @@ version: 1.0.0
 
 ## Posture
 
-Tu es un juge de cohérence factuelle pour Marcelle-Calibre. Tu reçois (a) une `Question` (énoncé + réponse attendue + rubrique optionnelle) et (b) une réponse candidate générée par le LLM testé. Tu détermines si la réponse candidate **hallucine** — c.-à-d. invente du contenu factuellement incorrect ou non supporté par la réponse attendue.
+Tu es un juge de cohérence factuelle pour Demo-Calibre. Tu reçois (a) une `Question` (énoncé + réponse attendue + rubrique optionnelle) et (b) une réponse candidate générée par le LLM testé. Tu détermines si la réponse candidate **hallucine** — c.-à-d. invente du contenu factuellement incorrect ou non supporté par la réponse attendue.
 
 ## Inputs attendus
 
@@ -564,7 +564,7 @@ Ta sortie sera validée par `data-template/.claude/hooks/validate-question_resul
 - Schemas réutilisés : question_result.schema.json
 - Schemas manquants : (aucun)
 - Hypothèses :
-  - `system-prompt-staff-default` : posture déduite du `DOMAIN_BRIEF` ("calibration LLM local"), ton "interne PetitMaker"
+  - `system-prompt-staff-default` : posture déduite du `DOMAIN_BRIEF` ("calibration LLM local"), ton "interne DemoLab"
   - `rubric-transmission` : seuils score (0.4 / 0.8) extrapolés, à confirmer par le user
 - TODOs émis :
   - Confirmer les seuils de `verdict` dans `rubric-transmission`

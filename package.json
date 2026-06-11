@@ -1,6 +1,6 @@
 {
   "name": "bridge-erp-template",
-  "version": "0.0.35",
+  "version": "0.0.43",
   "private": true,
   "description": "Template Bridge + Supabase self-hosted pour ERP modulaire multi-services.",
   "engines": {
@@ -70,12 +70,15 @@
   },
   "scripts": {
     "postinstall": "node scripts/postinstall.js",
-    "dev": "concurrently -n daemon,next -c blue,green \"tsx watch server/index.ts\" \"next dev -p {{NEXT_PORT}}\"",
+    "dev": "node scripts/dev.mjs",
     "build": "next build",
     "start:daemon": "tsx server/index.ts",
     "start:next": "next start -p {{NEXT_PORT}}",
     "start": "node scripts/start.js",
     "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/**/*.test.ts",
+    "security:grep": "node scripts/security-grep.mjs",
+    "factory:check": "node scripts/factory-check.mjs",
     "deploy-data": "node scripts/postinstall.js",
     "lint": "next lint",
     "electron": "electron electron/main.cjs",
@@ -86,10 +89,11 @@
     "bridge:build": "node scripts/build-bridge.mjs",
     "bridge:pack:mac": "npm run bridge:build && electron-builder --mac --config electron-builder.bridge.cjs",
     "bridge:pack:win": "npm run bridge:build && electron-builder --win --x64 --config electron-builder.bridge.cjs --config.npmRebuild=false",
-    "dev:local": "concurrently -n daemon,next -c blue,green \"tsx watch server/index.ts\" \"next dev -p {{NEXT_PORT}}\"",
+    "dev:local": "node scripts/dev.mjs",
     "dev:cloud": "NEXT_PUBLIC_APP_API_MODE=cloud next dev -p {{NEXT_PORT}}",
     "start:mcp": "tsx server/mcp.ts",
-    "brand:icons": "node scripts/brand-icons.mjs"
+    "brand:icons": "node scripts/brand-icons.mjs",
+    "bridge:token": "node scripts/create-bridge-token.mjs"
   },
   "dependencies": {
     "@openreplay/tracker": "^18.0.13",
@@ -98,18 +102,18 @@
     "react-resizable-panels": "^2.1.9"
   },
   "devDependencies": {
-    "@hono/node-server": "^1.13.7",
+    "@hono/node-server": "^2.0.4",
     "@types/node": "^20.17.10",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
     "autoprefixer": "^10.4.20",
-    "concurrently": "^9.1.0",
-    "electron": "^42.0.0",
-    "electron-builder": "^26.8.1",
-    "esbuild": "^0.24.2",
-    "hono": "^4.6.14",
-    "next": "^16.0.0",
-    "postcss": "^8.4.49",
+    "concurrently": "^10.0.3",
+    "electron": "^42.4.0",
+    "electron-builder": "^26.15.2",
+    "esbuild": "^0.28.0",
+    "hono": "^4.12.25",
+    "next": "^16.2.9",
+    "postcss": "^8.5.15",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "tailwindcss": "^3.4.17",
@@ -117,5 +121,10 @@
     "typescript": "^5.7.2",
     "yaml": "^2.6.1",
     "zod": "^3.24.1"
+  },
+  "overrides": {
+    "postcss": "^8.5.15",
+    "shell-quote": "^1.8.4",
+    "tmp": "^0.2.7"
   }
 }

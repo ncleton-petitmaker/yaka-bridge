@@ -70,7 +70,7 @@ desktop "Electron + daemon Hono + subprocess + skills".
 - `skills-template/_global/.gitkeep` — emplacement vide.
 
 ### 1.5 Tooling + scaffolding
-- `package.json` (placeholders `{{APP_NAME}}`, `{{APP_ID}}`, ports).
+- `package.json` (placeholders `Bridge ERP Demo`, `com.example.demo-erp`, ports).
 - `template.config.json` — manifeste placeholders.
 - `scripts/init-from-template.mjs` — rebrand CLI (placeholders → valeurs).
 - `tsconfig.json`, `tailwind.config.ts`, `postcss.config.js`.
@@ -133,33 +133,22 @@ Aucun parcours utilisateur ne doit avoir une étape "intermédiaire" qui ne
 fait que rediriger ou afficher un CTA vers la vraie action. Si la seule
 action sur un écran est "passer à l'écran suivant", on supprime l'écran.
 
-#### UX-R5 · Storage picker natif (pattern OIF-eval)
-Toute app scaffoldée doit exposer dans `/settings` un **sélecteur natif de
-dossier** pour chaque chemin requis, **pas un input texte**. Pattern
-OIF-eval : l'utilisateur choisit la racine, l'app crée automatiquement les
-sous-dossiers requis.
+#### UX-R5 · Pas de stockage local visible par défaut
+Les apps scaffoldées sont des services web Bridge + Supabase. Elles ne doivent
+pas exposer une section `/settings` demandant à l'utilisateur de choisir des
+dossiers locaux `input/output/audit`.
 
-1. `electron/main.cjs` expose `ipcMain.handle("select-directory", ...)`
-   qui retourne `{ ok, path | cancelled | error }` et accepte `opts.subdirs:
-   string[]` pour créer les sous-dossiers automatiquement (path traversal
-   et chemins absolus rejetés).
-2. `lib/electron.ts` (invariant) expose `selectDirectory(opts)` typé +
-   `isElectron()` + `revealFile(absPath)` ; tombe sur
-   `{ ok: false, unavailable: true }` hors Electron.
-3. `app/settings/page.tsx` utilise `<DirField>` pour chaque entrée de
-   `config.requiredDirs` : input texte (édition manuelle possible) + bouton
-   **Parcourir** (picker natif) + bouton **Ouvrir** (reveal in Finder).
-   Sous-dossiers requis affichés en dessous (mono, gris) avec la mention
-   "↳ sous-dossiers auto : a, b, c".
-4. `server/app-config.ts` : type `requiredDirs: Array<{ key, label,
-   subdirs?: string[] }>`. L'agent `domain-modeler` ou `app-scaffolder`
-   remplit ce tableau dans `DEFAULT_CONFIG` selon les besoins du métier
-   (ex marcelle-calibre : `[{ key: "dataDir", label: "Dossier de
-   données", subdirs: ["batches", "questions", "samples", ".claude"] }]`).
-
-Ne pas exposer un champ texte sans bouton Parcourir. Ne pas demander à
-l'utilisateur de saisir 3 sous-dossiers à la main si une racine + subdirs
-auto fait l'affaire.
+1. Les données métier persistantes vont dans Supabase Postgres.
+2. Les fichiers durables (imports, exports, documents, installateurs Bridge,
+   artefacts d'update) vont dans Supabase Storage ou dans un stockage objet
+   explicitement raccordé au service.
+3. Le stockage local est interne au Bridge desktop, cloisonné par service
+   dans `<BridgeData>/services/<serviceId>/`, et ne doit pas devenir un
+   réglage utilisateur de l'app web.
+4. Un picker natif de dossier n'est autorisé que pour un workflow métier
+   explicitement local/offline demandé dans le brief. Dans ce cas, il doit
+   vivre dans un écran métier clair ou dans un bloc `Réglages > Avancé`, jamais
+   comme section générique obligatoire du template.
 
 ---
 
@@ -321,7 +310,7 @@ Composants oif-eval (33 fichiers, ~20 500 lignes) :
 | `StreamingPanel.tsx` (620 l) | **Pattern générique** — porter dans le template à terme | gardé tel quel par l'agent, type-events adapté |
 | `ChatDrawer.tsx`, `ResizeHandle.tsx`, `Icon.tsx`, `Mark.tsx`, `ClaudeMark.tsx`, `ProgressBar.tsx` | génériques | candidats à intégrer au template (Phase F.4) |
 | `CriteresGrid.tsx` (1078 l), `DossierFiles.tsx`, `DossierList.tsx`, `ReviewForm.tsx`, `VeriteBadge.tsx`, `SourceLink.tsx`, `DossierFileViewer.tsx` | OIF-pur | régénéré par `ui-page-generator` depuis les types |
-| `CampaignWizard.tsx`, `OnboardingWizard.tsx`, `StorageModeSelector.tsx`, `StorageGuard.tsx`, `ConflictBanner.tsx`, `AppChromeHeader.tsx` | OIF storage multi-poste | **non réutilisable** — pas de génération |
+| `CampaignWizard.tsx`, `OnboardingWizard.tsx`, `StorageModeSelector.tsx`, `ConflictBanner.tsx`, `AppChromeHeader.tsx` | OIF storage multi-poste / shell | **non réutilisable** — pas de génération hors composants shell conservés |
 | `CalibrageSection.tsx` (3553 l), `CostsDashboard.tsx` (1342 l), `DiffViewer.tsx`, `SkillEditor.tsx`, `RuleProposalForm.tsx` | métier + générique mêlés | candidats à splitter avant Phase F.4 |
 
 **Génériques (gardés)** : composants liés au flux SSE / streaming / chat /
@@ -351,8 +340,10 @@ Les agents factory ne génèrent **pas** :
 - **Storage multi-poste / sync bundles** (~1000 lignes oif-eval) — pas un
   pattern récurrent.
 - **PDF highlighting** (`server/pdf-highlight.ts`) — opt-in domain-specific.
-- **Logo / branding visuel** — icônes générées une fois via
-  `scripts/make-icon.mjs`, restent à la main de l'app.
+- **Branding illustratif avancé** — l'agent `brand-identity-designer` génère
+  uniquement un nom court et un logo minimal. Toute identité complexe
+  (illustration, mascotte, système marketing complet, animations) reste à la
+  main de l'app et ne doit pas entrer dans le template.
 
 ---
 
@@ -367,8 +358,8 @@ Les agents factory ne génèrent **pas** :
 - **Scope strict** : un agent ne touche **jamais** les fichiers hors de son
   scope (cf. prompt système de chaque agent, Phase F.2). Si un fichier
   invariant doit être patché, l'agent le signale dans le journal et stoppe.
-- **Placeholders** : `{{ENTITY}}`, `{{ENTITY_PLURAL}}`, `{{APP_NAME}}`,
-  `{{DAEMON_PORT}}`, `{{NEXT_PORT}}`, `{{DATA_DIR_ENV_VAR}}` — utilisés par
+- **Placeholders** : `{{ENTITY}}`, `{{ENTITY_PLURAL}}`, `Bridge ERP Demo`,
+  `7707`, `3307`, `DEMO_ERP_DATA_DIR` — utilisés par
   les agents pour rester génériques tant que `init-from-template.mjs` n'a
   pas tourné.
 - **Pas de dépendances ajoutées sans raison** : si l'agent veut ajouter un
@@ -390,8 +381,15 @@ Par agent, fichiers produits dans l'app cible :
   invoqués)
 - `factory-journal.md` (création initiale)
 - `data-template/.claude/CLAUDE.md` (rebrand placeholders)
-- Icônes : `public/icon-*` régénérées via `scripts/make-icon.mjs` si logo
-  fourni dans le brief
+
+### `brand-identity-designer`
+- `brand.config.json` (nom produit, nom court, tagline, source du mark)
+- `public/app-mark.svg` (logo minimal source de vérité)
+- `public/icon-*` et `public/icon.icns` si `npm run brand:icons` peut tourner
+  sur la machine
+- `components/Mark.tsx` (alt/aria-label/source logo)
+- `components/AppChromeHeader.tsx` (nom court + tagline)
+- `.factory-meta.json` et `factory-journal.md` (bloc brand)
 
 ### `domain-modeler`
 - `server/types.ts` (étendu)

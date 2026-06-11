@@ -1,8 +1,8 @@
 /**
  * Lecture et écriture persistante de la config app dans `<dataDir>/.claude/app-config.json`.
  *
- * Le template ne fixe que les champs structurels (modèle, Supabase, paths
- * autorisés en écriture). Les apps métier étendent ce type avec leurs propres
+ * Le template ne fixe que les champs structurels (modèle, Supabase, options
+ * runtime). Les apps métier étendent ce type avec leurs propres
  * settings en redéfinissant ce fichier ou en ajoutant un sous-module.
  */
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
@@ -28,20 +28,18 @@ export interface AppConfig {
   supabaseAnonKey?: string;
   /** Nombre max de runs Claude en parallèle. Défaut : 5. */
   maxConcurrentRuns?: number;
-  /**
-   * Liste des dossiers requis pour que l'app soit opérationnelle. Si non vide,
-   * `<StorageGuard>` bloque l'UI tant que chacune des clés référencées (par
-   * exemple "inputDir", "outputDir") n'est pas remplie. Chaque entrée :
-   *   { key: string, label: string, subdirs?: string[] }
-   * `key` désigne un champ de cette interface AppConfig que l'utilisateur doit
-   * configurer dans /settings ; `label` est ce qui s'affiche dans l'overlay ;
-   * `subdirs` (optionnel) liste les sous-dossiers créés automatiquement sous
-   * la racine choisie via le picker natif Electron (pattern OIF-eval —
-   * l'utilisateur choisit la racine, l'app crée le squelette).
-   *
-   * Vide par défaut : pas d'overlay bloquant.
-   */
-  requiredDirs?: Array<{ key: string; label: string; subdirs?: string[] }>;
+  automations?: {
+    gmailSupplierInvoices?: {
+      enabled?: boolean;
+      periodStart?: string;
+      periodEnd?: string;
+      supplierTypes?: string[];
+      excludedSupplierTypes?: string[];
+      gmailQuery?: string;
+      pennylaneMcpServer?: string;
+      schedule?: "manual" | "daily" | "weekly" | "monthly";
+    };
+  };
   lastUpdated?: string;
 }
 

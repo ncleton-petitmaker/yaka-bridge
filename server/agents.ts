@@ -53,7 +53,7 @@ function which(bin: string): string | null {
 }
 
 /**
- * Fallback dur : teste les chemins canoniques où les installers (npm global,
+ * Recherche secondaire : teste les chemins canoniques où les installers (npm global,
  * homebrew) posent le binaire. Utile si `which` échoue parce que le PATH du
  * process daemon n'a pas été rafraîchi après l'install.
  */
@@ -210,8 +210,8 @@ export interface BuildArgsOptions {
  * Nom de la variable d'environnement utilisée pour résoudre le `dataDir` :
  * c'est elle qui contient le path racine d'écriture (skills, audit-log, etc.).
  */
-const DATA_DIR_ENV_VAR = "PRIX_ACHATS_BE_DATA_DIR";
-const MCP_SERVER_NAME = "prix_achats_be";
+const DATA_DIR_ENV_VAR = "{{DATA_DIR_ENV_VAR}}";
+const MCP_SERVER_NAME = "{{APP_NAME_SNAKE}}";
 const CODEX_AUTH_FILES = ["auth.json", "auth-v2.json", "credentials.json"] as const;
 
 export function prepareIsolatedCodexHome(cwd: string): string {

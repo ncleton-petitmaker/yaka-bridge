@@ -4,26 +4,40 @@
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
-│  Electron BrowserWindow                                              │
-│  └─ http://localhost:{{NEXT_PORT}}/   ← Next.js sidecar              │
+│  Electron BrowserWindow ou navigateur cloud                          │
+│  └─ http://localhost:3307/   ← Next.js sidecar / web app cloud        │
 │                                                                      │
-│  Next.js (app/) ────────────── fetch /api/* ──────────┐              │
+│  Next.js (app/) ────────────── apiFetch /api/* ───────┐              │
 │                                                       │              │
-│                                                       ▼              │
-│  Hono daemon (server/index.ts) sur :{{DAEMON_PORT}}                  │
+│                 local                                ▼              │
+│  Hono daemon (server/index.ts) sur :7707                  │
 │   ├─ /api/health                                                     │
+│   ├─ /api/actions    registry agentic-first UI ↔ HTTP ↔ MCP          │
 │   ├─ /api/runs       POST  spawn subprocess                          │
 │   ├─ /api/runs/:id/events  SSE                                       │
 │   ├─ /api/skills     GET/PUT  YAML CRUD                              │
 │   ├─ /api/audit/*    journal chaîné                                  │
 │   └─ /api/app-config GET/PUT                                         │
 │                                                                      │
+│  MCP stdio (server/mcp.ts → dist/mcp.cjs)                            │
+│   └─ expose les mêmes actions serveur en tools `<app>__...`          │
+│                                                                      │
+│  Supabase                                                            │
+│   ├─ base métier par défaut, appelée côté daemon                      │
+│   │  via `server/supabase.ts`                                         │
+│   └─ Auth + Edge Functions en mode cloud                              │
+│                                                                      │
+│  Bridge local (bridge/index.ts)                                       │
+│   ├─ poll `bridge-poll` côté cloud                                    │
+│   ├─ exécute les jobs avec `server/runs.ts`                           │
+│   └─ renvoie les events via `run-event-batch`                         │
+│                                                                      │
 │  Subprocess(es) orchestrés par le daemon :                           │
 │   ├─ Claude Code CLI   spawn `claude -p --output-format stream-json` │
 │   ├─ ou Maestro / HTTP / cli custom (cf. subprocess-patterns.md)     │
 │                                                                      │
-│  Données runtime :                                                   │
-│  ~/Library/Application Support/{{APP_NAME}}/data/                    │
+│  Données runtime locales :                                           │
+│  ~/Library/Application Support/Bridge ERP Demo/data/                    │
 │  ├── .claude/                                                        │
 │  │   ├── app-config.json    config persistante                       │
 │  │   ├── CLAUDE.md          posture envoyée à Claude                 │
@@ -34,6 +48,69 @@
 │  └── …                                                               │
 └──────────────────────────────────────────────────────────────────────┘
 ```
+
+## Base de données Supabase
+
+Le template impose Supabase comme provider de base de données métier. Le daemon
+reste la frontière applicative : l'UI et les tools MCP appellent les actions
+serveur, puis ces actions lisent/écrivent Supabase via `server/supabase.ts`.
+
+- Config publique : `SUPABASE_URL` / `SUPABASE_ANON_KEY` ou `/settings`.
+- Secret serveur : `SUPABASE_SERVICE_ROLE_KEY`, uniquement en variable
+  d'environnement du daemon, jamais saisi dans l'UI.
+- Les fichiers locaux restent utiles pour le runtime Claude Code
+  (`.claude/`, skills, logs de runs, audit local), mais les entités métier et
+  workflows persistants doivent être modélisés dans Supabase.
+
+## Mode cloud + bridge
+
+Le template sait tourner en deux modes :
+
+- `NEXT_PUBLIC_APP_API_MODE=local` : comportement Electron classique. Next.js
+  rewrite `/api/*` vers le daemon Hono local ; les SSE tapent directement le
+  daemon.
+- `NEXT_PUBLIC_APP_API_MODE=cloud` : le navigateur appelle l'API web du service
+  sur le meme domaine, ou `NEXT_PUBLIC_CLOUD_API_URL` si elle est séparée, et
+  `CloudAuthGate` impose une session Supabase.
+
+Dans le mode cloud, les traitements agentiques longs sont exécutés par un
+bridge local installé sur un poste autorisé. Le bridge est un petit runtime
+Node/Electron indépendant :
+
+- `npm run bridge:install` écrit `~/.<app>-bridge/config.json`.
+- `npm run bridge -- run` s'enregistre auprès du cloud, poll les jobs, lance le
+  même moteur local que l'app Electron (`server/runs.ts`), puis remonte les
+  événements et le statut final.
+- `npm run bridge:build` bundle `bridge/index.ts` dans `dist/bridge/index.cjs`.
+- `npm run bridge:pack:mac` / `bridge:pack:win` produisent un installateur
+  séparé pour les postes opérateurs.
+
+Contrat Edge Functions minimal :
+
+- `POST /bridge-register`
+- `POST /bridge-poll`
+- `POST /run-event-batch`
+- `POST /bridge-job-complete`
+
+Chaque appel bridge envoie les headers `x-app-organization-id`,
+`x-app-bridge-id`, `x-app-install-id`, `x-app-bridge-token` et un body JSON
+contenant `organizationId`, `bridgeId`, `installId`, `sentAt`, `payload`.
+
+## Agentic-first / MCP
+
+Le template inclut un registry d'actions canonique dans `server/actions.ts`.
+Toute mutation métier doit y vivre. Les routes Hono, l'UI Next.js et le serveur
+MCP appellent les mêmes handlers.
+
+- HTTP : `GET /api/actions`, `POST /api/actions/:id`.
+- MCP stdio : `server/mcp.ts` en dev, `dist/mcp.cjs` en packagé.
+- Claude Code : `server/agents.ts` génère automatiquement
+  `<dataDir>/.claude/mcp.json` si absent et ajoute `--mcp-config` aux runs.
+- Préfixe tools : `demo-erp__runs__start`,
+  `demo-erp__runs__cancel`, `demo-erp__skills__list`, etc.
+
+Invariant : si une action est visible dans l'UI, elle doit avoir une action
+serveur et un tool MCP équivalent. Voir [`agentic-first.md`](agentic-first.md).
 
 ## Flux d'un run
 
@@ -64,13 +141,34 @@
 
 ## Sécurité
 
-Trois couches :
+Le runtime agentique réel est **Codex CLI** (`codex exec --json`), pas Claude
+Code. Les couches de sécurité effectives sont donc :
 
-1. **Claude CLI** : `--add-dir` whitelist (pas une sandbox stricte d'après la doc).
-2. **`.claude/settings.json`** : `permissions.deny = ["Bash", "WebFetch", "WebSearch"]`.
-3. **Hook PreToolUse `restrict-write-paths.mjs`** : exit 2 si le path d'écriture
-   n'est pas dans la whitelist construite depuis app-config.json. Anti-`..` et
-   anti-symlinks (resolve + realpath).
+1. **Bind loopback** : le daemon Hono n'écoute que sur `127.0.0.1`
+   (`serve({ ..., hostname: "127.0.0.1" })`). Aucune exposition réseau (LAN).
+2. **Token de session daemon** : l'hôte Electron génère un token aléatoire par
+   lancement, l'injecte au daemon (`APP_DAEMON_TOKEN`) et au renderer (preload).
+   Toutes les routes `/api/*` (sauf `/api/health`) exigent ce token
+   (`Authorization: Bearer` ou `?daemon_token=` pour le SSE), comparé en
+   constant-time. Défense anti-CSRF depuis un navigateur tiers + anti-process
+   local.
+3. **Sandbox Codex** : `--sandbox read-only` par défaut. Les mutations métier
+   passent par les outils MCP du daemon (validés + audités), pas par le shell.
+   `workspace-write` / `danger-full-access` ne sont accordés que sur des chemins
+   déjà confinés (et, côté bridge, sur scope explicite).
+4. **Confinement des chemins (`server/path-guard.ts`)** : `cwd` et chaque
+   `--add-dir` d'un run doivent résoudre SOUS une racine autorisée (dataDir +
+   inputDir/outputDir/auditLogDir). `realpathSync.native`, anti-`..`,
+   anti-symlink, fail-closed. C'est la barrière qui contient réellement les
+   écritures sous Codex.
+5. **Audit log chaîné** : voir section dédiée.
+
+> Note runtime : les fichiers `.claude/settings.json` (`permissions.deny`) et le
+> hook `.claude/hooks/restrict-write-paths.mjs` sont des constructs **Claude
+> Code**. Ils ne s'exécutent PAS sous Codex et ne doivent donc pas être comptés
+> comme une protection du runtime actuel ; ils restent utiles uniquement si
+> l'app est branchée sur le runtime Claude Code. Le confinement effectif sous
+> Codex est assuré par le point 4 ci-dessus.
 
 ## Audit log
 

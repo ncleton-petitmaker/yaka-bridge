@@ -49,6 +49,7 @@ export class BridgeCloudClient {
   async poll(capabilities: Record<string, unknown>): Promise<{
     ok: boolean;
     jobs: CloudBridgeJob[];
+    serverTime?: string;
   }> {
     return this.post("bridge/jobs/poll", {
       installId: this.cfg.installId,

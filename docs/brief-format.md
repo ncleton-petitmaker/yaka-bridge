@@ -23,11 +23,16 @@ Le parser interne convertit ces lignes en objet YAML (donc tout brief valide
 pas obligatoire).
 
 ```markdown
-APP_NAME: Marcelle-Calibre
-APP_ID: fr.petitmaker.marcelle-calibre
+APP_NAME: Demo-Calibre
+APP_ID: com.example.demo-erp
 NEXT_PORT: 3200
 DAEMON_PORT: 7556
-DATA_DIR_NAME: Marcelle-Calibre
+DATA_DIR_NAME: Demo-Calibre
+PROJECT_MODE: adapt-existing
+SOURCE_PROJECT_DIR: /Users/nicolascleton/Documents/marcelle-calibre-prototype
+ADAPTATION_BRIEF: |
+  Reprendre les drivers Maestro et les règles de scoring déjà codés, mais migrer
+  l'interface vers le shell Electron agentic-first. Ne pas toucher aux secrets.
 ENTITY: batch
 ENTITY_PLURAL: batches
 SUBPROCESS: maestro + http-api
@@ -58,6 +63,12 @@ SKILLS:
   - system-prompt-staff-default
   - hallucination-rules
   - rubric-transmission
+AGENTIC_FIRST: true
+MCP_ACTIONS:
+  - batch.create
+  - batch.cancel
+  - git.log
+  - git.checkout
 ```
 
 ---
@@ -68,11 +79,11 @@ SKILLS:
 
 | Champ              | Type     | Description                                                                                       | Exemple                          |
 | ------------------ | -------- | ------------------------------------------------------------------------------------------------- | -------------------------------- |
-| `APP_NAME`         | string   | Nom d'affichage (Dock, menus, titre fenêtre, DMG/NSIS).                                           | `Marcelle-Calibre`               |
-| `APP_ID`           | string   | Reverse-domain bundle ID. Regex `^[a-z][a-z0-9.-]*$`.                                             | `fr.petitmaker.marcelle-calibre` |
+| `APP_NAME`         | string   | Nom d'affichage (Dock, menus, titre fenêtre, DMG/NSIS).                                           | `Demo-Calibre`               |
+| `APP_ID`           | string   | Reverse-domain bundle ID. Regex `^[a-z][a-z0-9.-]*$`.                                             | `com.example.demo-erp` |
 | `NEXT_PORT`        | integer  | Port du sidecar Next.js. 1024-65535.                                                              | `3200`                           |
 | `DAEMON_PORT`      | integer  | Port du sidecar Hono. 1024-65535. Doit différer de `NEXT_PORT`.                                   | `7556`                           |
-| `DATA_DIR_NAME`    | string   | Nom du dossier `~/Library/Application Support/<DATA_DIR_NAME>`.                                   | `Marcelle-Calibre`               |
+| `DATA_DIR_NAME`    | string   | Nom du dossier `~/Library/Application Support/<DATA_DIR_NAME>`.                                   | `Demo-Calibre`               |
 | `ENTITY`           | string   | Entité métier principale, lowercase singular.                                                     | `batch`                          |
 | `SUBPROCESS`       | string   | Type de subprocess principal. Voir [Valeurs SUBPROCESS](#valeurs-subprocess).                     | `maestro + http-api`             |
 | `DOMAIN_BRIEF`     | string   | 1-2 phrases. Minimum 10 caractères. Apparaît dans `package.json` et `metadata`.                   | _(bloc YAML `\|`)_                |
@@ -81,12 +92,30 @@ SKILLS:
 
 | Champ            | Type                | Description                                                                                                | Exemple                                                |
 | ---------------- | ------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| `PROJECT_MODE`   | `new` \| `adapt-existing` | `new` pour un projet neuf ; `adapt-existing` si on part d'un repo/prototype existant. Défaut : `new`. | `adapt-existing`                                      |
+| `SOURCE_PROJECT_DIR` | string          | Dossier du projet existant à auditer si `PROJECT_MODE=adapt-existing`.                                    | `/Users/.../mon-projet`                                |
+| `ADAPTATION_BRIEF` | string            | Ce qu'il faut reprendre, migrer, préserver ou éviter dans le projet existant.                              | _(bloc YAML `\|`)_                                    |
 | `ENTITY_PLURAL`  | string              | Pluriel de `ENTITY`. Si absent, déduit par ajout de `s` (sauf si singular finit déjà par `s` → identique). | `batches`                                              |
 | `ENTITIES`       | array               | Liste des entités secondaires. Format : `- name: <slug>` + `description: <text>` (optionnel).              | voir exemple                                           |
 | `METRICS`        | array of string     | Catégories de métriques (texte libre). Chaque ligne est `- <category>: <details>`.                         | `- latency: avgApiLatencyMs, p95ApiLatencyMs`          |
 | `GIT_BINDING`    | string              | Description du binding avec un repo Git externe (capture SHA, checkout, etc.).                             | `capture marcelle-app/ HEAD per batch`                 |
 | `EXTRA_ROUTES`   | array of string     | Signatures HTTP des routes additionnelles à scaffolder, format libre `<METHOD> <path> <comment>`.          | `- GET /api/git/log marcelle-app`                      |
 | `SKILLS`         | array of string     | Liste de slugs de skills à générer dans `skills-template/_global/`. L'agent `skill-author` les remplit.    | `- system-prompt-staff-default`                        |
+| `AGENTIC_FIRST`  | boolean             | Si `true` (défaut), impose la parité UI ↔ serveur ↔ MCP pour toutes les actions métier.                    | `true`                                                 |
+| `MCP_ACTIONS`    | array of string     | Actions MCP explicitement attendues en plus des actions CRUD/run/cancel déduites des entités/routes.       | `- batch.create`                                       |
+
+---
+
+## Agentic-first / MCP
+
+Par défaut, la factory considère `AGENTIC_FIRST: true` même si le champ est absent.
+Cela signifie que toute action visible dans l'interface doit être implémentée
+comme une action serveur typée, exposée en HTTP et en tool MCP. Voir
+[`docs/agentic-first.md`](agentic-first.md).
+
+`MCP_ACTIONS` permet de lister des actions explicitement attendues, notamment
+celles qui ne se déduisent pas facilement d'une entité CRUD ou d'une route
+standard.
 
 ---
 

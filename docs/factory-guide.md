@@ -15,7 +15,7 @@ métier déjà scaffoldés.
 
 La cible : **passer d'un brief à un scaffold cohérent en quelques minutes**
 plutôt qu'en plusieurs jours de copier-coller depuis une app de référence
-(historiquement, `oif-eval` côté petitmaker, et `marcelle-calibre` côté plan
+(historiquement, `oif-eval` côté template maintainers, et `marcelle-calibre` côté plan
 `noble-scribbling-candy.md`). Le scaffold n'est pas l'app finie — il reste
 typiquement 20 à 40 % de logique métier à coder à la main (import XLSX,
 parsing dev.log spécifique, règles d'hallucination par catégorie, MCP custom,
@@ -23,7 +23,11 @@ parsing dev.log spécifique, règles d'hallucination par catégorie, MCP custom,
 (SSE, audit log, asar pack, parse-stream dédup, etc.) sont posés
 correctement du premier coup.
 
-Utilisateurs visés : développeurs petitmaker qui construisent une nouvelle
+Invariant ajouté : **agentic-first**. Toute action faisable dans l'interface
+doit être disponible par MCP via une action serveur typée partagée par l'UI,
+les routes Hono et le serveur MCP. Voir [`docs/agentic-first.md`](agentic-first.md).
+
+Utilisateurs visés : développeurs template maintainers qui construisent une nouvelle
 app Electron-Hono-Claude. Anti-cible : apps web/SaaS classiques, apps sans
 subprocess local, apps non desktop.
 
@@ -32,6 +36,7 @@ subprocess local, apps non desktop.
 ```
 ┌──────────────┐
 │   brief.md   │  (rédigé à la main ou via /electron-claude-app)
+│              │  PROJECT_MODE=new ou adapt-existing
 └──────┬───────┘
        │
        ▼
@@ -43,16 +48,18 @@ subprocess local, apps non desktop.
        ▼
 ┌────────────────────────────────────┐
 │ scripts/init-from-template.mjs     │  remplace les placeholders
-│   (rebrand)                        │  {{APP_NAME}}, {{NEXT_PORT}}, …
+│   (rebrand)                        │  Bridge ERP Demo, 3307, …
 └──────┬─────────────────────────────┘
        │
        ▼  séquentiel, un agent à la fois
 ┌────────────────────────────────────┐
+│  0. existing-project-auditor        │  seulement si PROJECT_MODE=adapt-existing
 │  1. app-scaffolder                 │  README, factory-journal, .factory-meta
-│  2. domain-modeler                 │  server/types.ts + JSON schemas
-│  3. subprocess-driver              │  <domain>-driver.ts + runner + routes
-│  4. ui-page-generator              │  pages liste/détail + composants
-│  5. skill-author                   │  skills-template/_global/*.skill.md
+│  2. brand-identity-designer        │  nom court + logo minimal + icônes
+│  3. domain-modeler                 │  server/types.ts + JSON schemas
+│  4. subprocess-driver              │  <domain>-driver.ts + runner + routes
+│  5. ui-page-generator              │  pages liste/détail + composants
+│  6. skill-author                   │  skills-template/_global/*.skill.md
 └──────┬─────────────────────────────┘
        │
        ▼
@@ -95,13 +102,21 @@ Champs obligatoires : `APP_NAME`, `APP_ID`, `NEXT_PORT`, `DAEMON_PORT`,
 `ENTITY_PLURAL`, `ENTITIES`, `METRICS`, `GIT_BINDING`, `EXTRA_ROUTES`,
 `SKILLS`.
 
-## 4. Les 5 agents
+## 4. Les agents
 
-Les agents vivent dans `.claude/agents/<name>.md` (descripteur avec
-frontmatter `name`, `description`, `tools`). L'orchestrateur les invoque
-séquentiellement via `claude --agent <name> --print`. Chaque agent est
-**strictement borné** à ses fichiers : tout débordement = bug remonté dans le
-journal.
+Les agents vivent dans `pi-electron-app-factory/claude-agents/<name>.md`
+(et sont copiés dans `~/.claude/agents/` au chargement du plugin pour compatibilité).
+Chaque descripteur contient frontmatter `name`, `description`, `tools`.
+L'orchestrateur les invoque séquentiellement via **Codex CLI** (`codex exec`) en
+injectant le descripteur dans le prompt. Chaque agent est **strictement borné**
+à ses fichiers : tout débordement = bug remonté dans le journal.
+
+### 4.0 existing-project-auditor (adaptation seulement)
+
+- **Scope** : si `PROJECT_MODE=adapt-existing`, audite `SOURCE_PROJECT_DIR` en lecture seule, cartographie ce qui est à reprendre, à wrapper, à migrer ou à ignorer, puis recommande la team d'agents spécialisée.
+- **Outputs** : `factory-existing-audit.md`, table de parité agentic-first, risques secrets/config, stratégie de migration.
+- **Outils autorisés** : Read, Bash, Write.
+- **Fiche complète** : [`.claude/agents/existing-project-auditor.md`](../.claude/agents/existing-project-auditor.md)
 
 ### 4.1 app-scaffolder
 
@@ -115,7 +130,27 @@ journal.
 - **Fiche complète** :
   [`.claude/agents/app-scaffolder.md`](../.claude/agents/app-scaffolder.md)
 
-### 4.2 domain-modeler
+### 4.2 brand-identity-designer
+
+- **Scope** : choisit ou confirme le nom produit, le nom court affiché dans le
+  header et une tagline opérationnelle. Génère `public/app-mark.svg` avec un
+  logo volontairement minimal (monogramme 1-2 lettres ou symbole géométrique
+  très simple), écrit `brand.config.json`, régénère les icônes packagées via
+  `npm run brand:icons` si l'environnement le permet, puis met à jour
+  `Mark.tsx` et le header.
+- **Outputs** : `brand.config.json`, `public/app-mark.svg`, éventuellement
+  `public/icon-*`, patch ciblé `components/Mark.tsx` et
+  `components/AppChromeHeader.tsx`, append au `factory-journal.md`.
+- **Outils autorisés** : Bash, Read, Write, Edit.
+- **Invariant** : logo le plus simple possible ; pas d'illustration métier, pas
+  de dégradé décoratif, pas de mascotte, pas de palette hors design system. Si
+  l'app expose plusieurs modules, leurs icônes doivent former une famille
+  cohérente : tuiles façon Odoo en structure, mais charte Claude/TeamFactory
+  en couleurs, formes et sobriété.
+- **Fiche complète** :
+  [`pi-electron-app-factory/claude-agents/brand-identity-designer.md`](../pi-electron-app-factory/claude-agents/brand-identity-designer.md)
+
+### 4.3 domain-modeler
 
 - **Scope** : depuis `ENTITIES`, `METRICS`, `GIT_BINDING` du brief, génère
   `server/types.ts` complet (préserve mot pour mot les types invariants
@@ -130,7 +165,7 @@ journal.
 - **Fiche complète** :
   [`.claude/agents/domain-modeler.md`](../.claude/agents/domain-modeler.md)
 
-### 4.3 subprocess-driver
+### 4.4 subprocess-driver
 
 - **Scope** : depuis `SUBPROCESS`, `ENTITIES`, `EXTRA_ROUTES`, `GIT_BINDING`,
   génère le driver bas-niveau, le runner haut-niveau, les routes Hono
@@ -144,7 +179,7 @@ journal.
 - **Fiche complète** :
   [`.claude/agents/subprocess-driver.md`](../.claude/agents/subprocess-driver.md)
 
-### 4.4 ui-page-generator
+### 4.5 ui-page-generator
 
 - **Scope** : `<en cours>` — depuis les entités générées par `domain-modeler`
   et les routes posées par `subprocess-driver`, scaffolde les pages
@@ -162,7 +197,7 @@ journal.
   moment de la rédaction de ce guide ; sera à
   `.claude/agents/ui-page-generator.md`.
 
-### 4.5 skill-author
+### 4.6 skill-author
 
 - **Scope** : `<en cours>` — depuis `SKILLS` du brief (ou 3 skills "starter"
   par défaut si absent : `domain-rules`, `quality-checks`, `output-format`),
@@ -237,7 +272,7 @@ faciliter le debug.
 
 ## 7. Exemples
 
-### 7.1 Marcelle-Calibre (référence historique)
+### 7.1 Demo-Calibre (référence historique)
 
 Brief : `maestro + http-api` + `GIT_BINDING` (calibration EHPAD).
 
@@ -269,7 +304,7 @@ Brief : `http-api` seul, compare variantes de prompts.
 
 - Entités : `variant`, `prompt_run`, `prompt_result`.
 - Subprocess : `http-api` uniquement (pas de Maestro, pas de Git binding).
-- Fichiers générés : équivalent simplifié de Marcelle-Calibre — pas de
+- Fichiers générés : équivalent simplifié de Demo-Calibre — pas de
   `git-binding.ts`, pas de driver Maestro. App "plus simple" qui sert
   surtout à valider la factory sur un 2e cas.
 - Temps wall : ~1 jour focus.
@@ -377,7 +412,7 @@ Pistes d'évolution (cf. plan `noble-scribbling-candy.md`) :
 
 ## 12. Liens
 
-- Repo template : <https://github.com/ncleton-petitmaker/claude-electron-app-template>
+- Repo template : <https://github.com/example/bridge-erp-template>
 - Plan de référence : `/Users/marcelle/.claude/plans/noble-scribbling-candy.md`
 - Audit invariants : [`docs/factory-invariants.md`](factory-invariants.md)
 - Format brief : [`docs/brief-format.md`](brief-format.md)

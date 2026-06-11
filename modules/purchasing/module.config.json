@@ -1,0 +1,87 @@
+{
+  "id": "purchasing",
+  "labels": {
+    "fr": "Achats",
+    "en": "Purchasing"
+  },
+  "description": {
+    "fr": "Module achats generique pour fournisseurs, devis, comparaison et decisions.",
+    "en": "Generic purchasing module for suppliers, quotes, comparisons and decisions."
+  },
+  "category": "business",
+  "dataStrategy": "service-supabase",
+  "routes": [
+    {
+      "path": "/dashboard",
+      "kind": "dashboard",
+      "label": {
+        "fr": "Dashboard achats",
+        "en": "Purchasing dashboard"
+      }
+    },
+    {
+      "path": "/runs",
+      "kind": "workspace",
+      "label": {
+        "fr": "Assistant achats",
+        "en": "Purchasing assistant"
+      }
+    }
+  ],
+  "scopes": [
+    "erp:core:read",
+    "erp:events:publish",
+    "erp:events:consume",
+    "service:purchasing:read",
+    "service:purchasing:write",
+    "service:purchasing:admin",
+    "codex:run"
+  ],
+  "actions": [
+    {
+      "id": "purchasing.quote.import",
+      "label": "Importer un devis fournisseur",
+      "requiredScopes": ["service:purchasing:write"]
+    },
+    {
+      "id": "purchasing.quote.analyze",
+      "label": "Analyser les devis",
+      "requiredScopes": ["service:purchasing:read", "codex:run"]
+    }
+  ],
+  "events": [
+    {
+      "type": "purchasing.quote.imported",
+      "label": "Devis fournisseur importe",
+      "requiredScopes": ["erp:events:publish"]
+    }
+  ],
+  "tables": [
+    {
+      "name": "purchasing_suppliers",
+      "description": "Fournisseurs du module achats.",
+      "rls": "organization"
+    },
+    {
+      "name": "purchasing_quotes",
+      "description": "Devis et offres fournisseurs.",
+      "rls": "organization"
+    }
+  ],
+  "migrations": [
+    "supabase/migrations/20260611120000_purchasing_module.sql"
+  ],
+  "seeds": [
+    "modules/purchasing/seeds/demo-data.json"
+  ],
+  "bridgeService": {
+    "serviceId": "purchasing",
+    "basePath": "/runs?service=purchasing",
+    "requiredScopes": [
+      "service:purchasing:read",
+      "service:purchasing:write",
+      "codex:run"
+    ]
+  }
+}
+

@@ -1,0 +1,39 @@
+{
+  "suppliers": [
+    {
+      "external_ref": "SUP-DEMO-001",
+      "name": "Demo Supplies",
+      "category": "general",
+      "contact_email": "sales@demo-supplies.example",
+      "rating": 4
+    },
+    {
+      "external_ref": "SUP-DEMO-002",
+      "name": "Sample Industrial",
+      "category": "industrial",
+      "contact_email": "contact@sample-industrial.example",
+      "rating": 3
+    }
+  ],
+  "quotes": [
+    {
+      "external_ref": "Q-DEMO-001",
+      "supplier_ref": "SUP-DEMO-001",
+      "title": "Office equipment renewal",
+      "amount": 12450,
+      "currency": "EUR",
+      "status": "under_review",
+      "risk_level": "low"
+    },
+    {
+      "external_ref": "Q-DEMO-002",
+      "supplier_ref": "SUP-DEMO-002",
+      "title": "Warehouse consumables",
+      "amount": 18300,
+      "currency": "EUR",
+      "status": "under_review",
+      "risk_level": "medium"
+    }
+  ]
+}
+

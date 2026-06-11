@@ -117,7 +117,7 @@ export function normalizeBridgeConfig(input: Partial<BridgeConfig>): BridgeConfi
     label: cleanOptional(input.label) ?? hostname(),
     dataDir,
     defaultModel: cleanOptional(input.defaultModel),
-    maxConcurrentJobs: clampInt(input.maxConcurrentJobs, 1, 20, 2),
+    maxConcurrentJobs: clampInt(input.maxConcurrentJobs, 1, 20, 10),
     pollIntervalSeconds: clampInt(input.pollIntervalSeconds, 2, 300, 5),
     services,
     erpBus: normalizeErpBus(input.erpBus, services),
@@ -235,9 +235,21 @@ function prepareBridgeConfigForDisk(cfg: BridgeConfig): PersistedBridgeConfig {
   return stripUndefined(persisted);
 }
 
+/**
+ * Le chiffrement des secrets au repos (bridgeToken + tokens Supabase) est
+ * ACTIVÉ par défaut dès qu'on tourne sous Electron avec un coffre OS disponible
+ * (Keychain macOS, DPAPI Windows, libsecret Linux). On ne stocke en clair que
+ * sur opt-out explicite `BRIDGE_USE_SAFE_STORAGE=0` (utile en CI/headless où le
+ * coffre OS n'existe pas). Hors Electron (bridge CLI pur Node), `safeStorage`
+ * n'est pas disponible : les secrets restent en clair faute de coffre lié à l'OS.
+ */
+function safeStorageOptOut(): boolean {
+  return process.env.BRIDGE_USE_SAFE_STORAGE === "0";
+}
+
 function encryptBridgeSecrets(payload: BridgeSecretPayload): SecureBridgeSecrets | null {
   if (!payload.bridgeToken && !payload.session?.accessToken && !payload.session?.refreshToken) return null;
-  if (process.env.BRIDGE_USE_SAFE_STORAGE !== "1") return null;
+  if (safeStorageOptOut()) return null;
   const safeStorage = electronSafeStorage();
   if (!safeStorage?.isEncryptionAvailable()) return null;
   const ciphertext = safeStorage.encryptString(JSON.stringify(payload)).toString("base64");
@@ -246,7 +258,8 @@ function encryptBridgeSecrets(payload: BridgeSecretPayload): SecureBridgeSecrets
 
 function decryptBridgeSecrets(secure: SecureBridgeSecrets): BridgeSecretPayload | null {
   if (secure.version !== 1 || secure.provider !== "electron-safe-storage" || !secure.ciphertext) return null;
-  if (process.env.BRIDGE_USE_SAFE_STORAGE !== "1") return null;
+  // On déchiffre toujours si un coffre est disponible, même en opt-out, pour
+  // pouvoir relire un config chiffré précédemment.
   const safeStorage = electronSafeStorage();
   if (!safeStorage?.isEncryptionAvailable()) return null;
   try {
@@ -356,14 +369,14 @@ function demoServices(organizationId: string): BridgeServiceInstance[] {
       healthUrl: "http://localhost:3307/api/health",
       launchCallbackUrl: "http://localhost:3307/auth/bridge/callback",
       dataStrategy: "service-supabase",
-      scopes: ["erp:core:read", "erp:events:consume", "codex:run"],
-      requiredScopes: ["erp:core:read", "erp:events:consume"],
+      scopes: ["erp:core:read", "erp:events:consume", "service:purchasing:read", "service:purchasing:write", "codex:run"],
+      requiredScopes: ["service:purchasing:read", "service:purchasing:write"],
       actions: [
         {
-          id: "supplier.quote.import",
-          label: "Importer offre",
-          description: "Importe une offre fournisseur avec isolation service.",
-          requiredScopes: ["codex:run"],
+          id: "purchasing.quote.import",
+          label: "Importer devis",
+          description: "Importe un devis fournisseur avec isolation service.",
+          requiredScopes: ["service:purchasing:write"],
         },
       ],
       events: [
@@ -426,8 +439,8 @@ function normalizeStringList(value: unknown): string[] {
   return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim());
 }
 
-function clampInt(value: unknown, min: number, max: number, fallback: number): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+function clampInt(value: unknown, min: number, max: number, defaultValue: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return defaultValue;
   return Math.min(max, Math.max(min, Math.round(value)));
 }
 

@@ -335,3 +335,180 @@ drop policy if exists "admins read audit" on public.bridge_audit_log;
 create policy "admins read audit"
   on public.bridge_audit_log for select
   using (public.bridge_is_admin(organization_id));
+
+create table if not exists public.bridge_device_tokens (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.bridge_organizations(id) on delete cascade,
+  bridge_id text not null,
+  device_id text not null,
+  user_id uuid references auth.users(id) on delete set null,
+  token_hash text not null unique,
+  token_jti_hash text not null unique,
+  service_ids text[] not null default array[]::text[],
+  scopes text[] not null default array[]::text[],
+  expires_at timestamptz not null,
+  revoked_at timestamptz,
+  last_used_at timestamptz,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists bridge_device_tokens_device_idx
+  on public.bridge_device_tokens(organization_id, device_id, revoked_at, expires_at);
+
+alter table public.bridge_device_tokens enable row level security;
+
+drop policy if exists "admins manage bridge device tokens" on public.bridge_device_tokens;
+create policy "admins manage bridge device tokens"
+  on public.bridge_device_tokens for all
+  using (public.bridge_is_admin(organization_id))
+  with check (public.bridge_is_admin(organization_id));
+
+create or replace function public.bridge_has_scope(target_org uuid, target_service_id text, required_scope text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select
+    public.bridge_is_admin(target_org)
+    or exists (
+      select 1
+      from public.bridge_entitlements e
+      where e.organization_id = target_org
+        and e.user_id = auth.uid()
+        and e.service_id = target_service_id
+        and e.enabled = true
+        and required_scope = any(e.scopes)
+    );
+$$;
+
+create or replace function public.bridge_poll_jobs(
+  p_organization_id uuid,
+  p_device_id text,
+  p_service_ids text[],
+  p_limit integer default 5,
+  p_lease_seconds integer default 120
+)
+returns table (
+  id uuid,
+  organization_id uuid,
+  service_id text,
+  service_instance_id text,
+  user_id uuid,
+  lease_id uuid,
+  scopes text[],
+  payload jsonb
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  return query
+  with candidates as (
+    select j.id
+    from public.bridge_jobs j
+    join public.bridge_services s
+      on s.organization_id = j.organization_id
+     and s.service_id = j.service_id
+     and s.enabled = true
+    where j.organization_id = p_organization_id
+      and j.service_id = any(p_service_ids)
+      and (
+        j.status = 'queued'
+        or (j.status = 'leased' and j.leased_until < now())
+      )
+    order by j.created_at asc
+    limit least(greatest(coalesce(p_limit, 5), 1), 20)
+    for update skip locked
+  ),
+  leased as (
+    update public.bridge_jobs j
+    set
+      status = 'leased',
+      lease_id = gen_random_uuid(),
+      device_id = p_device_id,
+      leased_until = now() + make_interval(secs => least(greatest(coalesce(p_lease_seconds, 120), 30), 900)),
+      updated_at = now()
+    from candidates c
+    where j.id = c.id
+    returning
+      j.id,
+      j.organization_id,
+      j.service_id,
+      j.service_instance_id,
+      j.user_id,
+      j.lease_id,
+      j.scopes,
+      j.payload
+  )
+  select
+    leased.id,
+    leased.organization_id,
+    leased.service_id,
+    leased.service_instance_id,
+    leased.user_id,
+    leased.lease_id,
+    leased.scopes,
+    leased.payload
+  from leased;
+end;
+$$;
+
+revoke all on function public.bridge_poll_jobs(uuid, text, text[], integer, integer) from public;
+grant execute on function public.bridge_poll_jobs(uuid, text, text[], integer, integer) to service_role;
+
+create or replace function public.bridge_consume_launch_ticket(
+  p_ticket_hash text,
+  p_return_to text default null
+)
+returns table (
+  id uuid,
+  organization_id uuid,
+  user_id uuid,
+  service_id text,
+  service_instance_id text,
+  device_id text,
+  return_to text,
+  service jsonb
+)
+language sql
+security definer
+set search_path = public
+as $$
+  with consumed as (
+    update public.bridge_launch_tickets t
+    set used_at = now()
+    where t.ticket_hash = p_ticket_hash
+      and t.used_at is null
+      and t.expires_at > now()
+      and (p_return_to is null or t.return_to is null or t.return_to = p_return_to)
+    returning
+      t.id,
+      t.organization_id,
+      t.user_id,
+      t.service_id,
+      t.service_instance_id,
+      t.device_id,
+      t.return_to
+  )
+  select
+    c.id,
+    c.organization_id,
+    c.user_id,
+    c.service_id,
+    c.service_instance_id,
+    c.device_id,
+    c.return_to,
+    to_jsonb(s) as service
+  from consumed c
+  join public.bridge_services s
+    on s.organization_id = c.organization_id
+   and s.service_id = c.service_id
+   and s.enabled = true;
+$$;
+
+revoke all on function public.bridge_consume_launch_ticket(text, text) from public;
+grant execute on function public.bridge_consume_launch_ticket(text, text) to service_role;

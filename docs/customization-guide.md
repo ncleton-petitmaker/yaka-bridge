@@ -7,6 +7,7 @@ Où poser le code domain quand on étend le template pour une app métier.
 Le template fournit **les invariants** :
 
 - pipeline daemon Hono + Next.js + spawn Claude + parser stream-json,
+- accès Supabase côté daemon pour la base métier,
 - skills YAML + audit log + app-config,
 - packaging Electron,
 - placeholders rebrandables.
@@ -14,6 +15,7 @@ Le template fournit **les invariants** :
 Le template **n'a pas** :
 
 - de types domain (Dossier, Batch, Question, …)
+- de schéma SQL Supabase métier,
 - de subprocess métier (Maestro, MCP custom, …)
 - de routes métier
 - de pages métier
@@ -53,6 +55,24 @@ export interface QuestionResult {
 ```
 
 Optionnel : mirror les types côté UI dans `lib/types.ts`.
+
+## Base de données Supabase
+
+Les entités métier persistantes doivent vivre dans Supabase. Ajoute les
+migrations SQL du domaine dans un dossier `supabase/migrations/` de l'app
+générée, puis utilise `getSupabaseServerClient(DATA_DIR)` côté daemon :
+
+```ts
+import { getSupabaseServerClient } from "./supabase.js";
+
+const supabase = getSupabaseServerClient(DATA_DIR);
+const { data, error } = await supabase.from("batches").select("*");
+if (error) throw error;
+```
+
+La clé `SUPABASE_SERVICE_ROLE_KEY` reste côté daemon. Ne jamais l'exposer dans
+le renderer ou dans une page settings ; l'UI configure au maximum
+`supabaseUrl` et `supabaseAnonKey` pour les usages publics ou Realtime.
 
 ## Subprocess driver
 
@@ -132,10 +152,10 @@ poser dans **`scripts/import-<truc>.mjs`**. Le pattern du template pour
 écrire dans `<dataDir>` est :
 
 ```js
-const dataDir = process.env["{{DATA_DIR_ENV_VAR}}"] || resolve(process.cwd(), "data");
+const dataDir = process.env["DEMO_ERP_DATA_DIR"] || resolve(process.cwd(), "data");
 ```
 
-(Le placeholder `{{DATA_DIR_ENV_VAR}}` est remplacé au scaffolding par le
+(Le placeholder `DEMO_ERP_DATA_DIR` est remplacé au scaffolding par le
 nom réel de la variable, ex `CALIBRE_DATA_DIR`.)
 
 ## App-config

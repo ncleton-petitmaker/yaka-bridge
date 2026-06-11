@@ -1,5 +1,5 @@
 /**
- * Electron main process pour {{APP_NAME}}.
+ * Electron main process pour Bridge ERP Demo.
  *
  * Lance le daemon Hono et Next.js en sidecar, charge l'UI dans une BrowserWindow.
  *
@@ -11,12 +11,12 @@
  * ESM normalement, c'est juste le main process qui est en CJS.
  *
  * Variables d'environnement (toutes optionnelles, défauts ci-dessous) :
- *   {{APP_NAME_KEBAB_UPPER}}_NEXT_PORT     port du sidecar Next.js
- *   {{APP_NAME_KEBAB_UPPER}}_DAEMON_PORT   port du sidecar Hono daemon
- *   {{DATA_DIR_ENV_VAR}}                   dossier de données (userData/)
- *   {{APP_NAME_KEBAB_UPPER}}_DEVTOOLS=1    ouvre les DevTools en dev
+ *   PRIX_ACHATS_BE_NEXT_PORT     port du sidecar Next.js
+ *   PRIX_ACHATS_BE_DAEMON_PORT   port du sidecar Hono daemon
+ *   PRIX_ACHATS_BE_DATA_DIR                   dossier de données (userData/)
+ *   PRIX_ACHATS_BE_DEVTOOLS=1    ouvre les DevTools en dev
  */
-const { app, BrowserWindow, Menu, shell, ipcMain, dialog, clipboard } = require("electron");
+const { app, BrowserWindow, Menu, shell, ipcMain, dialog, clipboard, session } = require("electron");
 const { spawn, spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -27,8 +27,8 @@ const IS_DEV = !app.isPackaged;
 // Nom affiché dans le Dock macOS, la menu bar et les notifications.
 // À faire AVANT app.whenReady() pour que le menu "appMenu" prenne ce nom,
 // et AVANT le premier app.getPath("userData") pour que le dossier userData
-// soit calculé sous le bon nom ("{{APP_NAME}}/" plutôt que "Electron/").
-app.setName("{{APP_NAME}}");
+// soit calculé sous le bon nom ("Bridge ERP Demo/" plutôt que "Electron/").
+app.setName("Bridge ERP Demo");
 
 // File logging : userData/logs/. Capture les sorties des sidecars + console main +
 // uncaughtException, pour qu'ils soient récupérables dans le bundle de diagnostic
@@ -94,9 +94,105 @@ if (process.platform === "darwin") {
   }
 }
 
-const NEXT_PORT = Number(process.env["{{APP_NAME_KEBAB_UPPER}}_NEXT_PORT"] || {{NEXT_PORT}});
-const DAEMON_PORT = Number(process.env["{{APP_NAME_KEBAB_UPPER}}_DAEMON_PORT"] || {{DAEMON_PORT}});
+const NEXT_PORT = Number(process.env["PRIX_ACHATS_BE_NEXT_PORT"] || 3307);
+const DAEMON_PORT = Number(process.env["PRIX_ACHATS_BE_DAEMON_PORT"] || 7707);
 const TARGET_URL = `http://localhost:${NEXT_PORT}/`;
+
+// Token de session généré une fois par lancement. Partagé avec le daemon Hono
+// (via env APP_DAEMON_TOKEN) et exposé au renderer (via additionalArguments du
+// preload) pour authentifier les requêtes /api/* en local. Voir Workstream A.
+const DAEMON_TOKEN = require("node:crypto").randomBytes(32).toString("base64url");
+
+// --- Confinement des chemins exposés au renderer (open-file / reveal-file) ---
+// Le renderer ne peut demander à ouvrir/révéler qu'un fichier SOUS le dataDir ou
+// les dossiers configurés (input/output/audit). Défense contre une éventuelle
+// XSS qui tenterait shell.openPath sur un exécutable arbitraire.
+function appDataDir() {
+  return (
+    process.env["PRIX_ACHATS_BE_DATA_DIR"] ||
+    path.join(app.getPath("userData"), "data")
+  );
+}
+
+function allowedFileRoots() {
+  const roots = new Set();
+  const dataDir = appDataDir();
+  roots.add(path.resolve(dataDir));
+  try {
+    const cfgPath = path.join(dataDir, ".claude", "app-config.json");
+    if (fs.existsSync(cfgPath)) {
+      const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
+      for (const key of ["inputDir", "outputDir", "auditLogDir"]) {
+        if (cfg[key]) roots.add(path.resolve(cfg[key]));
+      }
+    }
+  } catch {
+    /* config illisible : on retombe sur dataDir seul */
+  }
+  return Array.from(roots);
+}
+
+function isPathInsideRoots(target, roots) {
+  if (!target || typeof target !== "string" || !path.isAbsolute(target)) return false;
+  let resolved = path.resolve(target);
+  try {
+    if (fs.existsSync(resolved)) resolved = fs.realpathSync.native(resolved);
+  } catch {
+    return false; // fail-closed
+  }
+  return roots.some((root) => {
+    let rootPath = path.resolve(root);
+    try {
+      if (fs.existsSync(rootPath)) rootPath = fs.realpathSync.native(rootPath);
+    } catch {
+      return false;
+    }
+    const rel = path.relative(rootPath, resolved);
+    return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+  });
+}
+
+// Politique CSP appliquée au renderer. Permissive sur script/style (Next.js a
+// besoin d'inline + eval), mais verrouille frame-ancestors (anti-clickjacking),
+// object-src, base-uri, et borne connect-src aux endpoints loopback + TLS.
+function contentSecurityPolicy() {
+  return [
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob: https:",
+    "font-src 'self' data:",
+    "connect-src 'self' http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:* https: wss:",
+    "frame-ancestors 'none'",
+    "object-src 'none'",
+    "base-uri 'self'",
+  ].join("; ");
+}
+
+function setupContentSecurityPolicy() {
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    let host = null;
+    try {
+      host = new URL(details.url).hostname;
+    } catch {
+      /* URL non standard (data:, etc.) */
+    }
+    // On n'applique notre CSP qu'aux réponses de l'app locale. Les pages
+    // externes (fenêtre OAuth login) gardent leurs propres en-têtes, sinon on
+    // casserait leur rendu.
+    const isLocal = host === "localhost" || host === "127.0.0.1";
+    if (!isLocal) {
+      callback({ responseHeaders: details.responseHeaders });
+      return;
+    }
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        "Content-Security-Policy": [contentSecurityPolicy()],
+      },
+    });
+  });
+}
 
 let mainWindow = null;
 let daemonProc = null;
@@ -297,9 +393,10 @@ function sidecarEnv() {
   }
   return {
     ...process.env,
-    "{{APP_NAME_KEBAB_UPPER}}_DAEMON_PORT": String(DAEMON_PORT),
-    "{{APP_NAME_KEBAB_UPPER}}_LOG_DIR": LOG_DIR,
-    "{{APP_NAME_KEBAB_UPPER}}_APP_VERSION": app.getVersion(),
+    "PRIX_ACHATS_BE_DAEMON_PORT": String(DAEMON_PORT),
+    "PRIX_ACHATS_BE_LOG_DIR": LOG_DIR,
+    "PRIX_ACHATS_BE_APP_VERSION": app.getVersion(),
+    APP_DAEMON_TOKEN: DAEMON_TOKEN,
     ...(rawToken ? { CLAUDE_CODE_OAUTH_TOKEN: rawToken } : {}),
   };
 }
@@ -341,7 +438,7 @@ function spawnSidecars() {
     ...sidecarEnv(),
     ELECTRON_RUN_AS_NODE: "1",
     NODE_ENV: "production",
-    "{{DATA_DIR_ENV_VAR}}": userDataDir,
+    "PRIX_ACHATS_BE_DATA_DIR": userDataDir,
     PORT: String(NEXT_PORT),
     HOSTNAME: "127.0.0.1",
   };
@@ -445,7 +542,7 @@ async function waitForUrl(url, timeoutMs = 60000) {
 }
 
 // Charge un logo optionnel embedded en data URI. Si public/app-icon.svg
-// existe, on l'utilise pour les écrans de boot / wizard. Sinon, fallback vide.
+// existe, on l'utilise pour les écrans de boot / wizard. Sinon, valeur vide.
 const FLAG_PATH = path.join(__dirname, "..", "public", "app-icon.svg");
 const FLAG_DATA_URI = (() => {
   try {
@@ -485,7 +582,7 @@ const WIN_INSTALL_SCREENSHOTS = {
 // Splash inline minimaliste : affiché immédiatement à la création de la fenêtre,
 // remplacé par la vraie page une fois que Next.js a fini de démarrer.
 const SPLASH_HTML = `<!DOCTYPE html>
-<html lang="fr"><head><meta charset="UTF-8"><title>{{APP_NAME}}</title>
+<html lang="fr"><head><meta charset="UTF-8"><title>Bridge ERP Demo</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; }
@@ -529,7 +626,7 @@ const SPLASH_HTML = `<!DOCTYPE html>
 <body>
   <div class="wrap">
     ${FLAG_DATA_URI ? `<img class="logo" src="${FLAG_DATA_URI}" alt="App"/>` : ""}
-    <div class="brand">{{APP_NAME}}</div>
+    <div class="brand">Bridge ERP Demo</div>
     <div class="sub">Organisation Internationale de la Francophonie</div>
     <div class="status">Démarrage en cours…</div>
     <div class="bar"></div>
@@ -552,7 +649,7 @@ function createSplashWindow() {
     alwaysOnTop: false, // pas alwaysOnTop : sinon il passe devant les dialogs
     resizable: false,
     skipTaskbar: false,
-    title: "{{APP_NAME}}",
+    title: "Bridge ERP Demo",
     backgroundColor: "#ffffff",
     show: true, // critique : show:true direct pour que la fenêtre apparaisse
     webPreferences: {
@@ -572,7 +669,7 @@ function createWindow() {
     height: 900,
     minWidth: 1100,
     minHeight: 700,
-    title: "{{APP_NAME}}",
+    title: "Bridge ERP Demo",
     backgroundColor: "#ffffff",
     show: false, // affiché manuellement quand Next a chargé, pour swap propre avec splash
     webPreferences: {
@@ -580,16 +677,46 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      // Le preload lit ce token et l'expose au renderer pour signer les appels
+      // /api/* du daemon local (Workstream A).
+      additionalArguments: [`--daemon-token=${DAEMON_TOKEN}`],
     },
   });
 
-  if (IS_DEV && process.env["{{APP_NAME_KEBAB_UPPER}}_DEVTOOLS"] === "1") {
+  if (IS_DEV && process.env["PRIX_ACHATS_BE_DEVTOOLS"] === "1") {
     mainWindow.webContents.openDevTools({ mode: "detach" });
   }
 
+  // Liens externes : on n'ouvre via le navigateur OS que https/mailto, jamais
+  // file: ni un autre schéma qui pourrait exécuter quelque chose localement.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    try {
+      const u = new URL(url);
+      if (u.protocol === "https:" || u.protocol === "mailto:") {
+        shell.openExternal(url);
+      }
+    } catch {
+      /* URL invalide : ignorée */
+    }
     return { action: "deny" };
+  });
+
+  // Navigation : on reste sur l'origine locale (Next sur localhost/127.0.0.1).
+  // Toute tentative de naviguer ailleurs est bloquée ; un lien https part dans
+  // le navigateur OS.
+  mainWindow.webContents.on("will-navigate", (event, url) => {
+    try {
+      const u = new URL(url);
+      const isLocal =
+        (u.protocol === "http:" || u.protocol === "https:") &&
+        (u.hostname === "localhost" || u.hostname === "127.0.0.1");
+      if (!isLocal) {
+        event.preventDefault();
+        if (u.protocol === "https:") shell.openExternal(url);
+      }
+    } catch {
+      event.preventDefault();
+    }
   });
 
   mainWindow.on("closed", () => (mainWindow = null));
@@ -601,20 +728,20 @@ function setupMenu() {
     ...(isMac
       ? [
           {
-            // Force le label "{{APP_NAME}}" même en dev où role:'appMenu' afficherait "Electron"
-            label: "{{APP_NAME}}",
+            // Force le label "Bridge ERP Demo" même en dev où role:'appMenu' afficherait "Electron"
+            label: "Bridge ERP Demo",
             submenu: [
-              { label: "À propos de {{APP_NAME}}", role: "about" },
+              { label: "À propos de Bridge ERP Demo", role: "about" },
               { type: "separator" },
               { label: "Préférences…", accelerator: "Cmd+,", enabled: false },
               { type: "separator" },
               { role: "services", submenu: [] },
               { type: "separator" },
-              { label: "Masquer {{APP_NAME}}", accelerator: "Cmd+H", role: "hide" },
+              { label: "Masquer Bridge ERP Demo", accelerator: "Cmd+H", role: "hide" },
               { label: "Masquer les autres", accelerator: "Cmd+Alt+H", role: "hideOthers" },
               { label: "Afficher tout", role: "unhide" },
               { type: "separator" },
-              { label: "Quitter {{APP_NAME}}", accelerator: "Cmd+Q", role: "quit" },
+              { label: "Quitter Bridge ERP Demo", accelerator: "Cmd+Q", role: "quit" },
             ],
           },
         ]
@@ -691,6 +818,9 @@ ipcMain.handle("open-file", async (_event, absPath) => {
   if (!absPath || typeof absPath !== "string") {
     return { ok: false, error: "chemin invalide" };
   }
+  if (!isPathInsideRoots(absPath, allowedFileRoots())) {
+    return { ok: false, error: "chemin hors périmètre autorisé" };
+  }
   try {
     const err = await shell.openPath(absPath);
     if (err) return { ok: false, error: err };
@@ -704,6 +834,9 @@ ipcMain.handle("open-file", async (_event, absPath) => {
 ipcMain.handle("reveal-file", async (_event, absPath) => {
   if (!absPath || typeof absPath !== "string") {
     return { ok: false, error: "chemin invalide" };
+  }
+  if (!isPathInsideRoots(absPath, allowedFileRoots())) {
+    return { ok: false, error: "chemin hors périmètre autorisé" };
   }
   try {
     shell.showItemInFolder(absPath);
@@ -1051,14 +1184,14 @@ async function showClaudeMissingDialog() {
   <header>
     <img class="logo" src="${FLAG_DATA_URI}" alt="App"/>
     <div>
-      <div class="eyebrow">{{APP_NAME}} · Première étape</div>
+      <div class="eyebrow">Bridge ERP Demo · Première étape</div>
       <h1>Installer Claude Code</h1>
     </div>
   </header>
 
   <main>
     <p class="lead">
-      {{APP_NAME}} s'appuie sur Claude Code (Anthropic) pour analyser les dossiers candidats.
+      Bridge ERP Demo s'appuie sur Claude Code (Anthropic) pour analyser les dossiers candidats.
       Suivez les étapes ci-dessous pour le mettre en place. Comptez moins d'une minute.
     </p>
 
@@ -1190,7 +1323,7 @@ async function showClaudeMissingDialog() {
     <div class="step">
       <span class="num">✓</span>
       <h3>Claude Code est installé</h3>
-      <p>Une fois Claude Code installé et connecté, cliquez sur <strong>Installer {{APP_NAME}}</strong> ci-dessous pour finaliser le démarrage.</p>
+      <p>Une fois Claude Code installé et connecté, cliquez sur <strong>Installer Bridge ERP Demo</strong> ci-dessous pour finaliser le démarrage.</p>
     </div>
         `
         : `
@@ -1223,7 +1356,7 @@ async function showClaudeMissingDialog() {
     <button id="prev">← Précédent</button>
     <button id="copy" class="primary">Copier la commande</button>
     <button id="next" class="primary">Suivant →</button>
-    <button id="retry" class="primary" style="display:none;">Installer {{APP_NAME}}</button>
+    <button id="retry" class="primary" style="display:none;">Installer Bridge ERP Demo</button>
   </footer>
 </div>
 
@@ -1299,7 +1432,7 @@ async function showClaudeMissingDialog() {
         copyBtn.textContent = 'Copier la commande';
       }, 2200);
     } catch (e) {
-      send('copy-fallback');
+      send('copy-manual');
     }
   };
   retryBtn.onclick = () => send('retry');
@@ -1312,7 +1445,7 @@ async function showClaudeMissingDialog() {
       width: 860,
       height: 880,
       frame: true,
-      title: "{{APP_NAME}} - Installer Claude Code",
+      title: "Bridge ERP Demo - Installer Claude Code",
       backgroundColor: "#faf9f7",
       modal: false,
       resizable: true,
@@ -1329,7 +1462,7 @@ async function showClaudeMissingDialog() {
     dialogWindow.setMenuBarVisibility(false);
     // Écrit le HTML en fichier temp + loadFile : data:URL se cassait au-delà
     // de ~2 Mo (les 11 captures embedded font dépasser la limite Chromium).
-    const tmpDir = path.join(app.getPath("temp"), "{{APP_NAME_KEBAB}}");
+    const tmpDir = path.join(app.getPath("temp"), "bridge-erp-demo");
     try {
       fs.mkdirSync(tmpDir, { recursive: true });
     } catch {}
@@ -1358,7 +1491,7 @@ async function showClaudeMissingDialog() {
         shell.openExternal("https://docs.claude.com/en/docs/claude-code/quickstart");
         return; // garde la fenêtre ouverte
       }
-      if (action === "copy-fallback") {
+      if (action === "copy-manual") {
         clipboard.writeText(installCmd);
         return;
       }
@@ -1619,7 +1752,7 @@ async function showSetupWindow({ needsInstall, needsAuth }) {
       minimizable: false,
       maximizable: false,
       center: true,
-      title: "Configuration {{APP_NAME}}",
+      title: "Configuration Bridge ERP Demo",
       backgroundColor: "#faf9f7",
       show: true,
       webPreferences: {
@@ -1633,7 +1766,7 @@ async function showSetupWindow({ needsInstall, needsAuth }) {
 
     // ── HTML de la fenêtre ──
     const html = `<!DOCTYPE html>
-<html lang="fr"><head><meta charset="UTF-8"><title>Configuration {{APP_NAME}}</title>
+<html lang="fr"><head><meta charset="UTF-8"><title>Configuration Bridge ERP Demo</title>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
@@ -1723,7 +1856,7 @@ button:hover { opacity: .88; }
 <header>
   <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='10' fill='%23c96442'/%3E%3Ctext x='20' y='27' font-family='system-ui' font-size='20' font-weight='700' fill='white' text-anchor='middle'%3EO%3C/text%3E%3C/svg%3E" alt="">
   <div class="titles">
-    <span class="eyebrow">{{APP_NAME}}</span>
+    <span class="eyebrow">Bridge ERP Demo</span>
     <h1>Configuration initiale</h1>
   </div>
 </header>
@@ -1809,7 +1942,7 @@ button:hover { opacity: .88; }
     <div class="step" id="step-done">
       <div class="step-icon pending" id="icon-done">3</div>
       <div class="step-body">
-        <div class="step-title muted" id="title-done">{{APP_NAME}} prêt</div>
+        <div class="step-title muted" id="title-done">Bridge ERP Demo prêt</div>
         <div class="step-desc" id="desc-done">L'application va démarrer automatiquement.</div>
       </div>
     </div>
@@ -1970,7 +2103,7 @@ window.__oifState = function(s) {
   }
   if (s.phase === 'done') {
     setIcon('icon-done', 'done', String.fromCodePoint(0x2713));
-    setText('title-done', '{{APP_NAME}} demarre...');
+    setText('title-done', 'Bridge ERP Demo demarre...');
     document.getElementById('btn-cancel').style.display = 'none';
   }
 };
@@ -2078,7 +2211,7 @@ window.__oifState = function(s) {
           const authWin = new BrowserWindow({
             width: 520,
             height: 700,
-            title: "Connexion Claude Code - {{APP_NAME}}",
+            title: "Connexion Claude Code - Bridge ERP Demo",
             backgroundColor: "#ffffff",
             webPreferences: {
               nodeIntegration: false,
@@ -2155,7 +2288,7 @@ window.__oifState = function(s) {
               handleRedirect(url);
             }
           });
-          // will-navigate : navigation JS (fallback)
+          // will-navigate : navigation JS secondaire
           authWin.webContents.on("will-navigate", (e, url) => {
             if (url && url.startsWith(REDIRECT_URI)) {
               e.preventDefault();
@@ -2234,6 +2367,9 @@ function sleep(ms) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 app.whenReady().then(async () => {
+  // CSP appliquée à la session par défaut avant le chargement de toute fenêtre.
+  setupContentSecurityPolicy();
+
   // ÉTAPE 1 : splash IMMÉDIATEMENT, avant tout le reste. C'est ce que voit
   // l'utilisateur dans la première seconde.
   createSplashWindow();
@@ -2298,9 +2434,9 @@ app.whenReady().then(async () => {
           margin-top: 8px; }
         button:hover { opacity: 0.9; }
       </style></head><body>
-        <h1>{{APP_NAME}} prend plus de temps que prévu</h1>
+        <h1>Bridge ERP Demo prend plus de temps que prévu</h1>
         <p>Le démarrage interne n'a pas répondu en 60 secondes. Cela arrive si l'antivirus de votre poste scanne l'app à fond au premier lancement. Réessayez, c'est souvent plus rapide la deuxième fois.</p>
-        <p>Si le problème persiste, consultez les logs dans <code>%APPDATA%\\{{APP_NAME}}\\logs</code> (Win) ou <code>~/Library/Logs/{{APP_NAME}}/</code> (Mac).</p>
+        <p>Si le problème persiste, consultez les logs dans <code>%APPDATA%\\Bridge ERP Demo\\logs</code> (Win) ou <code>~/Library/Logs/Bridge ERP Demo/</code> (Mac).</p>
         <button onclick="location.reload()">Réessayer</button>
       </body></html>`;
       mainWindow.loadURL(`data:text/html;charset=utf-8;base64,${Buffer.from(errHtml).toString("base64")}`);

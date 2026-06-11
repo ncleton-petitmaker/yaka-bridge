@@ -138,8 +138,8 @@ values
     'business',
     'Module achats et import des offres fournisseurs.',
     'service-supabase',
-    array['erp:core:read', 'erp:events:consume', 'codex:run'],
-    '{"actions":[{"id":"supplier.quote.import"}],"events":[{"type":"purchasing.quote.imported"}]}'::jsonb
+    array['erp:core:read', 'erp:events:consume', 'service:purchasing:read', 'service:purchasing:write', 'codex:run'],
+    '{"actions":[{"id":"purchasing.quote.import"}],"events":[{"type":"purchasing.quote.imported"}]}'::jsonb
   )
 on conflict (module_key) do update
 set

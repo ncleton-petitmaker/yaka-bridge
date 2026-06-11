@@ -3,7 +3,13 @@
  * Hook PreToolUse : bloque toute écriture (Write, Edit, MultiEdit, NotebookEdit)
  * en dehors de la whitelist de dossiers autorisés.
  *
- * Sécurité défense-en-profondeur :
+ * ⚠️ RUNTIME : ce hook est un construct **Claude Code**. Il ne s'exécute PAS
+ * sous le runtime Codex (`codex exec`), qui est le runtime par défaut du
+ * template. Sous Codex, le confinement effectif est assuré par `--sandbox` +
+ * la validation `server/path-guard.ts` côté daemon. Ce fichier ne sert donc de
+ * protection QUE si l'app est branchée sur le runtime Claude Code.
+ *
+ * Sécurité défense-en-profondeur (runtime Claude Code uniquement) :
  *  - `--add-dir` côté CLI n'est PAS une sandbox stricte (Anthropic doc)
  *  - `bypassPermissions` mode contourne les prompts interactifs
  *  - Donc on AJOUTE ce hook qui exit code 2 = blocage dur de l'opération
@@ -15,7 +21,7 @@
  *
  * La variable d'environnement utilisée pour résoudre le dataDir est injectée
  * au scaffolding par `scripts/init-from-template.mjs` (placeholder
- * `{{DATA_DIR_ENV_VAR}}`). Fallback : process.cwd().
+ * `{{DATA_DIR_ENV_VAR}}`, ex: DEMO_ERP_DATA_DIR). Fallback : process.cwd().
  */
 import { resolve as resolvePath, isAbsolute } from "node:path";
 import { realpathSync, existsSync, readFileSync } from "node:fs";

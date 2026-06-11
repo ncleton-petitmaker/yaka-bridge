@@ -1,6 +1,7 @@
 "use client";
 
 import { getSupabaseBrowserClient, getSupabaseSession } from "./supabase-client";
+import { getDaemonToken } from "./electron";
 
 type ApiMode = "local" | "cloud";
 
@@ -19,12 +20,31 @@ export function getCloudApiBaseUrl(): string | null {
   return "";
 }
 
+export function getBridgeOrganizationId(): string | null {
+  const configured = cleanBaseUrl(process.env.NEXT_PUBLIC_BRIDGE_ORGANIZATION_ID);
+  if (configured) return configured;
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem("bridge:organization-id")?.trim() || null;
+}
+
 export function localDaemonOrigin(): string {
   const port = process.env.NEXT_PUBLIC_DAEMON_PORT ?? "{{DAEMON_PORT}}";
-  if (typeof window !== "undefined" && window.location.hostname) {
-    return `http://${window.location.hostname}:${port}`;
-  }
-  return `http://localhost:${port}`;
+  // Toujours 127.0.0.1 : le daemon ne bind que la loopback, on ne route jamais
+  // le SSE vers une interface réseau même si l'app est ouverte via un hostname
+  // LAN.
+  return `http://127.0.0.1:${port}`;
+}
+
+/**
+ * Ajoute le token de session du daemon en query param sur une URL locale.
+ * Utilisé pour le SSE (`EventSource` ne permet pas d'en-têtes). No-op hors
+ * Electron (mode cloud).
+ */
+export function withDaemonToken(url: string): string {
+  const token = getDaemonToken();
+  if (!token) return url;
+  const sep = url.includes("?") ? "&" : "?";
+  return `${url}${sep}daemon_token=${encodeURIComponent(token)}`;
 }
 
 function isAbsoluteUrl(value: string): boolean {
@@ -54,9 +74,18 @@ export async function apiFetch(
   init: RequestInit = {}
 ): Promise<Response> {
   if (getApiMode() !== "cloud") {
-    if (typeof input === "string") return fetch(apiUrl(input), init);
-    if (input instanceof URL) return fetch(apiUrl(input.toString()), init);
-    return fetch(input, init);
+    const token = getDaemonToken();
+    const localInit: RequestInit = init;
+    if (token) {
+      const headers = new Headers(init.headers);
+      if (!headers.has("authorization")) {
+        headers.set("authorization", `Bearer ${token}`);
+      }
+      localInit.headers = headers;
+    }
+    if (typeof input === "string") return fetch(apiUrl(input), localInit);
+    if (input instanceof URL) return fetch(apiUrl(input.toString()), localInit);
+    return fetch(input, localInit);
   }
   return cloudFetch(input, init);
 }
@@ -75,6 +104,10 @@ async function cloudFetch(
   const headers = new Headers(init.headers);
   if (session?.access_token && !headers.has("authorization")) {
     headers.set("authorization", `Bearer ${session.access_token}`);
+  }
+  const organizationId = getBridgeOrganizationId();
+  if (organizationId && !headers.has("x-bridge-organization-id")) {
+    headers.set("x-bridge-organization-id", organizationId);
   }
 
   const target = typeof input === "string"

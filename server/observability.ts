@@ -289,8 +289,8 @@ function sanitizeText(value: string): string {
     .slice(0, 4000);
 }
 
-function cleanText(value: unknown, fallback: string, max: number): string {
-  const raw = typeof value === "string" && value.trim() ? value.trim() : fallback;
+function cleanText(value: unknown, defaultValue: string, max: number): string {
+  const raw = typeof value === "string" && value.trim() ? value.trim() : defaultValue;
   return sanitizeText(raw).slice(0, max);
 }
 
@@ -327,9 +327,9 @@ function countBy(rows: Array<Record<string, unknown>>, key: string): Record<stri
   return out;
 }
 
-function numberParam(url: URL, key: string, fallback: number): number {
+function numberParam(url: URL, key: string, defaultValue: number): number {
   const n = Number(url.searchParams.get(key));
-  return Number.isFinite(n) && n > 0 ? n : fallback;
+  return Number.isFinite(n) && n > 0 ? n : defaultValue;
 }
 
 function stringOrNull(value: unknown): string | null {

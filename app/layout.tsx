@@ -1,18 +1,18 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { StorageGuard } from "@/components/StorageGuard";
 import { CloudAuthGate } from "@/components/CloudAuthGate";
 import { BridgeStatusProvider } from "@/components/BridgeStatusProvider";
 import { OpenReplayProvider } from "@/components/OpenReplayProvider";
 import { RuntimeHealthGuard } from "@/components/RuntimeHealthGuard";
 
 export const metadata: Metadata = {
-  title: "{{APP_NAME}}",
-  description: "{{DOMAIN_BRIEF}}",
+  title: "Bridge ERP Demo",
+  description: "Template ERP modulaire cloud/bridge",
 };
 
 // Script inline qui applique data-theme avant le render pour éviter le FOUC.
-const themeInitScript = `(function(){try{var k='{{APP_NAME_KEBAB}}:theme';var t=localStorage.getItem(k);if(t==='light'||t==='dark'){document.documentElement.setAttribute('data-theme',t);}else{document.documentElement.setAttribute('data-theme',matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');}}catch(e){}})();`;
+const themeKey = "bridge-erp-demo:theme";
+const themeInitScript = `(function(){try{var k='${themeKey}';var t=localStorage.getItem(k);if(t==='light'||t==='dark'){document.documentElement.setAttribute('data-theme',t);}else{document.documentElement.setAttribute('data-theme',matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');}}catch(e){}})();`;
 
 export default function RootLayout({
   children,
@@ -37,7 +37,6 @@ export default function RootLayout({
           <OpenReplayProvider />
           <BridgeStatusProvider>
             {children}
-            <StorageGuard />
           </BridgeStatusProvider>
         </CloudAuthGate>
       </body>

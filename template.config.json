@@ -6,13 +6,13 @@
     {
       "key": "APP_NAME",
       "description": "Display name (utilisé dans Dock, menus, titres, builds DMG/NSIS).",
-      "example": "Marcelle-Calibre",
+      "example": "Demo-Calibre",
       "required": true
     },
     {
       "key": "APP_ID",
       "description": "Reverse-domain bundle ID Electron / appId electron-builder.",
-      "example": "fr.petitmaker.marcelle-calibre",
+      "example": "com.example.demo-erp",
       "required": true
     },
     {
@@ -30,7 +30,7 @@
     {
       "key": "DATA_DIR_NAME",
       "description": "Nom du dossier userData Electron (Library/Application Support/<DATA_DIR_NAME>).",
-      "example": "Marcelle-Calibre",
+      "example": "Demo-Calibre",
       "required": true
     },
     {
@@ -72,21 +72,23 @@
       "description": "Nom de la variable d'env qui contient le path du dataDir runtime (ex: CALIBRE_DATA_DIR)."
     },
     {
+      "key": "APP_NAME_SNAKE",
+      "from": "APP_NAME_KEBAB_UPPER",
+      "transform": "lower-case",
+      "description": "Slug lower_snake_case de APP_NAME (clé serveur MCP côté Codex / préfixe des tools, ex: demo_erp)."
+    },
+    {
       "key": "VERSION",
       "value": "0.0.1",
       "description": "Version initiale de l'app. Mise à 0.0.1 par défaut, à bumper avant pack."
     }
   ],
   "fileExtensions": [".ts", ".tsx", ".js", ".cjs", ".mjs", ".json", ".md", ".yaml", ".yml", ".css", ".html"],
-  "ignorePaths": [".git", "node_modules", ".next", "dist", "release", "data", "vendor", "release"],
+  "ignorePaths": [".git", "node_modules", ".next", "out", "build", "dist", "release", "release-bridge", "data", "vendor", "Projets", ".pi", ".cache", "supabase/.temp", "supabase/.branches", ".factory-meta.json", ".factory-error.json", "brief.generated.md"],
   "shell": {
     "description": "Configuration du shell UX restauré depuis oif-eval. Les agents (notamment ui-page-generator) lisent ces clés pour scaffolder les pages.",
     "nav_tabs": {
       "description": "Onglets affichés dans AppChromeHeader. Chaque entrée { href, label, adminOnly? }. Tableau vide par défaut : l'agent ui-page-generator l'enrichit selon les entités métier.",
-      "default": []
-    },
-    "required_dirs": {
-      "description": "Dossiers obligatoires que l'utilisateur doit configurer avant d'utiliser l'app. Chaque entrée { key, label } où `key` est un champ de AppConfig (ex 'inputDir', 'outputDir'). Tableau vide par défaut : pas de StorageGuard bloquant.",
       "default": []
     }
   }

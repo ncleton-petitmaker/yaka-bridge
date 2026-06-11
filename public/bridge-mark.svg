@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Bridge">
+  <rect width="1024" height="1024" rx="224" fill="#F6F1E8"/>
+  <path d="M322 516h380" fill="none" stroke="#2A211B" stroke-width="54" stroke-linecap="round"/>
+  <path d="M500 360v312" fill="none" stroke="#2A211B" stroke-width="42" stroke-linecap="round"/>
+  <rect x="238" y="376" width="172" height="172" rx="54" fill="#2A211B"/>
+  <rect x="614" y="476" width="172" height="172" rx="54" fill="#C96442"/>
+  <circle cx="500" cy="516" r="58" fill="#F6F1E8" stroke="#2A211B" stroke-width="42"/>
+</svg>

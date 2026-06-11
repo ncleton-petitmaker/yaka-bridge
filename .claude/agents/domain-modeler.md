@@ -22,7 +22,7 @@ C'est **tout**. Tu ne touches pas aux drivers (`subprocess-driver`), aux pages N
 L'orchestrateur (`scripts/new-app-from-brief.mjs`) t'invoque avec :
 
 - **`brief`** : objet JS avec au minimum
-  - `APP_NAME` (ex. `"Marcelle-Calibre"`)
+  - `APP_NAME` (ex. `"Demo-Calibre"`)
   - `ENTITY`, `ENTITY_PLURAL` (ex. `"batch"`, `"batches"`)
   - `DOMAIN_BRIEF` (1-2 phrases)
   - `ENTITIES` : liste `[{ name, description }]`
@@ -148,13 +148,13 @@ Ajoute (via `Write` ou `Edit` selon ce qui existe) un bloc au fichier `<outputDi
 - **Ne crée pas** de helpers, de constantes, de fonctions. Juste des types.
 - **N'importe pas** depuis le code applicatif (`server/runs.ts`, etc.). `server/types.ts` est la racine de la hiérarchie de types.
 
-## Exemple complet — brief Marcelle-Calibre
+## Exemple complet — brief Demo-Calibre
 
 ### Brief en entrée
 
 ```js
 {
-  APP_NAME: "Marcelle-Calibre",
+  APP_NAME: "Demo-Calibre",
   ENTITY: "batch",
   ENTITY_PLURAL: "batches",
   DOMAIN_BRIEF: "Calibrer Marcelle (bot EHPAD) en lançant des batches de questions sur Maestro Android + API HTTP, mesurer latence/route/hallucination, indexer les batches par commit Git pour comparer avant/après.",
@@ -180,7 +180,7 @@ Ajoute (via `Write` ou `Edit` selon ce qui existe) un bloc au fichier `<outputDi
 /**
  * Types partagés entre daemon et UI.
  * Section 1 : invariants template (préservés tel quel).
- * Section 2 : types domain Marcelle-Calibre (générés par domain-modeler).
+ * Section 2 : types domain Demo-Calibre (générés par domain-modeler).
  */
 
 // ─── 1. Invariants template ──────────────────────────────────────────────────
@@ -253,7 +253,7 @@ export interface ChatRunCreated {
   runId: string;
 }
 
-// ─── 2. Domain Marcelle-Calibre ──────────────────────────────────────────────
+// ─── 2. Domain Demo-Calibre ──────────────────────────────────────────────
 
 /**
  * Une question de référence du corpus de calibration, avec sa gold-standard
@@ -374,7 +374,7 @@ export type CalibreEvent =
 
 ### Schémas optionnels
 
-Le brief Marcelle-Calibre ne mentionne pas explicitement de validation JSON Schema sur du contenu généré par Claude. **Skip** la génération de schemas.
+Le brief Demo-Calibre ne mentionne pas explicitement de validation JSON Schema sur du contenu généré par Claude. **Skip** la génération de schemas.
 
 ### Bloc factory-journal ajouté
 

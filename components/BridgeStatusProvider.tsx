@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { Icon } from "@/components/Icon";
+import { apiFetch } from "@/lib/api-client";
 
 type BridgeConnection = "checking" | "connected" | "disconnected";
 type InstallerPlatform = "windows" | "mac";
@@ -175,7 +176,7 @@ function BridgeSetupModal({ onClose }: { onClose: () => void }) {
   const statusLabel = connected ? "Connecté" : status === "checking" ? "Vérification..." : "Déconnecté";
   const statusDetail = connected
     ? `Dernier test réussi${lastCheckedAt ? ` à ${new Date(lastCheckedAt).toLocaleTimeString("fr-FR")}` : ""}.`
-    : error ?? "Installe ou relance le bridge, puis relance le test.";
+    : error ?? "Télécharge Bridge si l'app a été supprimée, puis relance le test.";
   const installer = installerFromConfig(config, selectedPlatform);
 
   return (
@@ -219,7 +220,7 @@ function BridgeSetupModal({ onClose }: { onClose: () => void }) {
               <div className="bridge-step-index">1</div>
               <div>
                 <h3>Télécharger Bridge</h3>
-                <p>Format détecté : <strong>{installer.label}</strong>. Bridge restera discret en arrière-plan.</p>
+                <p>Format détecté : <strong>{installer.label}</strong>. Si Bridge a été désinstallé, ce téléchargement réinstalle aussi le lien système.</p>
                 <div className="bridge-os-toggle" aria-label="Choisir le système">
                   {(["mac", "windows"] as const).map((platform) => (
                     <button
@@ -242,8 +243,8 @@ function BridgeSetupModal({ onClose }: { onClose: () => void }) {
                   {downloading
                     ? "Préparation..."
                     : installer.extension === "exe"
-                      ? "Télécharger l'EXE"
-                      : "Télécharger le DMG"}
+                      ? "Réinstaller Bridge"
+                      : "Réinstaller Bridge"}
                 </button>
                 <span className="bridge-file-name">{installer.installerFilename}</span>
                 {downloadMessage && <p className="bridge-message">{downloadMessage}</p>}
@@ -253,10 +254,14 @@ function BridgeSetupModal({ onClose }: { onClose: () => void }) {
             <article className="bridge-install-row">
               <div className="bridge-step-index">2</div>
               <div>
-                <h3>Lancer le bridge</h3>
+                <h3>Ouvrir Bridge</h3>
                 <p>
-                  Ouvre Bridge et accepte la confirmation système si elle apparaît.
+                  Après installation, ouvre Bridge pour réactiver le lien système et le service local.
                 </p>
+                <button type="button" className="subtle bridge-secondary-action" onClick={openBridgeProtocol}>
+                  <Icon name="external-link" size={14} />
+                  Ouvrir Bridge
+                </button>
                 <code className="bridge-url">{config?.bridgeUrl ?? "http://127.0.0.1:7707"}</code>
               </div>
             </article>
@@ -289,7 +294,7 @@ function BridgeSetupModal({ onClose }: { onClose: () => void }) {
 }
 
 async function loadBridgeConfig(): Promise<BridgeConfig> {
-  const res = await fetch("/api/bridge/status");
+  const res = await apiFetch("/api/bridge/status");
   if (!res.ok) throw new Error(`GET /api/bridge/status ${res.status}`);
   return (await res.json()) as BridgeConfig;
 }
@@ -336,15 +341,17 @@ async function downloadInstaller(
       setMessage("Téléchargement lancé.");
       return;
     }
-    const res = await fetch(installer.installerUrl);
-    if (!res.ok) throw new Error(`Installateur indisponible (${res.status})`);
-    saveBlob(await res.blob(), installer.installerFilename);
+    downloadDirect(installer.installerUrl, installer.installerFilename);
     setMessage("Téléchargement lancé.");
   } catch (err) {
     setMessage(err instanceof Error ? err.message : String(err));
   } finally {
     setDownloading(false);
   }
+}
+
+function openBridgeProtocol(): void {
+  window.location.href = "bridge://status";
 }
 
 function installerFromConfig(config: BridgeConfig | null, platform: InstallerPlatform): BridgeInstaller {
@@ -385,6 +392,11 @@ function detectInstallerPlatform(): InstallerPlatform {
 
 function saveBlob(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
+  downloadDirect(url, filename);
+  window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
+}
+
+function downloadDirect(url: string, filename: string): void {
   const a = document.createElement("a");
   a.href = url;
   a.download = filename;
@@ -392,5 +404,4 @@ function saveBlob(blob: Blob, filename: string): void {
   document.body.appendChild(a);
   a.click();
   a.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
 }

@@ -22,8 +22,14 @@ interface NavTab {
   label: string;
 }
 const baseTabs: NavTab[] = [
+  { href: "/dashboard", label: "Dashboard" },
+  { href: "/runs", label: "Achats" },
   { href: "/admin/observability", label: "Observation" },
 ];
+
+const APP_NAME = "Bridge ERP Demo";
+const DOMAIN_BRIEF = "Template ERP modulaire cloud/bridge";
+const THEME_KEY = "bridge-erp-demo:theme";
 
 /**
  * Header global de l'app : Mark + nom + onglets + theme switcher.
@@ -46,7 +52,7 @@ export function AppChromeHeader() {
     const next = theme === "dark" ? "light" : "dark";
     document.documentElement.setAttribute("data-theme", next);
     try {
-      localStorage.setItem("{{APP_NAME_KEBAB}}:theme", next);
+      localStorage.setItem(THEME_KEY, next);
     } catch {
       // ignore
     }
@@ -79,7 +85,7 @@ export function AppChromeHeader() {
               whiteSpace: "nowrap",
             }}
           >
-            {"{{APP_NAME}}"}
+            {APP_NAME}
           </span>
           <span style={{ color: "var(--muted)", fontSize: 12 }}>·</span>
           <span
@@ -93,7 +99,7 @@ export function AppChromeHeader() {
               textOverflow: "ellipsis",
             }}
           >
-            {"{{DOMAIN_BRIEF}}"}
+            {DOMAIN_BRIEF}
           </span>
         </Link>
 

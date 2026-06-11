@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, nativeImage, shell, Tray, ipcMain, safeStorage } = require("electron");
+const { app, BrowserWindow, Menu, nativeImage, shell, Tray, ipcMain, safeStorage, dialog } = require("electron");
 const { spawnSync } = require("node:child_process");
 const { createServer } = require("node:http");
 const path = require("node:path");
@@ -17,10 +17,13 @@ process.env.APP_BRIDGE_ELECTRON = "1";
 process.env.APP_BRIDGE_VERSION = process.env.APP_BRIDGE_VERSION || app.getVersion();
 
 const PRODUCT_NAME = "Bridge";
+app.setName(PRODUCT_NAME);
 const PROTOCOL_VERSION = 2;
 const HEALTH_PORT = Number(process.env.BRIDGE_HEALTH_PORT || process.env.APP_BRIDGE_HEALTH_PORT || "7707") || 7707;
 const BRIDGE_ONLINE_THRESHOLD_SECONDS =
   Number(process.env.BRIDGE_ONLINE_THRESHOLD_SECONDS || "90") || 90;
+const SUPABASE_REFRESH_MARGIN_MS =
+  Number(process.env.BRIDGE_SUPABASE_REFRESH_MARGIN_MS || 10 * 60 * 1000) || 10 * 60 * 1000;
 const CONFIG_PATH =
   process.env.BRIDGE_CONFIG ||
   process.env.APP_BRIDGE_CONFIG ||
@@ -54,6 +57,8 @@ let localStatuses = {};
 let localActivity = [];
 let autoUpdateStarted = false;
 let autoUpdateInterval = null;
+let cloudHeartbeatInterval = null;
+let cloudHeartbeatInFlight = false;
 let updateDownloaded = false;
 let codexStatusCache = null;
 let codexStatusProbeRunning = false;
@@ -61,6 +66,7 @@ let lastCodexStatusRefreshMs = 0;
 let pendingBrowserSession = null;
 let lastConfigSnapshot = null;
 let protocolLaunchHandled = false;
+let lastProtocolLaunchAt = 0;
 let updateState = {
   enabled: false,
   status: "idle",
@@ -77,7 +83,7 @@ if (!singleInstanceLock) {
 } else {
   app.on("second-instance", (_event, argv) => {
     const handledProtocol = handleProtocolArgs(argv);
-    if (!handledProtocol) showStatusWindow();
+    if (!handledProtocol) showStatusWindow({ focus: true });
     syncServices();
   });
 }
@@ -85,6 +91,7 @@ if (!singleInstanceLock) {
 app.on("open-url", (event, url) => {
   event.preventDefault();
   handleProtocolUrl(url);
+  hideStatusWindowAfterLaunch();
   syncServices();
 });
 
@@ -94,6 +101,7 @@ app.on("before-quit", () => {
     runtimeHandle?.stop?.();
     localHealthServer?.close();
     if (autoUpdateInterval) clearInterval(autoUpdateInterval);
+    if (cloudHeartbeatInterval) clearInterval(cloudHeartbeatInterval);
   } catch {
     // no-op
   }
@@ -110,16 +118,23 @@ app.whenReady().then(() => {
     const launchedByProtocol = handleProtocolArgs(process.argv) || protocolLaunchHandled;
     registerBridgeProtocol();
     createTray();
-    if (!launchedByProtocol) showStatusWindow();
+    if (!launchedByProtocol) showStatusWindow({ focus: true });
     startRuntimeIfAvailable();
     startAutoUpdates();
+    startCloudHeartbeat();
     refreshExternalStatuses();
     scheduleCodexStatusRefresh();
     setInterval(refreshExternalStatuses, 15_000);
   });
 });
 
-app.on("activate", () => showStatusWindow());
+app.on("activate", () => {
+  if (Date.now() - lastProtocolLaunchAt < 8_000) {
+    hideStatusWindowAfterLaunch();
+    return;
+  }
+  showStatusWindow({ focus: true });
+});
 
 function registerBridgeProtocol() {
   try {
@@ -157,8 +172,8 @@ function startAutoUpdates({ reconfigure = false } = {}) {
     lastError: "",
   };
 
-  autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.autoDownload = process.env.BRIDGE_AUTO_DOWNLOAD_UPDATES !== "0";
+  autoUpdater.autoInstallOnAppQuit = process.env.BRIDGE_AUTO_INSTALL_ON_QUIT === "1";
   autoUpdater.allowPrerelease = process.env.BRIDGE_UPDATE_ALLOW_PRERELEASE === "1";
   autoUpdater.setFeedURL({ provider: "generic", url: feedUrl });
   attachAutoUpdateHandlers();
@@ -190,7 +205,7 @@ function attachAutoUpdateHandlers() {
     updateDownloaded = true;
     updateState.availableVersion = info?.version || updateState.availableVersion;
     setUpdateState("downloaded");
-    pushActivity("Mise à jour Bridge téléchargée. Installation automatique dès que Bridge est disponible.");
+    pushActivity("Mise à jour Bridge téléchargée. Elle sera installée sur action utilisateur, jamais en plein travail.");
     maybeInstallDownloadedUpdate();
   });
   autoUpdater.on("error", (err) => {
@@ -243,6 +258,10 @@ function scheduleAutoUpdateCheck(delayMs = 0) {
 
 function maybeInstallDownloadedUpdate() {
   if (!autoUpdater || !updateDownloaded) return;
+  if (process.env.BRIDGE_AUTO_INSTALL_UPDATES !== "1") {
+    setUpdateState("downloaded");
+    return;
+  }
   const activeJobs = Number(runtimeState?.activeJobs || 0);
   if (activeJobs > 0) {
     setUpdateState("waiting-for-idle");
@@ -262,14 +281,7 @@ function updateFeedBaseUrl(cfg) {
   if (supabaseUrl) return `${supabaseUrl}/storage/v1/object/public/bridge-updates`;
   const controlPlane = cleanExternalUrl(cfg.controlPlaneBaseUrl || cfg.cloudBaseUrl);
   if (controlPlane) {
-    try {
-      const url = new URL(controlPlane);
-      if (url.hostname.endsWith(".yaka-bridge.com")) {
-        return "https://api.rossinienergy.yaka-bridge.com/storage/v1/object/public/bridge-updates";
-      }
-    } catch {
-      // no-op
-    }
+    return null;
   }
   return null;
 }
@@ -290,6 +302,7 @@ function handleProtocolUrl(rawUrl) {
   }
   if (parsed.protocol !== "bridge:") return false;
   protocolLaunchHandled = true;
+  lastProtocolLaunchAt = Date.now();
   const browserSessionId = parsed.searchParams.get("browserSessionId") || "";
   const returnUrl = parsed.searchParams.get("returnUrl") || "";
   if (browserSessionId) {
@@ -302,6 +315,8 @@ function handleProtocolUrl(rawUrl) {
     pushActivity("Rendez-vous navigateur reçu.");
     void flushPendingBrowserSession();
   }
+  setTimeout(hideStatusWindowAfterLaunch, 150);
+  setTimeout(hideStatusWindowAfterLaunch, 900);
   return true;
 }
 
@@ -326,6 +341,7 @@ async function flushPendingBrowserSession() {
     });
     if (pendingBrowserSession === current) pendingBrowserSession = null;
     pushActivity("Rendez-vous navigateur confirmé au cloud.");
+    hideStatusWindowAfterLaunch();
     refreshStatusWindow();
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -367,17 +383,18 @@ function createTray() {
   if (process.platform === "darwin") image.setTemplateImage(true);
   tray = new Tray(image);
   tray.setToolTip(PRODUCT_NAME);
-  tray.on("click", () => showStatusWindow());
+  tray.on("click", () => showStatusWindow({ focus: true }));
   updateTrayMenu();
 }
 
 function updateTrayMenu() {
+  updateApplicationMenu();
   if (!tray) return;
   const state = localStatusPayload();
   const connectedCount = state.services.filter((service) => service.status === "connected" || service.status === "active").length;
   const codexLabel = state.codex?.ready ? "Codex prêt" : `Codex: ${state.codex?.label || "à vérifier"}`;
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: "Afficher Bridge", click: () => showStatusWindow() },
+    { label: "Afficher Bridge", click: () => showStatusWindow({ focus: true }) },
     {
       label: `${connectedCount}/${state.services.length} services connectés`,
       enabled: false,
@@ -395,6 +412,73 @@ function updateTrayMenu() {
       },
     },
   ]));
+}
+
+function updateApplicationMenu() {
+  const state = localStatusPayload();
+  const activityItems = (state.activity || []).slice(0, 8).map((item) => ({
+    label: `${new Date(item.ts).toLocaleTimeString("fr-FR")}  ${item.message}`,
+    enabled: false,
+  }));
+  Menu.setApplicationMenu(Menu.buildFromTemplate([
+    {
+      label: PRODUCT_NAME,
+      submenu: [
+        { label: "À propos de Bridge", click: () => showAboutBridge() },
+        { label: `Version ${currentBridgeVersion()}`, enabled: false },
+        { type: "separator" },
+        { label: "Afficher Bridge", click: () => showStatusWindow({ focus: true }) },
+        { type: "separator" },
+        { label: "Déconnexion", enabled: Boolean(state.authenticated), click: () => signOut() },
+        { type: "separator" },
+        { role: "quit", label: "Quitter Bridge" },
+      ],
+    },
+    {
+      label: "Fichier",
+      submenu: [
+        { label: "Synchroniser", accelerator: "CmdOrCtrl+R", click: () => syncServices() },
+        { label: "Ouvrir le dossier de données", click: () => revealDataDir() },
+      ],
+    },
+    {
+      label: "Codex",
+      submenu: [
+        { label: state.codex?.ready ? "Codex prêt" : `Codex: ${state.codex?.label || "à vérifier"}`, enabled: false },
+        { type: "separator" },
+        { label: "Tester Codex", click: () => { resetCodexStatusCache(); refreshStatusWindow(); updateTrayMenu(); } },
+        { label: "Configurer Codex", click: async () => { await runCodexSetup(); resetCodexStatusCache(); refreshStatusWindow(); updateTrayMenu(); } },
+        { label: "Aide Codex", click: () => shell.openExternal("https://help.openai.com/en/articles/11381614-api-codex-cli-and-sign-in-with-chatgpt") },
+      ],
+    },
+    {
+      label: "Activité",
+      submenu: activityItems.length ? activityItems : [{ label: "Aucune activité récente", enabled: false }],
+    },
+    {
+      label: "Édition",
+      submenu: [
+        { role: "undo", label: "Annuler" },
+        { role: "redo", label: "Rétablir" },
+        { type: "separator" },
+        { role: "cut", label: "Couper" },
+        { role: "copy", label: "Copier" },
+        { role: "paste", label: "Coller" },
+      ],
+    },
+  ]));
+}
+
+function showAboutBridge() {
+  const version = currentBridgeVersion();
+  return dialog.showMessageBox({
+    type: "info",
+    title: "À propos de Bridge",
+    message: `Bridge ${version}`,
+    detail: `Version installée : ${version}`,
+    buttons: ["OK"],
+    defaultId: 0,
+  });
 }
 
 function startRuntimeIfAvailable() {
@@ -771,16 +855,16 @@ function isStoredSessionInvalid(cfg) {
 
 function loadConfig(options = {}) {
   const hydrateSecrets = options.hydrateSecrets !== false;
-  const fallback = defaultConfig();
+  const defaultCfg = defaultConfig();
   try {
-    if (!fs.existsSync(CONFIG_PATH)) return fallback;
+    if (!fs.existsSync(CONFIG_PATH)) return defaultCfg;
     const raw = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
     const parsed = hydrateSecrets ? hydrateSecureBridgeSecrets(raw) : raw;
-    const cfg = normalizeConfig({ ...fallback, ...parsed });
+    const cfg = normalizeConfig({ ...defaultCfg, ...parsed });
     if (hydrateSecrets) lastConfigSnapshot = cfg;
     return cfg;
   } catch {
-    return lastConfigSnapshot || fallback;
+    return lastConfigSnapshot || defaultCfg;
   }
 }
 
@@ -851,7 +935,9 @@ function prepareBridgeConfigForDisk(cfg) {
 }
 
 function shouldUseElectronSafeStorage() {
-  return process.env.BRIDGE_USE_SAFE_STORAGE === "1" && Boolean(safeStorage?.isEncryptionAvailable());
+  // Chiffrement par défaut dès qu'un coffre OS est disponible ; opt-out explicite
+  // via BRIDGE_USE_SAFE_STORAGE=0 (CI/headless). Aligné avec bridge/config.ts.
+  return process.env.BRIDGE_USE_SAFE_STORAGE !== "0" && Boolean(safeStorage?.isEncryptionAvailable());
 }
 
 function defaultConfig() {
@@ -1130,33 +1216,56 @@ async function probe(url) {
   }
 }
 
-async function syncServices() {
+function startCloudHeartbeat() {
+  if (cloudHeartbeatInterval) return;
+  const intervalMs = Math.max(Number(process.env.BRIDGE_CLOUD_HEARTBEAT_MS || 30_000), 10_000);
+  const beat = async () => {
+    if (cloudHeartbeatInFlight || isQuitting) return;
+    const cfg = loadConfig();
+    if (!cfg.controlPlaneBaseUrl || (!cfg.bridgeToken && !cfg.session?.accessToken)) return;
+    cloudHeartbeatInFlight = true;
+    try {
+      await syncServices({ silent: true });
+    } finally {
+      cloudHeartbeatInFlight = false;
+    }
+  };
+  setTimeout(() => void beat(), 2_000);
+  cloudHeartbeatInterval = setInterval(() => void beat(), intervalMs);
+}
+
+async function syncServices(options = {}) {
+  const silent = options.silent === true;
   if (runtimeHandle?.syncOnce) {
     await runtimeHandle.syncOnce().catch((err) => {
       bridgeError = err instanceof Error ? err.message : String(err);
     });
     startAutoUpdates({ reconfigure: true });
-    pushActivity("Synchronisation demandée.");
-    refreshStatusWindow();
+    if (!silent) {
+      pushActivity("Synchronisation demandée.");
+      refreshStatusWindow();
+    }
     return;
   }
 
   const cfg = loadConfig();
-  if (!cfg.controlPlaneBaseUrl || !cfg.bridgeToken) {
-    pushActivity("Mode démo: aucun Control Plane configuré.");
-    refreshStatusWindow();
+  if (!cfg.controlPlaneBaseUrl || (!cfg.bridgeToken && !cfg.session?.accessToken)) {
+    if (!silent) {
+      pushActivity("Mode démo: aucun Control Plane configuré.");
+      refreshStatusWindow();
+    }
     return;
   }
   try {
     await syncServicesFromControlPlane(cfg);
     startAutoUpdates({ reconfigure: true });
-    pushActivity("Services synchronisés.");
+    if (!silent) pushActivity("Services synchronisés.");
     bridgeError = null;
   } catch (err) {
     bridgeError = err instanceof Error ? err.message : String(err);
-    pushActivity(`Synchronisation échouée: ${bridgeError}`);
+    if (!silent) pushActivity(`Synchronisation échouée: ${bridgeError}`);
   }
-  refreshStatusWindow();
+  if (!silent) refreshStatusWindow();
 }
 
 async function signIn(input = {}) {
@@ -1269,18 +1378,18 @@ async function refreshSupabaseSessionIfNeeded(cfg) {
     const fresh = loadConfig();
     if (fresh.session?.refreshToken) {
       const freshExpiresAt = fresh.session.expiresAt ? Date.parse(fresh.session.expiresAt) : 0;
-      if (fresh.session.refreshToken !== cfg.session.refreshToken && (!freshExpiresAt || freshExpiresAt - Date.now() > 60_000)) {
+      if (fresh.session.refreshToken !== cfg.session.refreshToken && (!freshExpiresAt || freshExpiresAt - Date.now() > SUPABASE_REFRESH_MARGIN_MS)) {
         Object.assign(cfg, fresh);
         return cfg;
       }
-      if (freshExpiresAt && freshExpiresAt - Date.now() > 60_000) {
+      if (freshExpiresAt && freshExpiresAt - Date.now() > SUPABASE_REFRESH_MARGIN_MS) {
         Object.assign(cfg, fresh);
         return cfg;
       }
     }
 
     const expiresAt = cfg.session.expiresAt ? Date.parse(cfg.session.expiresAt) : 0;
-    if (expiresAt && expiresAt - Date.now() > 60_000) return cfg;
+    if (expiresAt && expiresAt - Date.now() > SUPABASE_REFRESH_MARGIN_MS) return cfg;
     const refreshToken = cfg.session.refreshToken;
     const res = await fetch(`${cfg.supabaseUrl.replace(/\/+$/, "")}/auth/v1/token?grant_type=refresh_token`, {
       method: "POST",
@@ -1300,7 +1409,7 @@ async function refreshSupabaseSessionIfNeeded(cfg) {
         if (
           latest.session?.refreshToken &&
           latest.session.refreshToken !== refreshToken &&
-          (!latestExpiresAt || latestExpiresAt - Date.now() > 60_000)
+          (!latestExpiresAt || latestExpiresAt - Date.now() > SUPABASE_REFRESH_MARGIN_MS)
         ) {
           Object.assign(cfg, latest);
           return cfg;
@@ -1406,7 +1515,10 @@ async function openService(serviceId) {
       }
     }
     target = appendQueryParam(target, "browserSessionId", browserSessionId);
+    hideStatusWindowAfterLaunch();
     await shell.openExternal(target);
+    hideStatusWindowAfterLaunch();
+    setTimeout(hideStatusWindowAfterLaunch, 900);
     delete localStatuses[serviceId];
     pushActivity(`${service.name} ouvert.`);
     return { ok: true, launchUrl: target };
@@ -1417,6 +1529,17 @@ async function openService(serviceId) {
     return { ok: false, error: message };
   } finally {
     refreshStatusWindow();
+  }
+}
+
+function hideStatusWindowAfterLaunch() {
+  if (!statusWindow || statusWindow.isDestroyed()) return;
+  statusWindow.setAlwaysOnTop(false);
+  if (process.platform === "darwin") {
+    statusWindow.hide();
+    app.hide();
+  } else {
+    statusWindow.minimize();
   }
 }
 
@@ -1516,20 +1639,27 @@ function pushActivity(message) {
   localActivity = localActivity.slice(0, 30);
 }
 
-function showStatusWindow() {
+function showStatusWindow({ focus = false } = {}) {
   if (statusWindow && !statusWindow.isDestroyed()) {
-    statusWindow.show();
-    statusWindow.focus();
+    statusWindow.setAlwaysOnTop(false);
+    if (focus) {
+      statusWindow.show();
+      statusWindow.focus();
+    } else {
+      statusWindow.showInactive();
+    }
     refreshStatusWindow();
     return;
   }
   statusWindow = new BrowserWindow({
+    show: false,
     width: 760,
     height: 560,
     minWidth: 680,
     minHeight: 480,
     title: PRODUCT_NAME,
     resizable: true,
+    alwaysOnTop: false,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -1561,6 +1691,17 @@ function showStatusWindow() {
     ipcMain.handle("bridge:sign-out", () => signOut());
     ipcMain.handle("bridge:reveal-data-dir", () => revealDataDir());
   }
+  statusWindow.setAlwaysOnTop(false);
+  statusWindow.once("ready-to-show", () => {
+    if (!statusWindow || statusWindow.isDestroyed()) return;
+    statusWindow.setAlwaysOnTop(false);
+    if (focus) {
+      statusWindow.show();
+      statusWindow.focus();
+    } else {
+      statusWindow.showInactive();
+    }
+  });
   statusWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(statusHtml())}`);
 }
 
@@ -1579,14 +1720,14 @@ function statusHtml() {
   <style>
     * { box-sizing: border-box; }
     :root { color-scheme: light; --bg:#f7f5f0; --fg:#171716; --muted:#706c64; --soft:#9b978e; --line:#e4ded3; --panel:#ffffff; --paper:#fffdf8; --ink:#27221d; --rust:#c96442; --rust-strong:#a74f34; --teal:#2fb9a8; --green:#1e8f56; --grey:#9b9f98; --amber:#ba7a18; --blue:#2b63a8; --red:#b34236; --shadow:0 18px 44px rgba(39,34,29,.10), 0 3px 10px rgba(39,34,29,.06); }
-    body { margin: 0; min-height: 100vh; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: radial-gradient(circle at 12% -10%, #fffaf1 0, transparent 32%), var(--bg); color: var(--fg); }
-    main { display: grid; grid-template-rows: auto auto 1fr; min-height: 100vh; }
-    header { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 18px 26px 14px; border-bottom: 1px solid var(--line); background: rgba(255,253,248,.84); backdrop-filter: blur(16px); position: sticky; top: 0; z-index: 5; }
+    body { margin: 0; min-height: 100vh; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--bg); color: var(--fg); }
+    main { min-height: 100vh; }
+    header { display: none; }
     .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
     .mark { width: 34px; height: 34px; flex: 0 0 auto; display: block; }
     h1 { font-size: 18px; line-height: 1.1; margin: 0; letter-spacing: 0; }
     .subtitle { color: var(--muted); font-size: 12px; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .top-actions { display: flex; gap: 8px; align-items: center; }
+    .top-actions { display: flex; gap: 8px; align-items: center; position: relative; }
     .status-pill { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; border: 1px solid var(--line); border-radius: 999px; background: #fff; padding: 4px 9px; font-size: 12px; font-weight: 700; color: var(--muted); white-space: nowrap; }
     .status-pill::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--grey); }
     .status-pill.ready { color: var(--green); border-color: #b8ddc7; background: #f4fbf7; }
@@ -1599,16 +1740,27 @@ function statusHtml() {
     button:disabled { opacity: .55; cursor: progress; }
     button.primary { background: #171716; color: #fff; border-color: #171716; }
     button.icon { width: 34px; padding: 0; display: grid; place-items: center; }
-    nav { display: flex; gap: 4px; padding: 10px 26px 0; background: rgba(255,253,248,.72); }
+    .menu-wrap { position: relative; }
+    .menu-popover { position: absolute; top: calc(100% + 8px); right: 0; width: 260px; max-height: 420px; overflow: auto; border: 1px solid var(--line); background: #fff; border-radius: 10px; box-shadow: var(--shadow); padding: 8px; z-index: 20; display: none; }
+    .menu-popover.open { display: block; }
+    .menu-item { width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 10px; border: 0; background: transparent; text-align: left; border-radius: 7px; padding: 9px 10px; font-weight: 650; }
+    .menu-item:hover { background: #f1eee8; }
+    .menu-title { color: var(--muted); font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; padding: 7px 10px 5px; }
+    .menu-activity { display: grid; gap: 0; margin-top: 4px; border-top: 1px solid var(--line); padding-top: 6px; }
+    .menu-activity-row { display: grid; gap: 2px; border-radius: 7px; padding: 7px 10px; font-size: 12px; color: var(--muted); }
+    .menu-activity-row strong { color: var(--fg); font-weight: 600; overflow-wrap: anywhere; }
+    .menu-version { display: flex; justify-content: space-between; gap: 10px; padding: 9px 10px; border-radius: 7px; color: var(--muted); font-size: 12px; font-weight: 700; }
+    .menu-version strong { color: var(--fg); }
+    nav { display: none; }
     nav button { border-color: transparent; background: transparent; color: var(--muted); min-height: 32px; }
     nav button.active { color: var(--fg); background: #e8e8e1; border-color: #d0d0c8; }
-    section { display: none; padding: 18px 26px 26px; overflow: auto; }
+    section { display: none; padding: 54px 46px 40px; overflow: auto; }
     section.active { display: block; }
-    .dashboard-intro { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 14px; align-items: stretch; margin-bottom: 22px; }
+    .dashboard-intro { position: fixed; top: 16px; right: 18px; z-index: 3; display: inline-flex; gap: 8px; align-items: center; }
     .hero-panel, .health-panel { border: 1px solid var(--line); background: rgba(255,253,248,.86); border-radius: 10px; padding: 16px; box-shadow: 0 1px 0 rgba(39,34,29,.03); }
     .hero-panel h2 { font-size: 22px; margin: 0 0 5px; letter-spacing: 0; }
     .hero-panel p, .health-panel p { margin: 0; color: var(--muted); font-size: 12px; }
-    .health-panel { display: grid; gap: 12px; }
+    .health-panel { display: grid; gap: 12px; max-width: 720px; }
     .health-head { display: flex; justify-content: space-between; align-items: start; gap: 12px; }
     .health-head strong { font-size: 13px; }
     .health-score { display: inline-flex; align-items: center; gap: 6px; color: var(--green); font-weight: 800; font-size: 12px; }
@@ -1618,10 +1770,17 @@ function statusHtml() {
     .health-stat { border: 1px solid var(--line); border-radius: 8px; padding: 9px; background: #fff; min-width: 0; }
     .health-stat span { display: block; color: var(--muted); font-size: 11px; margin-bottom: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .health-stat strong { display: block; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .services { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 24px 28px; align-items: start; }
-    .login-hero { min-height: 320px; display: grid; align-content: center; justify-content: center; }
-    .login-hero .login-form { width: min(460px, calc(100vw - 64px)); }
-    .login-hero .codex-card { width: min(460px, calc(100vw - 64px)); margin-top: 10px; }
+    .codex-mini { display: inline-flex; align-items: center; gap: 7px; min-height: 28px; border: 1px solid var(--line); border-radius: 999px; background: rgba(255,253,248,.82); padding: 4px 9px; color: var(--green); font-size: 12px; font-weight: 750; box-shadow: 0 1px 2px rgba(39,34,29,.04); backdrop-filter: blur(12px); }
+    .codex-mini.version { color: var(--muted); }
+    .codex-mini.version .dot { display: none; }
+    button.codex-mini { cursor: pointer; }
+    .codex-mini.warning { color: var(--amber); }
+    .codex-mini.error { color: var(--red); border-color: #efcbc4; background: rgba(255,247,245,.88); }
+    .codex-mini .dot { width: 8px; height: 8px; border-radius: 99px; background: currentColor; box-shadow: none; }
+    .services { min-height: calc(100vh - 94px); display: grid; grid-template-columns: repeat(3, 128px); gap: 38px 42px; align-content: center; justify-content: center; align-items: start; }
+    .login-hero { min-height: calc(100vh - 94px); display: grid; align-content: center; justify-content: center; }
+    .login-hero .login-form { width: min(380px, calc(100vw - 64px)); }
+    .login-hero .codex-card { display: none; }
     .codex-card { display: grid; grid-template-columns: 18px 1fr auto; gap: 12px; align-items: center; border: 1px solid var(--line); background: #fff; border-radius: 8px; padding: 12px; margin-bottom: 12px; }
     .codex-card .codex-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
     .codex-card.ready { border-color: #cfe6d7; background: #fbfffc; }
@@ -1629,19 +1788,22 @@ function statusHtml() {
     .codex-card.ready .dot { background: var(--green); box-shadow: 0 0 0 4px #e2f2e8; }
     .codex-card.missing .dot, .codex-card.login_required .dot, .codex-card.error .dot { background: var(--amber); box-shadow: 0 0 0 4px #f6eddc; }
     .codex-card code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--fg); background: #f0f0ea; padding: 2px 4px; border-radius: 4px; }
-    .app-card { appearance: none; border: 0; background: transparent; padding: 0; color: var(--fg); min-height: 0; display: grid; justify-items: center; gap: 10px; text-align: center; cursor: pointer; position: relative; }
+    .app-card { appearance: none; border: 0; background: transparent; padding: 0; color: var(--fg); min-height: 0; width: 128px; display: grid; justify-items: center; gap: 12px; text-align: center; cursor: pointer; position: relative; }
     .app-card:hover { text-decoration: none; }
     .app-card:disabled { cursor: progress; opacity: .72; }
-    .app-icon { width: 112px; height: 112px; border-radius: 8px; background: var(--panel); box-shadow: var(--shadow); display: grid; place-items: center; border: 1px solid rgba(228,222,211,.72); position: relative; transition: transform .12s ease, box-shadow .12s ease; }
+    .app-icon { width: 118px; height: 118px; border-radius: 8px; background: var(--panel); box-shadow: var(--shadow); display: grid; place-items: center; border: 1px solid rgba(228,222,211,.72); position: relative; transition: transform .12s ease, box-shadow .12s ease; }
     .app-card:hover .app-icon { transform: translateY(-2px); box-shadow: 0 22px 52px rgba(39,34,29,.14), 0 4px 12px rgba(39,34,29,.07); }
     .app-icon svg { width: 74px; height: 74px; display: block; }
     .app-card.active .app-icon::after, .app-card.reconnecting .app-icon::after { content:""; position:absolute; inset:auto 12px 10px; height:3px; border-radius:99px; background: linear-gradient(90deg, transparent, var(--blue), transparent); animation: move 1.15s linear infinite; }
     .app-card.codex_unready .app-icon, .app-card.cloud_stale .app-icon { border-color: #ead7bb; }
     .app-card.disconnected .app-icon, .app-card.site_unreachable .app-icon, .app-card.local_unavailable .app-icon { border-color: #efcbc4; }
+    .app-card.placeholder { cursor: default; opacity: .48; filter: grayscale(.12); }
+    .app-card.placeholder .app-icon { box-shadow: 0 10px 28px rgba(39,34,29,.07), 0 2px 6px rgba(39,34,29,.04); }
+    .app-card.placeholder:hover .app-icon { transform: none; box-shadow: 0 10px 28px rgba(39,34,29,.07), 0 2px 6px rgba(39,34,29,.04); }
     .app-label { display: grid; gap: 2px; width: 100%; min-width: 0; }
     .app-label strong { font-size: 16px; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .app-label span { color: var(--muted); font-size: 11px; text-transform: lowercase; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .app-badge { position: absolute; top: 8px; right: calc(50% - 54px); width: 12px; height: 12px; border-radius: 50%; background: var(--grey); border: 2px solid #fff; box-shadow: 0 1px 4px rgba(39,34,29,.20); }
+    .app-badge { display: none; }
     .connected .app-badge { background: var(--green); }
     .active .app-badge, .reconnecting .app-badge { background: var(--blue); }
     .codex_unready .app-badge, .cloud_stale .app-badge { background: var(--amber); }
@@ -1667,27 +1829,27 @@ function statusHtml() {
     .grid { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .panel { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 14px; }
     .panel h2 { font-size: 13px; margin: 0 0 10px; }
-    .login-form { display: grid; gap: 10px; margin-bottom: 12px; }
-    .login-form label { display: grid; gap: 5px; color: var(--muted); font-size: 12px; }
-    .login-form input { width: 100%; border: 1px solid var(--line); border-radius: 7px; min-height: 34px; padding: 7px 9px; font: inherit; color: var(--fg); background: #fff; }
-    .login-form details { border: 1px solid var(--line); border-radius: 7px; padding: 8px; display: grid; gap: 8px; }
+    .login-form { display: grid; gap: 12px; margin-bottom: 12px; border-radius: 14px; padding: 18px; box-shadow: var(--shadow); }
+    .login-form h2 { font-size: 24px; margin-bottom: 2px; }
+    .login-form label { display: grid; gap: 6px; color: var(--muted); font-size: 12px; font-weight: 650; }
+    .login-form input { width: 100%; border: 1px solid var(--line); border-radius: 8px; min-height: 40px; padding: 8px 10px; font: inherit; color: var(--fg); background: #fff; }
+    .login-form input:focus { outline: 3px solid rgba(201,100,66,.18); border-color: var(--rust); }
+    .login-form details { border: 1px solid var(--line); border-radius: 8px; padding: 9px; display: grid; gap: 8px; }
     .login-form summary { cursor: pointer; color: var(--muted); font-size: 12px; }
     .form-message { min-height: 18px; margin: 0; color: var(--red); font-size: 12px; }
     .kv { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 8px; color: var(--muted); font-size: 12px; }
     .kv strong { color: var(--fg); font-weight: 600; overflow-wrap: anywhere; }
-    .activity { display: grid; gap: 8px; }
-    .activity-row { display: grid; grid-template-columns: 82px 1fr; gap: 10px; border-bottom: 1px solid var(--line); padding: 8px 0; font-size: 12px; color: var(--muted); }
-    .activity-row strong { color: var(--fg); font-weight: 550; }
     .empty { color: var(--muted); font-size: 13px; padding: 18px 0; }
-    .error { color: var(--red); font-size: 12px; margin-top: 8px; }
+    .error { display: none; }
     @media (max-width: 760px) {
-      .dashboard-intro { grid-template-columns: 1fr; }
-      .services { grid-template-columns: repeat(auto-fill, minmax(108px, 1fr)); gap: 20px 18px; }
-      .app-icon { width: 94px; height: 94px; }
+      .services { grid-template-columns: repeat(3, 104px); gap: 28px 22px; padding-top: 8px; }
+      .app-card { width: 104px; }
+      .app-icon { width: 96px; height: 96px; }
       .app-icon svg { width: 64px; height: 64px; }
-      .app-label strong { font-size: 14px; }
-      header { padding-inline: 18px; }
-      nav, section { padding-inline: 18px; }
+      section { padding-inline: 20px; }
+    }
+    @media (max-width: 420px) {
+      .services { grid-template-columns: 104px; }
     }
   </style>
 </head>
@@ -1695,16 +1857,23 @@ function statusHtml() {
   <main>
     <header>
       <div class="brand">${bridgeLogoSvg("mark")}<div><h1>Bridge</h1><div class="subtitle" id="subtitle"></div></div></div>
-      <div class="top-actions"><span class="status-pill version" id="version-pill"></span><span class="status-pill" id="codex-pill"></span><button class="icon" id="sync" title="Synchroniser" aria-label="Synchroniser">R</button><button id="folder">Dossier</button></div>
+      <div class="top-actions">
+        <span class="status-pill version" id="version-pill"></span>
+        <span class="status-pill" id="codex-pill"></span>
+        <button class="icon" id="sync" title="Synchroniser" aria-label="Synchroniser">R</button>
+        <button id="folder">Dossier</button>
+        <div class="menu-wrap">
+          <button class="icon" id="menu-button" title="Menu" aria-label="Menu" aria-expanded="false">⋯</button>
+          <div class="menu-popover" id="menu-popover"></div>
+        </div>
+      </div>
     </header>
     <nav>
       <button data-tab="bridges" class="active">Apps</button>
       <button data-tab="identity">Identifiants</button>
-      <button data-tab="activity">Activité</button>
     </nav>
     <section id="bridges" class="active"><div id="dashboard-overview"></div><div class="services" id="services"></div><p class="error" id="error"></p></section>
     <section id="identity"><div id="login-panel"></div><div class="grid" id="identity-grid"></div></section>
-    <section id="activity"><div class="activity" id="activity-list"></div></section>
   </main>
   <script>
     let current = null;
@@ -1740,12 +1909,12 @@ function statusHtml() {
               ? "Reconnecter"
               : "Connecter";
         const actionAttr = status === "codex_unready" ? 'data-codex-setup="1"' : 'data-open="' + esc(service.serviceId) + '"';
-        return '<button class="app-card ' + esc(status) + '" ' + actionAttr + ' title="' + esc(actionLabel + " " + service.name) + '">' +
+        return '<button class="app-card ' + esc(status) + '" ' + actionAttr + ' title="' + esc(actionLabel + " " + service.name) + '" aria-label="' + esc(actionLabel + " " + service.name) + '">' +
           '<span class="app-badge" aria-hidden="true"></span>' +
           '<span class="app-icon" aria-hidden="true">' + appIcon(service) + '</span>' +
-          '<span class="app-label"><strong>' + esc(service.name) + '</strong><span>' + esc(labels[status] || status) + '</span></span>' +
+          '<span class="app-label"><strong>' + esc(service.name) + '</strong></span>' +
         '</button>';
-      }).join("") : '<p class="empty">Aucune app autorisée.</p>';
+      }).join("") + placeholderApps() : '<p class="empty">Aucune app autorisée.</p>';
         services.querySelectorAll("[data-open]").forEach(btn => {
           if (btn.dataset.bound === "1") return;
           btn.dataset.bound = "1";
@@ -1782,76 +1951,83 @@ function statusHtml() {
           ["Jobs actifs", String(state.activeJobs || 0)],
           ["Protocole", String(state.protocolVersion || 2)]
         ]) +
-        codexIdentityPanel(state.codex) +
-        (state.authenticated ? '<div class="panel"><h2>Session</h2><button id="signout">Déconnecter</button></div>' : "");
-      document.getElementById("signout")?.addEventListener("click", () => window.bridge.signOut());
+        codexIdentityPanel(state.codex);
       attachCodexActions(document);
-
-      const activity = state.activity || [];
-      document.getElementById("activity-list").innerHTML = activity.length ? activity.map(item =>
-        '<div class="activity-row"><span>' + new Date(item.ts).toLocaleTimeString("fr-FR") + '</span><strong>' + esc(item.message) + '</strong></div>'
-      ).join("") : '<p class="empty">Aucune activité récente.</p>';
+      renderMenu(state);
     }
     function dashboardOverview(state) {
-      const connected = state.services.filter(service => ["connected", "active", "reconnecting"].includes(service.status || "")).length;
-      const blocked = state.services.filter(service => ["disconnected", "site_unreachable", "local_unavailable", "codex_unready"].includes(service.status || "")).length;
       const codexState = state.codex?.state || "unknown";
       const codexOk = Boolean(state.codex?.ready);
-      return '<div class="dashboard-intro">' +
-        '<div class="hero-panel"><h2>Lancer une app</h2><p>' + esc(state.account?.organizationName || state.organizationId || "Bridge") + ' · ' + state.services.length + ' app(s) disponibles. Les tuiles ouvrent directement le module local ou reconnectent le service.</p></div>' +
-        '<div class="health-panel">' +
-          '<div class="health-head"><div><strong>Santé Codex</strong><p>' + esc(state.codex?.detail || "Statut Codex non vérifié.") + '</p></div><span class="health-score ' + (codexOk ? "" : "warning") + '">' + esc(codexLabels[codexState] || codexState) + '</span></div>' +
-          '<div class="health-grid">' +
-            healthStat("Apps prêtes", connected + "/" + state.services.length) +
-            healthStat("À revoir", String(blocked)) +
-            healthStat("Jobs", String(state.activeJobs || 0)) +
-          '</div>' +
-        '</div>' +
-      '</div>';
+      const tone = codexOk ? "" : (codexState === "error" || codexState === "missing" || codexState === "login_required" ? "error" : "warning");
+      const label = "Codex " + (codexLabels[codexState] || codexState);
+      if (codexOk) return '<div class="dashboard-intro"><span class="codex-mini" title="' + esc(state.codex?.detail || "Codex prêt.") + '"><span class="dot" aria-hidden="true"></span><span>' + esc(label) + '</span></span></div>';
+      return '<div class="dashboard-intro"><button class="codex-mini ' + tone + '" data-codex-setup="1" title="' + esc((state.codex?.detail || "Codex à reconnecter.") + " Cliquer pour reconnecter.") + '"><span class="dot" aria-hidden="true"></span><span>' + esc(label) + '</span></button></div>';
     }
     function healthStat(label, value) {
       return '<div class="health-stat"><span>' + esc(label) + '</span><strong>' + esc(value) + '</strong></div>';
+    }
+    function renderMenu(state) {
+      const activity = state.activity || [];
+      const activityHtml = activity.length ? activity.slice(0, 8).map(item =>
+        '<div class="menu-activity-row"><span>' + new Date(item.ts).toLocaleTimeString("fr-FR") + '</span><strong>' + esc(item.message) + '</strong></div>'
+      ).join("") : '<div class="menu-activity-row"><strong>Aucune activité récente.</strong></div>';
+      document.getElementById("menu-popover").innerHTML =
+        '<div class="menu-title">Bridge</div>' +
+        '<div class="menu-version"><span>Version installée</span><strong>v' + esc(state.version || "dev") + '</strong></div>' +
+        (state.update?.latestVersion && state.update.latestVersion !== state.version ? '<div class="menu-version"><span>Dernière version</span><strong>v' + esc(state.update.latestVersion) + '</strong></div>' : '') +
+        '<button class="menu-item" id="menu-sync">Synchroniser<span>R</span></button>' +
+        '<button class="menu-item" id="menu-folder">Dossier<span>↗</span></button>' +
+        (state.authenticated ? '<button class="menu-item" id="menu-signout">Déconnexion<span>⌫</span></button>' : '') +
+        '<div class="menu-activity"><div class="menu-title">Activité</div>' + activityHtml + '</div>';
+      document.getElementById("menu-sync")?.addEventListener("click", () => window.bridge.sync());
+      document.getElementById("menu-folder")?.addEventListener("click", () => window.bridge.revealDataDir());
+      document.getElementById("menu-signout")?.addEventListener("click", () => window.bridge.signOut());
     }
     function appIcon(service = {}) {
       const id = String(service.serviceId || service.slug || service.name || "").toLowerCase();
       const name = String(service.name || "App").toLowerCase();
       const key = id + " " + name;
-      if (key.includes("achat") || key.includes("purchase") || key.includes("supplier")) return iconPurchasing();
-      if (key.includes("crm") || key.includes("client") || key.includes("customer")) return iconCrm();
-      if (key.includes("dashboard") || key.includes("pilot")) return iconDashboard();
-      if (key.includes("doc") || key.includes("file")) return iconDocuments();
-      if (key.includes("vente") || key.includes("sale")) return iconSales();
-      if (key.includes("stock") || key.includes("invent")) return iconInventory();
-      if (key.includes("support") || key.includes("assist")) return iconSupport();
+      if (key.includes("achat") || key.includes("purchase") || key.includes("supplier")) return achatsLogoSvg();
       return iconGeneric(service.name || service.serviceId || "App");
+    }
+    function placeholderApps() {
+      const apps = [
+        { name: "Stock", key: "stock" },
+        { name: "Recrutement", key: "recruiting" },
+        { name: "CRM", key: "crm" },
+        { name: "Connaissance", key: "knowledge" },
+        { name: "Flotte", key: "fleet" },
+      ];
+      return apps.map(app =>
+        '<button class="app-card placeholder" disabled aria-label="' + esc(app.name + " indisponible") + '" title="' + esc(app.name + " indisponible") + '">' +
+          '<span class="app-icon" aria-hidden="true">' + placeholderIcon(app.key) + '</span>' +
+          '<span class="app-label"><strong>' + esc(app.name) + '</strong></span>' +
+        '</button>'
+      ).join("");
+    }
+    function placeholderIcon(key) {
+      if (key === "stock") return iconSvg('<path d="M48 16 76 32v32L48 80 20 64V32L48 16Z" fill="#F6F1E8"/><path d="M48 16 76 32 48 48 20 32 48 16Z" fill="#C96442"/><path d="M48 48v32L20 64V32l28 16Z" fill="#2A211B"/><path d="M48 48v32l28-16V32L48 48Z" fill="#2A211B" opacity=".72"/>');
+      if (key === "recruiting") return iconSvg('<circle cx="48" cy="31" r="14" fill="#2A211B"/><path d="M23 76c4-17 14-26 25-26s21 9 25 26" fill="#C96442"/><circle cx="25" cy="44" r="9" fill="#2A211B" opacity=".72"/><circle cx="72" cy="44" r="9" fill="#C96442" opacity=".72"/>');
+      if (key === "crm") return iconSvg('<path d="M22 36h40c9 0 16 7 16 16v4H38c-9 0-16-7-16-16v-4Z" fill="#C96442"/><path d="M54 36h20v18c0 8-6 14-14 14H40V50c0-8 6-14 14-14Z" fill="#2A211B"/><path d="M29 58 55 32" stroke="#F6F1E8" stroke-width="9" stroke-linecap="round" opacity=".9"/>');
+      if (key === "knowledge") return iconSvg('<path d="M26 22h28c9 0 16 7 16 16v36H34c-7 0-12-5-12-12V26c0-2 2-4 4-4Z" fill="#2A211B"/><path d="M34 30h26c6 0 10 4 10 10v34H40c-6 0-10-4-10-10V34c0-2 2-4 4-4Z" fill="#C96442"/><path d="M40 43h18M40 55h22" stroke="#F6F1E8" stroke-width="5" stroke-linecap="round"/>');
+      if (key === "fleet") return iconSvg('<path d="M18 56 35 36h29l14 20v12H18V56Z" fill="#C96442"/><path d="M36 36h18l8 20H26l10-20Z" fill="#2A211B"/><circle cx="34" cy="70" r="8" fill="#2A211B"/><circle cx="66" cy="70" r="8" fill="#2A211B"/><path d="M22 56h54" stroke="#F6F1E8" stroke-width="5" stroke-linecap="round" opacity=".72"/>');
+      return iconGeneric("A");
     }
     function iconSvg(body) {
       return '<svg viewBox="0 0 96 96" xmlns="http://www.w3.org/2000/svg">' + body + '</svg>';
     }
-    function iconPurchasing() {
-      return iconSvg('<rect x="20" y="32" width="56" height="32" rx="7" fill="#9b5a87"/><path d="M20 32h56v10c0 6-5 11-11 11H31c-6 0-11-5-11-11V32Z" fill="#2fb9a8"/><path d="M20 53h56v11H20z" fill="#27221d" opacity=".22"/>');
-    }
-    function iconCrm() {
-      return iconSvg('<path d="M22 36h40c9 0 16 7 16 16v4H38c-9 0-16-7-16-16v-4Z" fill="#2fb9a8"/><path d="M54 36h20v18c0 8-6 14-14 14H40V50c0-8 6-14 14-14Z" fill="#9b5a87" opacity=".92"/><path d="M29 58 55 32" stroke="#27221d" stroke-width="9" stroke-linecap="round" opacity=".82"/>');
-    }
-    function iconDashboard() {
-      return iconSvg('<rect x="18" y="24" width="24" height="24" rx="5" fill="#9b5a87"/><rect x="52" y="24" width="26" height="14" rx="5" fill="#fb8a7d"/><rect x="18" y="58" width="22" height="18" rx="5" fill="#2b9fe8"/><rect x="48" y="50" width="12" height="26" rx="4" fill="#2fb9a8"/><rect x="66" y="50" width="12" height="26" rx="4" fill="#1e8f56"/>');
-    }
-    function iconDocuments() {
-      return iconSvg('<rect x="20" y="26" width="30" height="44" rx="7" fill="#2b9fe8"/><rect x="36" y="30" width="30" height="44" rx="7" fill="#c96442" opacity=".9" transform="rotate(8 51 52)"/><rect x="50" y="38" width="28" height="38" rx="7" fill="#f6b74b" transform="rotate(38 64 57)"/><path d="M43 31 31 68" stroke="#27221d" stroke-width="12" stroke-linecap="round" opacity=".54"/>');
-    }
-    function iconSales() {
-      return iconSvg('<rect x="24" y="54" width="16" height="24" rx="4" fill="#9b5a87"/><rect x="42" y="42" width="16" height="36" rx="4" fill="#c96442"/><rect x="60" y="24" width="16" height="54" rx="4" fill="#f6b74b"/><path d="M24 78h52" stroke="#27221d" stroke-width="5" stroke-linecap="round" opacity=".28"/>');
-    }
-    function iconInventory() {
-      return iconSvg('<path d="M48 16 76 32v32L48 80 20 64V32L48 16Z" fill="#f6b74b"/><path d="M48 16 76 32 48 48 20 32 48 16Z" fill="#ff8a3d"/><path d="M48 48v32L20 64V32l28 16Z" fill="#c96442"/><path d="M48 48v32l28-16V32L48 48Z" fill="#9b5a87"/>');
-    }
-    function iconSupport() {
-      return iconSvg('<rect x="28" y="22" width="40" height="52" rx="14" fill="#2fb9a8"/><rect x="46" y="22" width="22" height="52" rx="10" fill="#1d6f62"/><path d="M20 48h56M48 20v56" stroke="#fffdf8" stroke-width="11" stroke-linecap="round"/><path d="M20 48h56M48 20v56" stroke="#27221d" stroke-width="5" stroke-linecap="round" opacity=".14"/>');
+    function achatsLogoSvg() {
+      return '<svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Purchasing module">' +
+        '<rect width="1024" height="1024" rx="224" fill="#F6F1E8"/>' +
+        '<path d="M306 626V398c0-34 27-61 61-61h36c34 0 61 27 61 61v228c0 34-27 61-61 61h-36c-34 0-61-27-61-61Z" fill="#2A211B"/>' +
+        '<path d="M560 626V506c0-34 27-61 61-61h36c34 0 61 27 61 61v120c0 34-27 61-61 61h-36c-34 0-61-27-61-61Z" fill="#C96442"/>' +
+        '<path d="M300 754h424" stroke="#2A211B" stroke-width="52" stroke-linecap="round"/>' +
+        '<path d="m688 718 52 36-52 36" fill="none" stroke="#2A211B" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/>' +
+      '</svg>';
     }
     function iconGeneric(label) {
       const initial = esc(String(label || "A").trim().slice(0, 1).toUpperCase() || "A");
-      return iconSvg('<rect x="20" y="20" width="56" height="56" rx="16" fill="#fffdf8" stroke="#d8d3c8" stroke-width="2"/><circle cx="34" cy="36" r="12" fill="#f6b74b"/><path d="M29 64 64 29" stroke="#9b5a87" stroke-width="13" stroke-linecap="round"/><circle cx="62" cy="60" r="12" fill="#2fb9a8"/><text x="48" y="57" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="24" font-weight="800" fill="#27221d" opacity=".88">' + initial + '</text>');
+      return iconSvg('<rect x="20" y="20" width="56" height="56" rx="16" fill="#F6F1E8" stroke="#d8d3c8" stroke-width="2"/><circle cx="34" cy="36" r="12" fill="#C96442"/><path d="M29 64 64 29" stroke="#2A211B" stroke-width="13" stroke-linecap="round"/><circle cx="62" cy="60" r="12" fill="#C96442"/><text x="48" y="57" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="24" font-weight="800" fill="#F6F1E8" opacity=".92">' + initial + '</text>');
     }
     function codexCard(codex = {}) {
       const state = codex.state || "unknown";
@@ -1948,8 +2124,8 @@ function statusHtml() {
     function loginForm(suffix, state, draft = {}) {
       const url = draft.controlPlaneBaseUrl || state.controlPlaneBaseUrl || "";
       return '<form id="login-form-' + esc(suffix) + '" class="panel login-form">' +
-        '<h2>Compte Bridge</h2>' +
-        '<label>URL Bridge entreprise<input name="controlPlaneBaseUrl" type="url" value="' + esc(url) + '" placeholder="https://rossinienergy.yaka-bridge.com" required /></label>' +
+        '<h2>Connexion Bridge</h2>' +
+        '<label>Site<input name="controlPlaneBaseUrl" type="text" inputmode="url" value="' + esc(url.replace(/^https?:\\/\\//, "")) + '" placeholder="erp.customer.example" required /></label>' +
         '<label>Email<input name="email" type="email" value="' + esc(draft.email || "") + '" autocomplete="username" required /></label>' +
         '<label>Mot de passe<input name="password" type="password" value="' + esc(draft.password || "") + '" autocomplete="current-password" required /></label>' +
         '<details><summary>Configuration avancée</summary>' +
@@ -1987,6 +2163,19 @@ function statusHtml() {
     }));
     document.getElementById("sync").addEventListener("click", () => window.bridge.sync());
     document.getElementById("folder").addEventListener("click", () => window.bridge.revealDataDir());
+    document.getElementById("menu-button").addEventListener("click", (event) => {
+      event.stopPropagation();
+      const popover = document.getElementById("menu-popover");
+      const open = !popover.classList.contains("open");
+      popover.classList.toggle("open", open);
+      document.getElementById("menu-button").setAttribute("aria-expanded", String(open));
+    });
+    document.addEventListener("click", (event) => {
+      const wrap = document.querySelector(".menu-wrap");
+      if (wrap?.contains(event.target)) return;
+      document.getElementById("menu-popover").classList.remove("open");
+      document.getElementById("menu-button").setAttribute("aria-expanded", "false");
+    });
     window.bridge.onStatus(render);
     window.bridge.getStatus().then(render);
   </script>
@@ -1995,8 +2184,9 @@ function statusHtml() {
 }
 
 function cleanExternalUrl(value) {
-  const raw = String(value || "").trim().replace(/\/+$/, "");
+  let raw = String(value || "").trim().replace(/\/+$/, "");
   if (!raw) return null;
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(raw)) raw = `https://${raw}`;
   try {
     const url = new URL(raw);
     const localHttp = url.protocol === "http:" && (url.hostname === "localhost" || url.hostname === "127.0.0.1");

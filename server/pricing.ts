@@ -6,9 +6,9 @@
  * La grille est externalisée dans `data/.claude/pricing.json` (modifiable à
  * chaud, mis à jour par le bouton "Actualiser les tarifs" qui lance un run
  * Claude avec WebFetch sur la doc Anthropic). Si le JSON est absent ou
- * corrompu, on fallback sur la grille en dur ci-dessous (mai 2026).
+ * corrompu, le daemon utilise la grille de référence ci-dessous (mai 2026).
  *
- * Modèles inconnus -> fallback Sonnet (par sécurité, plutôt sous-estimer un
+ * Modèles inconnus -> tarif Sonnet de référence (par sécurité, plutôt sous-estimer un
  * peu Opus que sur-estimer Haiku).
  */
 import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync } from "node:fs";
@@ -33,7 +33,7 @@ export interface ModelTariff {
 }
 
 /**
- * Grille tarifaire en dur (fallback). Mai 2026.
+ * Grille tarifaire de référence. Mai 2026.
  * Référence : https://docs.claude.com/en/docs/about-claude/pricing
  * Mise à jour via l'agent /api/pricing/refresh (qui écrase data/.claude/pricing.json).
  */
@@ -97,7 +97,7 @@ function loadPricing(): Record<string, ModelTariff> {
       return _cached.tariffs;
     }
   } catch {
-    // fallback silencieux
+    // La grille de référence reste disponible si le fichier local est invalide.
   }
   return DEFAULT_TARIFFS;
 }
@@ -142,7 +142,7 @@ export const MODEL_TARIFFS: Record<string, ModelTariff> = new Proxy({} as Record
   },
 });
 
-function getFallback(): ModelTariff {
+function getDefaultTariff(): ModelTariff {
   return loadPricing()["claude-sonnet-4-6"] ?? DEFAULT_TARIFFS["claude-sonnet-4-6"];
 }
 
@@ -165,7 +165,7 @@ function normalizeModel(model: string | undefined | null, tariffs: Record<string
 export function tariffFor(model: string | undefined | null): ModelTariff {
   const tariffs = loadPricing();
   const norm = normalizeModel(model, tariffs);
-  return tariffs[norm] ?? getFallback();
+  return tariffs[norm] ?? getDefaultTariff();
 }
 
 export interface UsageTotals {

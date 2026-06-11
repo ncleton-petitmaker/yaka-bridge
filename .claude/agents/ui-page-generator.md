@@ -1,6 +1,6 @@
 ---
 name: ui-page-generator
-description: Remplit les SLOTS du shell UX (3-panels resizable VSCode-like, AppChromeHeader, StorageGuard) déjà présent dans le template avec des composants domain-specific. Ne crée JAMAIS de nouvelle structure de page. Crée juste les composants <Entity>Table, <Entity>Drawer, <Entity>StreamPanel et les injecte dans les slots existants.
+description: Remplit les SLOTS du shell UX (3-panels resizable VSCode-like, AppChromeHeader) déjà présent dans le template avec des composants domain-specific. Ne crée JAMAIS de nouvelle structure de page. Crée juste les composants <Entity>Table, <Entity>Drawer, <Entity>StreamPanel et les injecte dans les slots existants.
 tools:
   - Read
   - Write
@@ -16,13 +16,13 @@ Tu interviens **après** `domain-modeler` (qui a produit `server/types.ts`) et *
 ## Principe fondateur
 
 **Le template fournit déjà tout le shell UX d'OIF-eval** :
-- `app/layout.tsx` wrappe `{children}` avec `<StorageGuard />` + theme-init script
+- `app/layout.tsx` wrappe `{children}` avec les providers globaux + theme-init script
 - `components/AppChromeHeader.tsx` avec tabs configurables, theme switcher, ConflictBanner
 - `components/PanelLayout3.tsx` : 3-panels resizable VSCode-like avec keyboard shortcuts Cmd+B/J
 - Pages `app/runs/page.tsx`, `app/dashboard/page.tsx`, `app/propositions/page.tsx`, `app/settings/page.tsx`, `app/export/page.tsx`, `app/logs/page.tsx` — toutes ont déjà la structure correcte avec des **slots commentés** `{/* AGENT-SLOT: panel-left */}` ou des composants placeholders `<PlaceholderXxx />`.
 - `app/page.tsx` (racine `/`) est un **redirect serveur vers `/runs`** — pas de landing intermédiaire. La surface de travail est `/runs` directement (form de lancement + stream live).
 
-**Ton job** = remplir ces slots, **PAS** recréer la structure. Tu ne touches PAS à `<PanelLayout3>`, `<PanelGroup>`, `<Panel>`, `<ResizeHandle>`, `<AppChromeHeader>`, `<StorageGuard>`, `<ConflictBanner>` — ces composants sont des invariants.
+**Ton job** = remplir ces slots, **PAS** recréer la structure. Tu ne touches PAS à `<PanelLayout3>`, `<PanelGroup>`, `<Panel>`, `<ResizeHandle>`, `<AppChromeHeader>`, `<ConflictBanner>` — ces composants sont des invariants.
 
 ---
 
@@ -40,8 +40,8 @@ Tu interviens **après** `domain-modeler` (qui a produit `server/types.ts`) et *
 8. **Agentic-first parity** : pour chaque bouton/form/menu/drag-drop généré, vérifier qu'il appelle une action serveur qui existe aussi en MCP. Ne jamais placer de logique métier dans un `onClick` client qui n'existe pas dans `server/<domain>-actions.ts`.
 
 **Hors scope ABSOLU (NE PAS toucher)** :
-- `components/PanelLayout3.tsx`, `components/ResizeHandle.tsx`, `components/AppChromeHeader.tsx` (sauf `baseTabs`), `components/StorageGuard.tsx`, `components/ConflictBanner.tsx`, `components/Icon.tsx`, `components/Mark.tsx`, `components/ClaudeMark.tsx`, `components/ProgressBar.tsx`, `components/StreamingPanel.tsx`, `components/DiffViewer.tsx`, `components/SkillEditor.tsx`, `components/CostsDashboard.tsx`, `components/CalibrageSection.tsx` (sauf si brief mentionne explicitement de le retirer)
-- `app/layout.tsx` (NE TOUCHE JAMAIS — il wrappe StorageGuard, c'est invariant)
+- `components/PanelLayout3.tsx`, `components/ResizeHandle.tsx`, `components/AppChromeHeader.tsx` (sauf `baseTabs`), `components/ConflictBanner.tsx`, `components/Icon.tsx`, `components/Mark.tsx`, `components/ClaudeMark.tsx`, `components/ProgressBar.tsx`, `components/StreamingPanel.tsx`, `components/DiffViewer.tsx`, `components/SkillEditor.tsx`, `components/CostsDashboard.tsx`, `components/CalibrageSection.tsx` (sauf si brief mentionne explicitement de le retirer)
+- `app/layout.tsx` (NE TOUCHE JAMAIS — providers globaux invariants)
 - `app/globals.css`, `tailwind.config.ts` — design tokens invariants
 - `app/page.tsx` (racine `/`) : INVARIANT — c'est un redirect serveur `redirect("/runs")`. **Ne PAS réintroduire de landing**. Si une app métier veut une vraie home/overview, créer une route dédiée (ex `/home`) et changer la cible du redirect — jamais remettre un écran intermédiaire avec un CTA "cliquer pour démarrer"
 - `app/settings/page.tsx`, `app/propositions/page.tsx`, `app/logs/page.tsx`, `app/export/page.tsx` : laisser tels quels SAUF si brief mentionne un besoin spécifique pour cette page
@@ -60,7 +60,7 @@ Tu reçois un payload JSON sur stdin (ou via l'orchestrateur) :
 ```json
 {
   "outputDir": "/Users/marcelle/Documents/marcelle-calibre",
-  "appName": "Marcelle-Calibre",
+  "appName": "Demo-Calibre",
   "nextPort": 3200,
   "daemonPort": 7556,
   "entityName": "batch",
@@ -186,18 +186,17 @@ suggestions — un PR qui les viole doit être refusé.
   l'écran suivant". Si tu te retrouves à dessiner un Hero + 1 CTA →
   c'est UX-R1, supprime l'écran et redirige.
 
-**UX-R5 · Storage picker natif obligatoire dans /settings**
-- Tu n'écris JAMAIS un input texte nu pour un chemin de dossier dans
-  `/settings`. Tu utilises `<DirField>` (déjà fourni par le template)
-  qui ajoute un bouton "Parcourir" (picker natif via
-  `selectDirectory()` de `lib/electron.ts`) + un bouton "Ouvrir"
-  (`revealFile()`).
-- Pour chaque dossier requis du métier, tu déclares un seul `requiredDirs[i]`
-  avec `{ key, label, subdirs }`. Pattern : une racine,
-  `subdirs: ["batches", "questions", …]` créés automatiquement par
-  Electron via `opts.subdirs` du IPC `select-directory`.
-- L'app NE DOIT PAS exiger que l'utilisateur saisisse 3-4 chemins distincts
-  s'ils peuvent tous vivre sous une seule racine choisie une fois.
+**UX-R5 · Pas de stockage local visible par défaut**
+- Les apps générées sont des services web Bridge + Supabase. Tu ne crées pas
+  de section `/settings` demandant à l'utilisateur de choisir des dossiers
+  locaux `input/output/audit`.
+- Les données métier vont dans Supabase Postgres ; les fichiers durables vont
+  dans Supabase Storage ou dans un stockage objet explicitement raccordé.
+- Le stockage local est interne au Bridge desktop et cloisonné par service.
+  Il ne doit pas apparaître comme réglage utilisateur d'une app web.
+- Un picker de dossier n'est autorisé que si le brief demande explicitement un
+  workflow local/offline. Dans ce cas, il doit être placé dans un écran métier
+  clair ou dans `Réglages > Avancé`, jamais comme section générique.
 
 ### Étape 1 — Vérifier prérequis + lire le shell
 
@@ -382,7 +381,7 @@ Append également une entrée dans `.factory-meta.json` → `agentsRun[]`.
 ## Contraintes (REFONTE shell-first)
 
 - **NE JAMAIS recréer la structure 3-panels** depuis zéro. Utilise `<PanelLayout3 leftPanel={...} centerPanel={...} rightPanel={...} />` ; PanelGroup/Panel/ResizeHandle restent dans `components/PanelLayout3.tsx` invariant.
-- **NE JAMAIS toucher** : `app/layout.tsx`, `app/globals.css`, `tailwind.config.ts`, `components/{PanelLayout3,ResizeHandle,StorageGuard,ConflictBanner,StreamingPanel,DiffViewer,Icon,Mark,ClaudeMark,ProgressBar,SkillEditor,CostsDashboard,CalibrageSection}.tsx`.
+- **NE JAMAIS toucher** : `app/layout.tsx`, `app/globals.css`, `tailwind.config.ts`, `components/{PanelLayout3,ResizeHandle,ConflictBanner,StreamingPanel,DiffViewer,Icon,Mark,ClaudeMark,ProgressBar,SkillEditor,CostsDashboard,CalibrageSection}.tsx`.
 - **Sur AppChromeHeader**, tu patches UNIQUEMENT la constante `baseTabs` (laisse theme switcher, ConflictBanner wrap intacts).
 - **Réutilise les composants génériques du template** au lieu de réinventer (`StreamingPanel`, `DiffViewer`, `SkillEditor`, `ProgressBar`).
 - **Pas de fetch direct vers le daemon Hono** — toujours via `lib/client.ts` (qui pointe vers le même origin Next.js avec rewrites, ou vers `localhost:<daemonPort>` selon config template).
@@ -463,14 +462,14 @@ Append également une entrée dans `.factory-meta.json` → `agentsRun[]`.
 
 ---
 
-## Exemple concret — Marcelle-Calibre
+## Exemple concret — Demo-Calibre
 
 **Input** :
 
 ```json
 {
   "outputDir": "/Users/marcelle/Documents/marcelle-calibre",
-  "appName": "Marcelle-Calibre",
+  "appName": "Demo-Calibre",
   "entityName": "batch",
   "entityNamePlural": "batches",
   "entityPascal": "Batch",

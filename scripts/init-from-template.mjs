@@ -5,11 +5,11 @@
  *
  * Usage :
  *   node scripts/init-from-template.mjs \
- *     --app-name "Marcelle-Calibre" \
- *     --app-id "fr.petitmaker.marcelle-calibre" \
+ *     --app-name "Demo-Calibre" \
+ *     --app-id "com.example.demo-erp" \
  *     --next-port 3200 \
  *     --daemon-port 7556 \
- *     --data-dir "Marcelle-Calibre" \
+ *     --data-dir "Demo-Calibre" \
  *     --entity-name "batch" \
  *     --entity-name-plural "batches" \
  *     --domain-brief "Calibre Marcelle…"
@@ -150,6 +150,9 @@ function applyComputed(values, config) {
       case "upper-snake-case":
         values[c.key] = toUpperSnakeCase(src);
         break;
+      case "lower-case":
+        values[c.key] = String(src).toLowerCase();
+        break;
       default:
         if (c.transform?.startsWith("suffix:")) {
           values[c.key] = src + c.transform.slice("suffix:".length);
@@ -207,6 +210,19 @@ function applyReplacements(content, values) {
     const token = `{{${key}}}`;
     while (out.includes(token)) {
       out = out.replace(token, val);
+      count++;
+    }
+  }
+  const demoRuntimeDefaults = {
+    "Bridge ERP Demo": values.APP_NAME,
+    "bridge-erp-demo": values.APP_NAME_KEBAB,
+    "Template ERP modulaire cloud/bridge": values.DOMAIN_BRIEF,
+  };
+  for (const [current, next] of Object.entries(demoRuntimeDefaults)) {
+    if (!next) continue;
+    if (current === String(next)) continue;
+    while (out.includes(current)) {
+      out = out.replace(current, String(next));
       count++;
     }
   }

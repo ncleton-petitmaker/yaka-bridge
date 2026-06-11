@@ -30,8 +30,11 @@ function toolNameForAction(actionId: string): string {
   return actionId.replace(/\./g, "__");
 }
 
+const TOOL_PREFIX = "{{APP_NAME_SNAKE}}__";
+
 function actionIdFromToolName(name: string): string | null {
-  const normalized = name.replace(/^prix[-_]achats[-_]be__/, "").replace(/^bridge__/, "");
+  const normalized = (name.startsWith(TOOL_PREFIX) ? name.slice(TOOL_PREFIX.length) : name)
+    .replace(/^bridge__/, "");
   return normalized.replace(/__/g, ".");
 }
 

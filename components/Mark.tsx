@@ -24,12 +24,12 @@ export function Mark({ size = 22, className }: { size?: number; className?: stri
         flexShrink: 0,
         overflow: "hidden",
       }}
-      aria-label="{{APP_NAME}}"
+      aria-label="Bridge ERP Template"
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src="/app-mark.svg"
-        alt="{{APP_NAME}}"
+        alt="Bridge ERP Template"
         style={{
           width: "100%",
           height: "100%",

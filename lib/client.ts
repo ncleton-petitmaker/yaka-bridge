@@ -9,7 +9,7 @@
  */
 import { parseSseFrame as _parseSseFrame } from "./sse";
 void _parseSseFrame; // exporté plus loin pour les apps qui l'utilisent
-import { apiDaemonUrl, apiFetch } from "./api-client";
+import { apiDaemonUrl, apiFetch, withDaemonToken } from "./api-client";
 import type {
   AgentEvent,
   RunRecord,
@@ -103,7 +103,9 @@ export function streamRun(
   handlers: RunStreamHandlers
 ): Promise<void> {
   return new Promise((resolve, reject) => {
-    const url = apiDaemonUrl(`/api/runs/${encodeURIComponent(runId)}/events`);
+    const url = withDaemonToken(
+      apiDaemonUrl(`/api/runs/${encodeURIComponent(runId)}/events`)
+    );
     const es = new EventSource(url);
     let ended = false;
 

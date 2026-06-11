@@ -11,6 +11,9 @@ next-env.d.ts
 # Production
 build/
 dist/
+electron-main.cjs
+mcp.cjs
+runtime.cjs
 
 # Viewer PDF.js téléchargé au build (cf. scripts/vendor-pdfjs.mjs)
 vendor/pdfjs/
@@ -36,6 +39,8 @@ brief.generated.md
 *.sqlite-wal
 *.sqlite-shm
 .cache/
+supabase/.temp/
+supabase/.branches/
 
 # Env
 .env

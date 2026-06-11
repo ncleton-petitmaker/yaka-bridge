@@ -1,6 +1,5 @@
 import { z } from "zod";
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
 import { findClaudeBin } from "./agents.js";
 import { getAgentStatus } from "./agents-status.js";
 import {
@@ -17,6 +16,7 @@ import {
   type AuditEventInput,
 } from "./audit-log.js";
 import { getPricingMetadata } from "./pricing.js";
+import { allowedRunRoots, assertInsideRoots } from "./path-guard.js";
 import {
   attachListener,
   cancelRun,
@@ -30,12 +30,17 @@ import {
   listPersoSkills,
   writeGlobalSkill,
 } from "./skills.js";
-import { getSupabasePublicConfig } from "./supabase.js";
+import { getSupabasePublicConfig, getSupabaseServerClient } from "./supabase.js";
+import type { BridgeEntitlement, BridgeRole } from "./authz.js";
 
 export interface ActionContext {
   dataDir: string;
   actorId?: string;
   actorRole?: string;
+  userId?: string;
+  organizationId?: string;
+  membershipRole?: BridgeRole;
+  entitlements?: BridgeEntitlement[];
   clientIp?: string;
   appVersion?: string;
   signal?: AbortSignal;
@@ -53,6 +58,8 @@ export interface AppAction<I = unknown, O = unknown> {
   description: string;
   inputSchema: z.ZodType<I>;
   inputJsonSchema: Record<string, unknown>;
+  requiredServiceScopes?: Array<{ serviceId: string; scopes: string[] }>;
+  requiredAnyScopes?: string[];
   audit?: ActionAuditSpec;
   handler(ctx: ActionContext, input: I): Promise<O> | O;
 }
@@ -79,7 +86,7 @@ function audit(ctx: ActionContext, spec: ActionAuditSpec, result: "success" | "f
       resource_type: spec.resourceType,
       resource_id: resourceId,
       result,
-      app_version: ctx.appVersion ?? process.env["{{APP_NAME_KEBAB_UPPER}}_APP_VERSION"] ?? "{{VERSION}}",
+      app_version: ctx.appVersion ?? process.env["{{APP_NAME_KEBAB_UPPER}}_APP_VERSION"] ?? "0.0.1",
       client_ip: ctx.clientIp ?? "mcp/local",
       metadata,
     };
@@ -113,17 +120,38 @@ const UpdateAppConfigSchema = z.object({
   outputDir: z.string().optional(),
   auditLogDir: z.string().optional(),
   maxConcurrentRuns: z.number().int().min(1).max(50).optional(),
-  requiredDirs: z.array(z.object({
-    key: z.string(),
-    label: z.string(),
-    subdirs: z.array(z.string()).optional(),
-  })).optional(),
+  automations: z.object({
+    gmailSupplierInvoices: z.object({
+      enabled: z.boolean().optional(),
+      periodStart: z.string().optional(),
+      periodEnd: z.string().optional(),
+      supplierTypes: z.array(z.string()).optional(),
+      excludedSupplierTypes: z.array(z.string()).optional(),
+      gmailQuery: z.string().optional(),
+      pennylaneMcpServer: z.string().optional(),
+      schedule: z.enum(["manual", "daily", "weekly", "monthly"]).optional(),
+    }).strict().optional(),
+  }).strict().optional(),
 }).strict();
 
 const ListSkillsSchema = z.object({ user: z.string().optional() }).strict();
 const WriteSkillSchema = z.object({ slug: z.string().min(1), raw: z.string().min(1) }).strict();
 const AuditReadSchema = z.object({ since: z.string().optional(), user: z.string().optional(), limit: z.number().int().min(1).max(5000).optional() }).strict();
 const AuditStatsSchema = z.object({ windowDays: z.number().int().min(1).max(365).optional() }).strict();
+const PurchasingQuoteImportSchema = z.object({
+  supplierName: z.string().min(1),
+  supplierExternalRef: z.string().min(1).optional(),
+  title: z.string().min(1),
+  amount: z.number().nonnegative().optional(),
+  currency: z.string().min(3).max(3).optional(),
+  riskLevel: z.enum(["unknown", "low", "medium", "high"]).optional(),
+}).strict();
+const PurchasingQuoteAnalyzeSchema = z.object({
+  quoteIds: z.array(z.string().uuid()).optional(),
+}).strict();
+
+type PurchasingQuoteImportInput = z.infer<typeof PurchasingQuoteImportSchema>;
+type PurchasingQuoteAnalyzeInput = z.infer<typeof PurchasingQuoteAnalyzeSchema>;
 
 export const appActions = {
   "health.get": {
@@ -134,7 +162,7 @@ export const appActions = {
     handler: (ctx: ActionContext) => ({
       ok: true,
       ts: new Date().toISOString(),
-      version: ctx.appVersion ?? process.env["{{APP_NAME_KEBAB_UPPER}}_APP_VERSION"] ?? "{{VERSION}}",
+      version: ctx.appVersion ?? process.env["{{APP_NAME_KEBAB_UPPER}}_APP_VERSION"] ?? "0.0.1",
       claude: findClaudeBin(),
       dataDir: ctx.dataDir,
       dataDirExists: existsSync(ctx.dataDir),
@@ -173,7 +201,24 @@ export const appActions = {
       outputDir: { type: "string" },
       auditLogDir: { type: "string" },
       maxConcurrentRuns: { type: "number" },
-      requiredDirs: { type: "array", items: { type: "object" } },
+      automations: {
+        type: "object",
+        properties: {
+          gmailSupplierInvoices: {
+            type: "object",
+            properties: {
+              enabled: { type: "boolean" },
+              periodStart: { type: "string" },
+              periodEnd: { type: "string" },
+              supplierTypes: { type: "array", items: { type: "string" } },
+              excludedSupplierTypes: { type: "array", items: { type: "string" } },
+              gmailQuery: { type: "string" },
+              pennylaneMcpServer: { type: "string" },
+              schedule: { type: "string", enum: ["manual", "daily", "weekly", "monthly"] },
+            },
+          },
+        },
+      },
     }),
     audit: { action: "app-config.update", resourceType: "app-config" },
     handler: (ctx: ActionContext, input: Partial<AppConfig>) => {
@@ -194,16 +239,19 @@ export const appActions = {
       maxTurns: { type: "number" },
       cwd: { type: "string" },
     }, ["prompt"]),
+    requiredAnyScopes: ["codex:run"],
     audit: { action: "run.start", resourceType: "run" },
     handler: (ctx: ActionContext, input: StartRunInput) => {
       const cfg = loadAppConfig(ctx.dataDir);
-      const cwd = input.cwd ? resolve(input.cwd) : ctx.dataDir;
+      const roots = allowedRunRoots(ctx.dataDir, cfg);
+      const cwd = input.cwd ? assertInsideRoots(input.cwd, roots, input.cwd) : ctx.dataDir;
+      const addDirs = input.addDirs?.map((dir) => assertInsideRoots(dir, roots, dir));
       const run = startRun({
         prompt: input.prompt,
         cwd,
         tag: input.tag,
         model: input.model ?? cfg.model,
-        addDirs: input.addDirs,
+        addDirs,
         allowedTools: input.allowedTools,
         maxTurns: input.maxTurns,
       });
@@ -240,6 +288,92 @@ export const appActions = {
     handler: (_ctx: ActionContext, input: { id: string }) => {
       cancelRun(input.id);
       return { ok: true, id: input.id };
+    },
+  },
+  "purchasing.quote.import": {
+    id: "purchasing.quote.import",
+    description: "Import or update a supplier quote in the generic purchasing module.",
+    inputSchema: PurchasingQuoteImportSchema,
+    inputJsonSchema: objectSchema({
+      supplierName: { type: "string" },
+      supplierExternalRef: { type: "string" },
+      title: { type: "string" },
+      amount: { type: "number" },
+      currency: { type: "string" },
+      riskLevel: { type: "string", enum: ["unknown", "low", "medium", "high"] },
+    }, ["supplierName", "title"]),
+    requiredServiceScopes: [{ serviceId: "purchasing", scopes: ["service:purchasing:write"] }],
+    audit: { action: "purchasing.quote.import", resourceType: "purchasing_quote" },
+    handler: async (ctx: ActionContext, input: PurchasingQuoteImportInput) => {
+      const organizationId = requireActionOrganization(ctx);
+      const supabase = getSupabaseServerClient(ctx.dataDir);
+      const supplierRef = input.supplierExternalRef ?? `supplier:${input.supplierName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+      const { data: supplier, error: supplierError } = await supabase
+        .from("purchasing_suppliers")
+        .upsert({
+          organization_id: organizationId,
+          external_ref: supplierRef,
+          name: input.supplierName,
+          created_by: ctx.userId ?? null,
+          updated_by: ctx.userId ?? null,
+        }, { onConflict: "organization_id,external_ref" })
+        .select("id")
+        .single();
+      if (supplierError) throw supplierError;
+      const quoteRef = `quote:${supplierRef}:${input.title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+      const { data: quote, error: quoteError } = await supabase
+        .from("purchasing_quotes")
+        .upsert({
+          organization_id: organizationId,
+          supplier_id: supplier.id,
+          external_ref: quoteRef,
+          title: input.title,
+          amount: input.amount,
+          currency: input.currency ?? "EUR",
+          status: "under_review",
+          risk_level: input.riskLevel ?? "unknown",
+          created_by: ctx.userId ?? null,
+          updated_by: ctx.userId ?? null,
+        }, { onConflict: "organization_id,external_ref" })
+        .select("*")
+        .single();
+      if (quoteError) throw quoteError;
+      return { quote };
+    },
+  },
+  "purchasing.quote.analyze": {
+    id: "purchasing.quote.analyze",
+    description: "Return a concise purchasing analysis from supplier quotes.",
+    inputSchema: PurchasingQuoteAnalyzeSchema,
+    inputJsonSchema: objectSchema({
+      quoteIds: { type: "array", items: { type: "string", format: "uuid" } },
+    }),
+    requiredServiceScopes: [{ serviceId: "purchasing", scopes: ["service:purchasing:read"] }],
+    audit: { action: "purchasing.quote.analyze", resourceType: "purchasing_quote" },
+    handler: async (ctx: ActionContext, input: PurchasingQuoteAnalyzeInput) => {
+      const organizationId = requireActionOrganization(ctx);
+      const supabase = getSupabaseServerClient(ctx.dataDir);
+      let query = supabase
+        .from("purchasing_quotes")
+        .select("id,title,amount,currency,status,risk_level,purchasing_suppliers(name)")
+        .eq("organization_id", organizationId)
+        .order("created_at", { ascending: false })
+        .limit(20);
+      if (input.quoteIds?.length) query = query.in("id", input.quoteIds);
+      const { data, error } = await query;
+      if (error) throw error;
+      const quotes = data ?? [];
+      const comparable = quotes.filter((quote: any) => typeof quote.amount === "number");
+      const cheapest = comparable.slice().sort((a: any, b: any) => Number(a.amount) - Number(b.amount))[0];
+      return {
+        quoteCount: quotes.length,
+        cheapestQuote: cheapest ?? null,
+        highRiskCount: quotes.filter((quote: any) => quote.risk_level === "high").length,
+        recommendation: cheapest
+          ? `Prioriser ${cheapest.title} pour revue detaillee, puis verifier les clauses et donnees manquantes avant validation.`
+          : "Completer les montants et conditions avant de recommander un fournisseur.",
+        quotes,
+      };
     },
   },
   "skills.list": {
@@ -299,11 +433,8 @@ export async function callAction(id: string, ctx: ActionContext, rawInput: unkno
   const action = appActions[id as AppActionId] as AppAction | undefined;
   if (!action) throw new Error(`Unknown action: ${id}`);
   const input = action.inputSchema.parse(rawInput ?? {});
-  if (action.audit?.adminOnly && ctx.actorRole !== "admin") {
-    audit(ctx, action.audit, "failure", { actionId: id, reason: "admin-only" });
-    throw new Error(`Action admin requise: ${id}`);
-  }
   try {
+    ensureActionAuthorized(ctx, action);
     const result = await action.handler(ctx, input);
     if (action.audit) {
       const resourceId = typeof input === "object" && input && "id" in input ? String((input as { id?: unknown }).id) : undefined;
@@ -319,3 +450,44 @@ export async function callAction(id: string, ctx: ActionContext, rawInput: unkno
 // Keep attachListener reachable to generated domain actions that want to reuse
 // the generic SSE fan-out without importing from runs.ts directly.
 export { attachListener };
+
+function ensureActionAuthorized(ctx: ActionContext, action: AppAction): void {
+  if (action.audit?.adminOnly && ctx.organizationId && ctx.membershipRole !== "owner" && ctx.membershipRole !== "admin") {
+    throw new Error("admin-required");
+  }
+  for (const entry of action.requiredServiceScopes ?? []) {
+    if (!ctx.organizationId) throw new Error("organization-required");
+    for (const scope of entry.scopes) {
+      if (!hasServiceScope(ctx, entry.serviceId, scope)) {
+        throw new Error(`scope-forbidden:${scope}`);
+      }
+    }
+  }
+  for (const scope of action.requiredAnyScopes ?? []) {
+    if (ctx.organizationId && !hasAnyScope(ctx, scope)) {
+      throw new Error(`scope-forbidden:${scope}`);
+    }
+  }
+}
+
+function requireActionOrganization(ctx: ActionContext): string {
+  if (!ctx.organizationId) throw new Error("organization-required");
+  return ctx.organizationId;
+}
+
+function hasServiceScope(ctx: ActionContext, serviceId: string, scope: string): boolean {
+  if (ctx.membershipRole === "owner" || ctx.membershipRole === "admin") return true;
+  return (ctx.entitlements ?? []).some((entitlement) =>
+    entitlement.enabled &&
+    entitlement.service_id === serviceId &&
+    entitlement.scopes.includes(scope)
+  );
+}
+
+function hasAnyScope(ctx: ActionContext, scope: string): boolean {
+  if (ctx.membershipRole === "owner" || ctx.membershipRole === "admin") return true;
+  return (ctx.entitlements ?? []).some((entitlement) =>
+    entitlement.enabled &&
+    entitlement.scopes.includes(scope)
+  );
+}

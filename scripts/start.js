@@ -1,14 +1,18 @@
 #!/usr/bin/env node
 /**
  * Lance daemon + Next.js puis ouvre le navigateur.
- * Mode bundle prod sans Electron (script de fallback).
+ * Mode bundle prod sans Electron.
  */
 import { spawn } from "node:child_process";
 import { setTimeout as wait } from "node:timers/promises";
 import { platform } from "node:os";
 
-const NEXT_PORT = process.env["{{APP_NAME_KEBAB_UPPER}}_NEXT_PORT"] ?? "{{NEXT_PORT}}";
-const DAEMON_PORT = process.env["{{APP_NAME_KEBAB_UPPER}}_DAEMON_PORT"] ?? "{{DAEMON_PORT}}";
+const NEXT_ENV_VAR = "{{APP_NAME_KEBAB_UPPER}}_NEXT_PORT";
+const DAEMON_ENV_VAR = "{{APP_NAME_KEBAB_UPPER}}_DAEMON_PORT";
+const NEXT_PORT_PLACEHOLDER = "{{NEXT_PORT}}";
+const DAEMON_PORT_PLACEHOLDER = "{{DAEMON_PORT}}";
+const NEXT_PORT = process.env[NEXT_ENV_VAR] ?? (/^\d+$/.test(NEXT_PORT_PLACEHOLDER) ? NEXT_PORT_PLACEHOLDER : "3307");
+const DAEMON_PORT = process.env[DAEMON_ENV_VAR] ?? (/^\d+$/.test(DAEMON_PORT_PLACEHOLDER) ? DAEMON_PORT_PLACEHOLDER : "7456");
 
 function logChild(name, child) {
   child.stdout.on("data", (b) => process.stdout.write(`[${name}] ${b}`));
@@ -30,7 +34,7 @@ async function main() {
   const daemon = spawn("npm", ["run", "start:daemon"], {
     env: {
       ...process.env,
-      ["{{APP_NAME_KEBAB_UPPER}}_DAEMON_PORT"]: DAEMON_PORT,
+      [DAEMON_ENV_VAR]: DAEMON_PORT,
     },
   });
   logChild("daemon", daemon);
@@ -38,7 +42,7 @@ async function main() {
   const next = spawn("npm", ["run", "start:next"], {
     env: {
       ...process.env,
-      ["{{APP_NAME_KEBAB_UPPER}}_NEXT_PORT"]: NEXT_PORT,
+      [NEXT_ENV_VAR]: NEXT_PORT,
     },
   });
   logChild("next", next);

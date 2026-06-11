@@ -1,110 +1,87 @@
-# claude-electron-app-template
+# Bridge ERP Template
 
-Template Electron + Hono daemon + Next.js + Claude Code subprocess + skills YAML.
+Template cloud/Bridge pour créer des ERP métier modulaires avec Next.js,
+Supabase, Bridge local et workflows agentiques.
 
-Base structurelle pour scaffolder rapidement des apps desktop **mono-utilisateur, locales**
-qui orchestrent Claude Code (ou un autre subprocess) avec :
+Le template public ne contient aucun cas client réel. Les modules fournis ici
+utilisent uniquement des données demo anonymisées.
 
-- Live streaming d'events via SSE,
-- Skills YAML résolus selon une hiérarchie perso > global,
-- Journal d'audit chaîné SHA-256,
-- Sécurité (deny rules Bash/WebFetch/WebSearch + hook PreToolUse qui valide les paths).
+## What is included
 
-## Stack
+- Next.js App Router UI with a shared ERP workspace design system.
+- Hono API daemon for local/Electron mode.
+- Supabase foundation for organizations, services, entitlements, ERP modules,
+  jobs, events and audit.
+- Bridge runtime for local machine execution of cloud jobs.
+- Agentic-first action registry with HTTP and MCP parity.
+- Module catalog starting with `purchasing`.
+- Factory script for generating new ERP projects from briefs.
+- Production maintenance guardrails: auth, audit, CI, dependency automation.
 
-- **Electron** (`electron/main.cjs`) : process main qui spawn les sidecars et embarque la BrowserWindow.
-- **Hono daemon** (`server/index.ts`) : orchestrateur de subprocess + REST/SSE.
-- **Next.js** (`app/`) : UI (App Router, pas de Server Actions ; tout passe par `lib/client.ts` -> daemon).
-- **Claude Code subprocess** : spawn `claude -p --output-format stream-json`, parsing du stream JSON.
-- **Skills YAML** : frontmatter + workflow propositions/promotion.
-- **Audit log** : un fichier JSONL par user par jour, chaîné en SHA-256.
-
-## Forker pour une nouvelle app
+## Quick start
 
 ```bash
-gh repo clone ncleton-petitmaker/claude-electron-app-template my-app
-cd my-app
-rm -rf .git
-git init
-node scripts/init-from-template.mjs \
-  --app-name "My-App" \
-  --app-id "fr.example.my-app" \
-  --next-port 3300 \
-  --daemon-port 7600 \
-  --data-dir "My-App" \
-  --entity-name "thing" \
-  --entity-name-plural "things" \
-  --domain-brief "Mon app qui …"
 npm install
 npm run typecheck
-npm run electron
+npm run build
 ```
 
-Tous les placeholders `{{...}}` sont remplacés en place ; un `.factory-meta.json` est écrit
-au root pour traçabilité.
+Local daemon routes require `APP_DAEMON_TOKEN`. In desktop mode the Electron
+preload passes that token to the UI. Plain browser development should target a
+cloud API with Supabase auth instead of an unauthenticated local daemon.
 
-## Layout
+Generate a demo ERP from the catalog:
 
+```bash
+node scripts/new-app-from-brief.mjs \
+  --brief briefs/demo-erp-purchasing.md \
+  --output-dir ../demo-erp \
+  --yes \
+  --skip-agents
 ```
-app/                Next.js App Router (UI)
-  page.tsx          home + nav vers /runs /skills /logs /settings
-  runs/             liste + detail (SSE live) des runs Claude
-  skills/           éditeur skills YAML
-  logs/             audit log viewer
-  settings/         app-config (modèle, paths, user, …)
 
-components/         composants UI partagés (vide dans le template ; à enrichir)
-lib/
-  client.ts         fetch helpers vers /api/*
-  types.ts          mirroir compact de server/types.ts
-  sse.ts            parser SSE
+## Production posture
 
-server/             daemon Hono (TypeScript ESM)
-  index.ts          routes /api/health, /api/runs, /api/skills, /api/audit, /api/app-config
-  runs.ts           cycle de vie des runs Claude, dédup tokens, SSE fan-out
-  agents.ts         findClaudeBin + buildClaudeArgs
-  parse-stream.ts   parser claude-stream-json -> AgentEvent typé
-  pricing.ts        tarifs Anthropic, computeCostUsd
-  run-history.ts    persistance .events.jsonl (tag-based)
-  skills.ts         CRUD skills global/perso/propositions
-  audit-log.ts      journal chaîné SHA-256
-  app-config.ts     persistance app-config.json
-  agents-status.ts  probe `claude --version` + login
+For cloud deployments, set `REQUIRE_AUTH=1`, explicit CORS origins, Supabase
+server secrets, `NEXT_PUBLIC_BRIDGE_ORGANIZATION_ID` and a Bridge token secret. See
+[docs/cloud-security.md](docs/cloud-security.md).
 
-electron/
-  main.cjs          spawn daemon + next, BrowserWindow, onboarding Claude
-  preload.cjs       bridge IPC minimal
-  setup-preload.cjs setup wizard
+CI/security checks:
 
-skills-template/    skills par défaut empaquetés avec l'app
-  _global/          (vide dans le template ; les apps y posent leurs skills)
-
-data-template/      template du dossier de données runtime
-  .claude/
-    CLAUDE.md       posture, sécurité, conventions de sortie
-    settings.json   permissions.deny + hook PreToolUse
-    hooks/          restrict-write-paths.mjs
-    skills/_global/ skills déployés au premier lancement
-
-scripts/
-  init-from-template.mjs    rebrand CLI (placeholders -> valeurs)
-  postinstall.js            déploie data-template/ -> data/
-  build-server.mjs          esbuild server/index.ts -> dist/server.cjs
-  prepare-pack.mjs          orchestre le pack electron-builder
-  start.js                  fallback non-Electron (daemon + next + open browser)
-
-template.config.json    manifeste des placeholders (lu par init-from-template.mjs)
+```bash
+npm run typecheck
+npm test
+npm run build
+npm audit --audit-level=high
+npm run security:grep
+npm run factory:check
 ```
+
+## Module catalog
+
+Modules live in `modules/<moduleId>/` and include a manifest, UI, server
+actions, migrations and demo seeds. See
+[docs/module-catalog.md](docs/module-catalog.md).
+
+Current module:
+
+- `purchasing` / Achats: suppliers, quotes, comparison and decision workflows.
+
+## Client workflow
+
+Real customer implementations live in private repositories. Stable generic
+modules can be anonymized and copied back into this template. See
+[docs/client-template-workflow.md](docs/client-template-workflow.md).
 
 ## Docs
 
-- [docs/architecture.md](docs/architecture.md) : flux UI -> daemon -> subprocess -> SSE -> UI.
-- [docs/customization-guide.md](docs/customization-guide.md) : où poser le code domain.
-- [docs/gotchas.md](docs/gotchas.md) : pièges connus (Maestro unicode, undici timeout, Kong, asar).
-- [docs/subprocess-patterns.md](docs/subprocess-patterns.md) : 4 modèles de drivers (claude-cli, maestro, http-api, cli-custom).
-- [docs/supabase-vps-architecture.md](docs/supabase-vps-architecture.md) : architecture Bridge + Supabase self-hosted.
-- [docs/vps-provisioning-runbook.md](docs/vps-provisioning-runbook.md) : checklist pour provisionner un VPS client.
+- [docs/architecture.md](docs/architecture.md)
+- [docs/bridge-multiservices.md](docs/bridge-multiservices.md)
+- [docs/supabase-vps-architecture.md](docs/supabase-vps-architecture.md)
+- [docs/vps-provisioning-runbook.md](docs/vps-provisioning-runbook.md)
+- [docs/cloud-security.md](docs/cloud-security.md)
+- [docs/module-catalog.md](docs/module-catalog.md)
 
 ## License
 
-MIT.
+MIT

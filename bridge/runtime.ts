@@ -35,6 +35,8 @@ import { buildEnrichedPath, findCodexBin } from "../server/agents.js";
 import { setPricingDataDir } from "../server/pricing.js";
 
 let codexStatusCache: { checkedMs: number; status: BridgeCodexStatus } | null = null;
+const SUPABASE_REFRESH_MARGIN_MS =
+  Number(process.env.BRIDGE_SUPABASE_REFRESH_MARGIN_MS || 10 * 60 * 1000) || 10 * 60 * 1000;
 
 export interface BridgeRuntimeOptions {
   command?: "run" | "once";
@@ -453,18 +455,18 @@ async function refreshSupabaseSessionIfNeeded(cfg: BridgeConfig, configPath: str
     const fresh = loadBridgeConfig(configPath);
     if (fresh.session?.refreshToken) {
       const freshExpiresAt = fresh.session.expiresAt ? Date.parse(fresh.session.expiresAt) : 0;
-      if (fresh.session.refreshToken !== cfg.session?.refreshToken && (!freshExpiresAt || freshExpiresAt - Date.now() > 60_000)) {
+      if (fresh.session.refreshToken !== cfg.session?.refreshToken && (!freshExpiresAt || freshExpiresAt - Date.now() > SUPABASE_REFRESH_MARGIN_MS)) {
         Object.assign(cfg, fresh);
         return;
       }
-      if (freshExpiresAt && freshExpiresAt - Date.now() > 60_000) {
+      if (freshExpiresAt && freshExpiresAt - Date.now() > SUPABASE_REFRESH_MARGIN_MS) {
         Object.assign(cfg, fresh);
         return;
       }
     }
 
     const expiresAt = cfg.session?.expiresAt ? Date.parse(cfg.session.expiresAt) : 0;
-    if (expiresAt && expiresAt - Date.now() > 60_000) return;
+    if (expiresAt && expiresAt - Date.now() > SUPABASE_REFRESH_MARGIN_MS) return;
     const supabaseUrl = cfg.supabaseUrl;
     const supabaseAnonKey = cfg.supabaseAnonKey;
     const session = cfg.session;
@@ -488,7 +490,7 @@ async function refreshSupabaseSessionIfNeeded(cfg: BridgeConfig, configPath: str
         if (
           latest.session?.refreshToken &&
           latest.session.refreshToken !== refreshToken &&
-          (!latestExpiresAt || latestExpiresAt - Date.now() > 60_000)
+          (!latestExpiresAt || latestExpiresAt - Date.now() > SUPABASE_REFRESH_MARGIN_MS)
         ) {
           Object.assign(cfg, latest);
           return;

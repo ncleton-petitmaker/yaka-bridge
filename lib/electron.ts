@@ -1,10 +1,10 @@
 /**
- * Wrappers typés sur `window.oifEval.*` exposés par `electron/preload.cjs`.
+ * Wrappers typés sur `window.appBridge.*` exposés par `electron/preload.cjs`.
  *
- * Utilisable depuis tout composant React ; renvoie un fallback sentinel
+ * Utilisable depuis tout composant React ; renvoie un état indisponible typé
  * `{ ok: false, unavailable: true }` quand l'app tourne hors Electron
  * (mode `next dev` pur, browser preview…), pour que les pages se
- * comportent proprement (input texte manuel en fallback).
+ * comportent proprement hors Electron.
  */
 
 export interface SelectDirectoryOpts {
@@ -31,8 +31,9 @@ export type SelectDirectoryResult =
   | { ok: false; error: string }
   | { ok: false; unavailable: true };
 
-interface OifEvalBridge {
+interface AppBridge {
   isElectron: boolean;
+  daemonToken?: string;
   selectDirectory(opts?: SelectDirectoryOpts): Promise<SelectDirectoryResult>;
   openFile(absPath: string): Promise<{ ok: boolean; error?: string }>;
   revealFile(absPath: string): Promise<{ ok: boolean; error?: string }>;
@@ -43,14 +44,27 @@ interface OifEvalBridge {
   version(): string;
 }
 
-function bridge(): OifEvalBridge | null {
+function bridge(): AppBridge | null {
   if (typeof window === "undefined") return null;
-  const w = window as unknown as { oifEval?: OifEvalBridge };
-  return w.oifEval ?? null;
+  const w = window as unknown as { appBridge?: AppBridge };
+  return w.appBridge ?? null;
 }
 
 export function isElectron(): boolean {
   return !!bridge()?.isElectron;
+}
+
+/**
+ * Token de session du daemon local exposé par le preload Electron. Renvoie ""
+ * hors Electron (mode cloud / next dev pur), où l'auth passe par Supabase.
+ */
+export function getDaemonToken(): string {
+  const electronToken = bridge()?.daemonToken;
+  if (electronToken) return electronToken;
+  if (process.env.NODE_ENV !== "production") {
+    return process.env.NEXT_PUBLIC_DAEMON_TOKEN ?? "";
+  }
+  return "";
 }
 
 export async function selectDirectory(

@@ -61,7 +61,7 @@ export function PanelLayout3({
   leftPanel,
   centerPanel,
   rightPanel,
-  autoSaveId = "{{APP_NAME_KEBAB}}:panel-layout-v1",
+  autoSaveId = "bridge-erp-template:panel-layout-v1",
   defaultSizes = [22, 56, 22],
   minSizes = [12, 30, 12],
   keyboardShortcuts,

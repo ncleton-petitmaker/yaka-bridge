@@ -82,11 +82,13 @@ const BriefSchema = z.object({
   GIT_BINDING: z.string().optional(),
   EXTRA_ROUTES: z.array(z.string()).optional(),
   SKILLS: z.array(z.string()).optional(),
+  MODULES: z.array(z.string()).optional().default([]),
   AGENTIC_FIRST: z.coerce.boolean().optional().default(true),
   MCP_ACTIONS: z.array(z.string()).optional(),
 });
 
 const CANONICAL_SUBPROCESS = [
+  "codex-cli",
   "claude-cli",
   "maestro",
   "http-api",
@@ -154,6 +156,9 @@ function readBrief(briefPath) {
       typeof e === "string" ? { name: e } : e
     );
   }
+  if (typeof doc.MODULES === "string") {
+    doc.MODULES = doc.MODULES.split(",").map((moduleId) => moduleId.trim()).filter(Boolean);
+  }
   return doc;
 }
 
@@ -166,7 +171,7 @@ function deducePlural(singular) {
   return singular + "s";
 }
 
-function validateBrief(raw) {
+function validateBrief(raw, templateDir = DEFAULT_TEMPLATE_DIR, options = {}) {
   const parsed = BriefSchema.safeParse(raw);
   if (!parsed.success) {
     const issues = parsed.error.issues.map(
@@ -219,7 +224,26 @@ function validateBrief(raw) {
       }
     }
   }
+  const knownModules = availableModuleIds(templateDir);
+  const unknownModules = brief.MODULES.filter((moduleId) => !knownModules.includes(moduleId));
+  if (unknownModules.length) {
+    throw new Error(`MODULES contient des modules inconnus: ${unknownModules.join(", ")}`);
+  }
+  if (!options.legacyEntity && brief.MODULES.length === 0) {
+    throw new Error("MODULES doit contenir au moins un module catalogue. Utilise --legacy-entity pour un ancien scaffold ENTITY.");
+  }
   return { brief, warnings };
+}
+
+function availableModuleIds(templateDir) {
+  const modulesDir = resolve(templateDir, "modules");
+  if (!existsSync(modulesDir)) return [];
+  return readdirSync(modulesDir)
+    .filter((entry) => {
+      const configPath = join(modulesDir, entry, "module.config.json");
+      return existsSync(configPath) && statSync(configPath).isFile();
+    })
+    .sort();
 }
 
 // ----- Interactive helpers -----
@@ -393,7 +417,7 @@ function buildAgentPrompt(agentName, brief, outputDir) {
   const header = [
     `# Agent: ${agentName}`,
     "",
-    `## Agent descriptor (${descriptor.path ?? "inline fallback"})`,
+    `## Agent descriptor (${descriptor.path ?? "inline descriptor"})`,
     "",
     "```markdown",
     descriptor.content,
@@ -409,6 +433,7 @@ function buildAgentPrompt(agentName, brief, outputDir) {
     `- PROJECT_MODE: ${brief.PROJECT_MODE ?? "new"}`,
     ...(brief.SOURCE_PROJECT_DIR ? [`- SOURCE_PROJECT_DIR: ${brief.SOURCE_PROJECT_DIR}`] : []),
     `- AGENTIC_FIRST: ${brief.AGENTIC_FIRST !== false}`,
+    `- MODULES: ${brief.MODULES.join(", ")}`,
     `- ENTITY: ${brief.ENTITY} (plural: ${brief.ENTITY_PLURAL})`,
     `- SUBPROCESS: ${brief.SUBPROCESS}`,
     `- OUTPUT_DIR: ${outputDir}`,
@@ -534,7 +559,7 @@ async function spawnAgent(agent, brief, outputDir, opts) {
 async function cloneTemplate(templateDir, outputDir, opts) {
   if (opts.dryRun) {
     console.log(
-      `[dry-run] copierait ${templateDir} → ${outputDir} (sans node_modules/.git/.next/release/dist)`
+      `[dry-run] copierait ${templateDir} → ${outputDir} (sans artefacts locaux lourds)`
     );
     return;
   }
@@ -542,11 +567,25 @@ async function cloneTemplate(templateDir, outputDir, opts) {
     ".git",
     "node_modules",
     ".next",
+    "out",
+    "build",
     "dist",
     "release",
+    "release-bridge",
+    "data",
     "Projets",
+    ".pi",
+    ".cache",
+    ".temp",
+    "vendor",
+    "evaluations",
+    ".branches",
     ".factory-meta.json",
     ".factory-error.json",
+    "brief.generated.md",
+    "electron-main.cjs",
+    "mcp.cjs",
+    "runtime.cjs",
   ];
   copyDirSync(templateDir, outputDir, ignore);
 }
@@ -580,6 +619,63 @@ async function runInitFromTemplate(brief, outputDir, opts) {
     return;
   }
   await runCmd("node", args, { cwd: outputDir });
+}
+
+// ----- Step: configure selected ERP modules -----
+
+function configureModules(brief, outputDir, opts) {
+  const selected = Array.from(new Set(brief.MODULES ?? []));
+  if (opts.dryRun) {
+    console.log(`[dry-run] modules selection: ${selected.join(", ")}`);
+    return { selected, mode: "dry-run" };
+  }
+  const modulesDir = join(outputDir, "modules");
+  if (!existsSync(modulesDir)) return { selected, mode: "no-modules-dir" };
+  const available = availableModuleIds(outputDir);
+  if (selected.length) {
+    for (const moduleId of available) {
+      if (!selected.includes(moduleId)) {
+        rmSync(join(modulesDir, moduleId), { recursive: true, force: true });
+      }
+    }
+    writeModuleRegistry(modulesDir, selected);
+  }
+  const manifests = selected.map((moduleId) => {
+    const manifestPath = join(modulesDir, moduleId, "module.config.json");
+    return JSON.parse(readFileSync(manifestPath, "utf8"));
+  });
+  writeFileSync(
+    join(outputDir, ".factory-modules.json"),
+    `${JSON.stringify({
+      selectedModules: selected,
+      manifests,
+      generatedAt: new Date().toISOString(),
+    }, null, 2)}\n`,
+    "utf8"
+  );
+  return { selected, mode: "selected" };
+}
+
+function writeModuleRegistry(modulesDir, selected) {
+  const imports = selected
+    .map((moduleId) => `import { ${moduleIdToExportName(moduleId)} } from "./${moduleId}";`)
+    .join("\n");
+  const entries = selected.map(moduleIdToExportName).join(", ");
+  const body = `${imports}\nimport type { ErpModuleManifest } from "./types";\n\n` +
+    `export const erpModules = [${entries}] satisfies ErpModuleManifest[];\n\n` +
+    `export function getErpModule(moduleId: string): ErpModuleManifest | undefined {\n` +
+    `  return erpModules.find((module) => module.id === moduleId);\n` +
+    `}\n\n` +
+    `export function assertKnownModules(moduleIds: string[]): void {\n` +
+    `  const known = new Set(erpModules.map((module) => module.id));\n` +
+    `  const unknown = moduleIds.filter((moduleId) => !known.has(moduleId));\n` +
+    `  if (unknown.length) throw new Error(\`Unknown ERP module(s): \${unknown.join(", ")}\`);\n` +
+    `}\n`;
+  writeFileSync(join(modulesDir, "registry.ts"), body, "utf8");
+}
+
+function moduleIdToExportName(moduleId) {
+  return `${moduleId.replace(/(^|[-_])([a-z])/g, (_m, _sep, chr) => chr.toUpperCase())}Module`.replace(/^([A-Z])/, (m) => m.toLowerCase());
 }
 
 // ----- Step: post-scaffold (install + typecheck + git) -----
@@ -708,6 +804,8 @@ async function main() {
         `  --skip-install          ne pas faire npm install\n` +
         `  --skip-typecheck        ne pas faire npx tsc --noEmit\n` +
         `  --dry-run               affiche les actions, n'exécute rien\n` +
+        `  --skip-agents           configure sans lancer Codex, pour CI\n` +
+        `  --legacy-entity         autorise un brief sans MODULES\n` +
         `  --yes                   bypass confirmation interactive\n` +
         `  --force                 overwrite output-dir s'il existe déjà\n`
     );
@@ -725,6 +823,8 @@ async function main() {
     dryRun: !!args["dry-run"],
     skipInstall: !!args["skip-install"],
     skipTypecheck: !!args["skip-typecheck"],
+    skipAgents: !!args["skip-agents"],
+    legacyEntity: !!args["legacy-entity"],
     yes: !!args.yes,
     force: !!args.force,
     briefName: basename(briefPath, ".md"),
@@ -741,7 +841,7 @@ async function main() {
   let warnings;
   try {
     const raw = readBrief(briefPath);
-    const v = validateBrief(raw);
+    const v = validateBrief(raw, templateDir, opts);
     brief = v.brief;
     warnings = v.warnings;
   } catch (err) {
@@ -777,8 +877,8 @@ async function main() {
   }
 
   // 2. Check Codex CLI (agent runner)
-  const codexVersion = checkCodexCli();
-  if (!codexVersion && !opts.dryRun) {
+  const codexVersion = opts.skipAgents ? null : checkCodexCli();
+  if (!codexVersion && !opts.dryRun && !opts.skipAgents) {
     console.log(
       `\n[factory] WARNING: \`codex\` CLI introuvable dans le PATH.`
     );
@@ -788,6 +888,8 @@ async function main() {
     console.log(
       `         Les agents seront skipped (prompts écrits dans .factory-prompt-*.md).`
     );
+  } else if (opts.skipAgents) {
+    console.log("\n[factory] agents: skipped by --skip-agents");
   } else if (codexVersion) {
     console.log(`\n[factory] codex CLI: ${codexVersion}`);
   }
@@ -857,6 +959,9 @@ async function main() {
     await runInitFromTemplate(brief, outputDir, opts);
     report.steps.init = "ok";
 
+    console.log("[factory] Step 2b — configure ERP modules");
+    report.steps.modules = configureModules(brief, outputDir, opts);
+
     // Initialise factory-journal.md
     if (!opts.dryRun) {
       const journalPath = join(outputDir, "factory-journal.md");
@@ -880,6 +985,10 @@ async function main() {
     report.agentPlan = agentPlan.map((a) => a.name);
     for (const agent of agentPlan) {
       console.log(`  - ${agent.name}`);
+      if (opts.skipAgents) {
+        report.agents[agent.name] = "skipped:skip-agents";
+        continue;
+      }
       if (opts.dryRun) {
         // In dry-run we don't have an output dir to write to, skip prompt write
         report.agents[agent.name] = "dry-run";

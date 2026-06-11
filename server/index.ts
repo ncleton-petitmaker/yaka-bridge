@@ -27,8 +27,9 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { streamSSE } from "hono/streaming";
 import { serve } from "@hono/node-server";
-import { existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, readdirSync, statSync } from "node:fs";
+import { join, relative, resolve } from "node:path";
+import { timingSafeEqual } from "node:crypto";
 import { findClaudeBin } from "./agents.js";
 import { getAgentStatus } from "./agents-status.js";
 import {
@@ -45,6 +46,8 @@ import {
   listRuns,
   attachListener,
   cancelRun,
+  waitForRun,
+  cleanupZombies,
 } from "./runs.js";
 import {
   listGlobalSkills,
@@ -59,7 +62,17 @@ import {
   type AuditEventInput,
 } from "./audit-log.js";
 import { callAction, listActions, type ActionContext } from "./actions.js";
+import { allowedRunRoots, assertInsideRoots } from "./path-guard.js";
 import { getSupabasePublicConfig } from "./supabase.js";
+import {
+  getCloudAuth,
+  isCloudAuthRequired,
+} from "./cloud-auth.js";
+import {
+  getAuthz,
+  normalizeAuthError,
+  requireOrganizationMember,
+} from "./authz.js";
 import { getBridgeStatusPayload } from "./bridge-status.js";
 import { registerBridgeControlPlaneRoutes } from "./bridge-control-plane.js";
 import {
@@ -85,12 +98,58 @@ const DATA_DIR_ENV_VAR = "{{DATA_DIR_ENV_VAR}}";
 const DATA_DIR = resolve(process.env[DATA_DIR_ENV_VAR] ?? "./data");
 setPricingDataDir(DATA_DIR);
 
-// Placeholders remplacés par `scripts/init-from-template.mjs`. En attendant le
-// scaffolding, on garde une valeur numérique pour ne pas casser `npm run dev`.
+/**
+ * Token de session partagé entre l'hôte (Electron) et le daemon. Injecté via
+ * `APP_DAEMON_TOKEN` au spawn des sidecars. Il est obligatoire hors cloud et
+ * hors tests automatisés pour toutes les routes applicatives non-health.
+ */
+const DAEMON_TOKEN = process.env.APP_DAEMON_TOKEN ?? "";
+const DAEMON_TOKEN_TEST_MODE = process.env.NODE_ENV === "test" || process.env.APP_TEST_MODE === "1";
+
+if (!isCloudAuthRequired() && !DAEMON_TOKEN && !DAEMON_TOKEN_TEST_MODE) {
+  throw new Error("APP_DAEMON_TOKEN requis pour lancer le daemon local.");
+}
+
+function tokenMatches(provided: string): boolean {
+  if (!DAEMON_TOKEN || !provided) return false;
+  const a = Buffer.from(provided);
+  const b = Buffer.from(DAEMON_TOKEN);
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
+
+function extractDaemonToken(c: {
+  req: {
+    header: (k: string) => string | undefined;
+    query: (k: string) => string | undefined;
+  };
+}): string {
+  const auth = c.req.header("authorization") ?? "";
+  const bearer = /^Bearer\s+(.+)$/i.exec(auth)?.[1];
+  // EventSource ne permet pas d'envoyer d'en-têtes; le token est donc transmis
+  // par query param uniquement pour cette route SSE locale.
+  return (bearer ?? c.req.header("x-daemon-token") ?? c.req.query("daemon_token") ?? "").trim();
+}
+
+// Placeholders remplacés par `scripts/init-from-template.mjs`.
 const NEXT_PORT_DEFAULT = Number("{{NEXT_PORT}}") || 3100;
 const DAEMON_PORT_DEFAULT = Number("{{DAEMON_PORT}}") || 7456;
 
-function getActor(): { actor_id: string; actor_role: string } {
+function getActor(c?: { req: { header: (k: string) => string | undefined } }): { actor_id: string; actor_role: string } {
+  const authz = c ? getAuthz(c as any) : undefined;
+  if (authz?.user) {
+    return {
+      actor_id: authz.user.id,
+      actor_role: `cloud-${authz.membership.role}`,
+    };
+  }
+  const auth = c ? getCloudAuth(c as any) : undefined;
+  if (auth?.user) {
+    return {
+      actor_id: auth.user.id,
+      actor_role: "cloud-user",
+    };
+  }
   return {
     actor_id: "local-agent",
     actor_role: "agent",
@@ -109,8 +168,9 @@ function audit(
 ): void {
   try {
     const cfg = loadAppConfig(DATA_DIR);
-    const actor_id = partial.actor_id ?? "local-agent";
-    const actor_role = partial.actor_role ?? "agent";
+    const actor = getActor(c);
+    const actor_id = partial.actor_id ?? actor.actor_id;
+    const actor_role = partial.actor_role ?? actor.actor_role;
     appendAuditEvent(
       DATA_DIR,
       {
@@ -138,11 +198,16 @@ function buildAddDirs(dataDir: string, cfg: AppConfig): string[] {
 }
 
 function actionContext(c: { req: { header: (k: string) => string | undefined; raw: { signal: AbortSignal } } }): ActionContext {
-  const a = getActor();
+  const a = getActor(c);
+  const authz = getAuthz(c as any);
   return {
     dataDir: DATA_DIR,
     actorId: a.actor_id,
     actorRole: a.actor_role,
+    userId: authz?.user.id,
+    organizationId: authz?.organizationId,
+    membershipRole: authz?.membership.role,
+    entitlements: authz?.entitlements,
     appVersion: APP_VERSION,
     clientIp: c.req.header("x-forwarded-for") ?? c.req.header("x-real-ip") ?? "local",
     signal: c.req.raw.signal,
@@ -152,6 +217,21 @@ function actionContext(c: { req: { header: (k: string) => string | undefined; ra
 const app = new Hono();
 registerBridgeControlPlaneRoutes(app, DATA_DIR);
 
+function configuredCorsOrigins(): string[] {
+  const configured = [
+    process.env["APP_ALLOWED_ORIGINS"],
+    process.env["NEXT_PUBLIC_APP_ORIGIN"],
+  ]
+    .flatMap((value) => value?.split(",") ?? [])
+    .map((s) => s.trim().replace(/\/+$/, ""))
+    .filter((s) => s && s !== "*");
+  const local = [
+    `http://localhost:${NEXT_PORT_DEFAULT}`,
+    `http://127.0.0.1:${NEXT_PORT_DEFAULT}`,
+  ];
+  return Array.from(new Set([...(isCloudAuthRequired() ? [] : local), ...configured]));
+}
+
 app.use("*", async (c, next) => {
   await next();
   c.header("Access-Control-Allow-Private-Network", "true");
@@ -160,30 +240,72 @@ app.use("*", async (c, next) => {
 app.use(
   "*",
   cors({
-    origin: [
-      `http://localhost:${NEXT_PORT_DEFAULT}`,
-      `http://127.0.0.1:${NEXT_PORT_DEFAULT}`,
-      ...(process.env["APP_ALLOWED_ORIGINS"]?.split(",").map((s) => s.trim()).filter(Boolean) ?? []),
-      ...(process.env["NEXT_PUBLIC_APP_ORIGIN"]?.split(",").map((s) => s.trim()).filter(Boolean) ?? []),
-    ],
+    origin: configuredCorsOrigins(),
     credentials: true,
   })
 );
+
+// Auth locale sur les routes applicatives. `/api/health` reste public (sonde de
+// démarrage), et les préflights OPTIONS sont laissés à la couche CORS. Quand
+// aucun token n'est configuré (daemon lancé seul hors Electron), on n'exige rien
+// mais le bind loopback reste la barrière. Les routes `/bridge/*` sont
+// enregistrées avant ce middleware et gardent leur propre auth (control plane).
+app.use("/api/*", async (c, next) => {
+  if (c.req.method === "OPTIONS") return next();
+  if (c.req.path === "/api/health") return next();
+  if (isCloudAuthRequired()) {
+    try {
+      await requireOrganizationMember(DATA_DIR, c);
+    } catch (err) {
+      const normalized = normalizeAuthError(err);
+      return c.json(normalized.body, normalized.status as any);
+    }
+    return next();
+  }
+  if (!tokenMatches(extractDaemonToken(c))) {
+    return c.json({ error: "unauthorized" }, 401);
+  }
+  return next();
+});
+
+app.use("/api/admin/*", async (c, next) => {
+  if (!isCloudAuthRequired()) return next();
+  try {
+    await requireOrganizationMember(DATA_DIR, c, { admin: true });
+  } catch (err) {
+    const normalized = normalizeAuthError(err);
+    return c.json(normalized.body, normalized.status as any);
+  }
+  return next();
+});
 
 // ---------------------------------------------------------------------------
 // /api/health
 // ---------------------------------------------------------------------------
 app.get("/api/health", (c) =>
-  c.json({
-    ok: true,
-    ts: new Date().toISOString(),
-    version: APP_VERSION,
-    claude: findClaudeBin(),
-    dataDir: DATA_DIR,
-    dataDirExists: existsSync(DATA_DIR),
-    database: getSupabasePublicConfig(DATA_DIR),
-    pricing: getPricingMetadata(),
-  })
+  c.json(
+    isCloudAuthRequired()
+      ? {
+          ok: true,
+          ts: new Date().toISOString(),
+          version: APP_VERSION,
+          mode: "cloud",
+          database: {
+            provider: "supabase",
+            configured: getSupabasePublicConfig(DATA_DIR).configured,
+          },
+        }
+      : {
+          ok: true,
+          ts: new Date().toISOString(),
+          version: APP_VERSION,
+          claude: findClaudeBin(),
+          dataDir: DATA_DIR,
+          dataDirExists: existsSync(DATA_DIR),
+          database: getSupabasePublicConfig(DATA_DIR),
+          pricing: getPricingMetadata(),
+        }
+  )
 );
 
 app.get("/api/bridge/status", (c) => c.json(getBridgeStatusPayload("local-daemon")));
@@ -220,6 +342,14 @@ app.get("/api/app-config", (c) => {
 });
 
 app.put("/api/app-config", async (c) => {
+  if (isCloudAuthRequired()) {
+    try {
+      await requireOrganizationMember(DATA_DIR, c, { admin: true });
+    } catch (err) {
+      const normalized = normalizeAuthError(err);
+      return c.json(normalized.body, normalized.status as any);
+    }
+  }
   const body = (await c.req.json()) as Partial<AppConfig>;
   const next = saveAppConfig(DATA_DIR, body);
   audit(c, {
@@ -287,8 +417,23 @@ app.post("/api/runs", async (c) => {
     return c.json({ error: "champ `prompt` manquant" }, 400);
   }
   const cfg = loadAppConfig(DATA_DIR);
-  const cwd = body.cwd ? resolve(body.cwd) : DATA_DIR;
-  const addDirs = body.addDirs ?? buildAddDirs(DATA_DIR, cfg);
+  const roots = allowedRunRoots(DATA_DIR, cfg);
+  let cwd: string;
+  let addDirs: string[];
+  try {
+    cwd = body.cwd ? assertInsideRoots(body.cwd, roots, body.cwd) : DATA_DIR;
+    addDirs = (body.addDirs ?? buildAddDirs(DATA_DIR, cfg)).map((dir) =>
+      assertInsideRoots(dir, roots, dir)
+    );
+  } catch (err) {
+    audit(c, {
+      action: "run.start",
+      resource_type: "run",
+      result: "failure",
+      reason: (err as Error).message,
+    });
+    return c.json({ error: (err as Error).message }, 400);
+  }
   try {
     const run = startRun({
       prompt: body.prompt,
@@ -360,23 +505,21 @@ app.get("/api/runs/:id/events", async (c) => {
       handle.detach();
       return;
     }
-    // Sinon attend la fin
-    stream.onAbort(() => handle.detach());
-    await new Promise<void>((resolveDone) => {
-      const interval = setInterval(() => {
-        const r2 = getRun(id);
-        if (
-          !r2 ||
-          r2.status === "succeeded" ||
-          r2.status === "failed" ||
-          r2.status === "cancelled"
-        ) {
-          clearInterval(interval);
-          resolveDone();
-        }
-      }, 500);
+    // Sinon attend la fin : on await directement la promesse `done` du run
+    // (via waitForRun) au lieu de poller. Un abort client résout aussi la course
+    // pour libérer le handler proprement.
+    const aborted = new Promise<void>((resolveAbort) => {
+      stream.onAbort(() => {
+        handle.detach();
+        resolveAbort();
+      });
     });
-    await stream.writeSSE({ event: "end", data: "{}" });
+    await Promise.race([waitForRun(id), aborted]);
+    try {
+      await stream.writeSSE({ event: "end", data: "{}" });
+    } catch {
+      // socket déjà fermé
+    }
     handle.detach();
   });
 });
@@ -404,6 +547,14 @@ app.get("/api/skills", (c) => {
 });
 
 app.put("/api/skills/:slug", async (c) => {
+  if (isCloudAuthRequired()) {
+    try {
+      await requireOrganizationMember(DATA_DIR, c, { admin: true });
+    } catch (err) {
+      const normalized = normalizeAuthError(err);
+      return c.json(normalized.body, normalized.status as any);
+    }
+  }
   const slug = c.req.param("slug");
   let body: { content?: string };
   try {
@@ -469,22 +620,22 @@ app.get("/api/audit/integrity", (c) => {
 });
 
 // ---------------------------------------------------------------------------
-// /api/storage : stubs neutres pour ConflictBanner + StorageGuard
+// /api/storage : detection locale de conflits de synchronisation
 // ---------------------------------------------------------------------------
-// Les apps métier surchargent ces routes si elles utilisent un dossier partagé
-// synchronisé (OneDrive/Dropbox) avec détection de conflict copies. Par défaut
-// le template renvoie une liste vide, ce qui désactive simplement le banner.
 app.get("/api/storage/conflicts", (c) => {
-  return c.json({ conflicts: [] });
-});
-
-// ---------------------------------------------------------------------------
-// /api/onboarding-status : stub. Le template n'impose plus de wizard profil.
-// ---------------------------------------------------------------------------
-app.get("/api/onboarding-status", (c) => {
-  return c.json({
-    done: true,
-  });
+  const cfg = loadAppConfig(DATA_DIR);
+  const roots = Array.from(
+    new Set(
+      [DATA_DIR, cfg.inputDir, cfg.outputDir]
+        .filter((value): value is string => Boolean(value))
+        .map((value) => resolve(value))
+    )
+  );
+  const requestedPath = c.req.query("path");
+  const scanRoots = requestedPath
+    ? [assertInsideRoots(resolve(requestedPath), roots, requestedPath)]
+    : roots;
+  return c.json({ conflicts: findConflictCopies(scanRoots) });
 });
 
 // ---------------------------------------------------------------------------
@@ -500,8 +651,75 @@ if (!findClaudeBin()) {
   );
 }
 
-serve({ fetch: app.fetch, port }, ({ port: p }) => {
+// Filet de sécurité : nettoie périodiquement les runs zombies (process Codex
+// mort côté OS ou sans event depuis trop longtemps) pour libérer les slots de
+// concurrence même sans nouvelle requête.
+const zombieSweep = setInterval(() => {
+  try {
+    const cleaned = cleanupZombies();
+    if (cleaned > 0) console.warn(`[daemon] ${cleaned} run(s) zombie(s) nettoyé(s).`);
+  } catch (err) {
+    console.warn("[daemon] cleanupZombies a échoué:", err);
+  }
+}, 60_000);
+zombieSweep.unref?.();
+
+serve({ fetch: app.fetch, port, hostname: "127.0.0.1" }, ({ port: p }) => {
+  const authMode = isCloudAuthRequired() ? "cloud" : "local-token";
   console.log(
-    `[daemon] up on http://localhost:${p}  (dataDir=${DATA_DIR}, version=${APP_VERSION})`
+    `[daemon] up on http://127.0.0.1:${p}  (dataDir=${DATA_DIR}, version=${APP_VERSION}, auth=${authMode})`
   );
 });
+
+export { app };
+
+interface ConflictCopy {
+  path: string;
+  size: number;
+  mtime: string;
+}
+
+const CONFLICT_COPY_RE =
+  /(^|[\s._-])(conflict|conflicted|conflit|copie conflictuelle|copie en conflit)([\s._-]|$)/i;
+
+function findConflictCopies(roots: string[]): ConflictCopy[] {
+  const out: ConflictCopy[] = [];
+  const seen = new Set<string>();
+  for (const root of roots) {
+    scanConflictRoot(root, root, seen, out);
+    if (out.length >= 200) break;
+  }
+  return out.slice(0, 200);
+}
+
+function scanConflictRoot(root: string, current: string, seen: Set<string>, out: ConflictCopy[], depth = 0): void {
+  if (depth > 6 || out.length >= 200 || seen.has(current)) return;
+  seen.add(current);
+  let entries: string[];
+  try {
+    entries = readdirSync(current);
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (entry === "node_modules" || entry === ".next" || entry === ".git") continue;
+    const full = join(current, entry);
+    let stat;
+    try {
+      stat = statSync(full);
+    } catch {
+      continue;
+    }
+    if (stat.isDirectory()) {
+      scanConflictRoot(root, full, seen, out, depth + 1);
+      continue;
+    }
+    if (!stat.isFile() || !CONFLICT_COPY_RE.test(entry)) continue;
+    out.push({
+      path: relative(root, full) || entry,
+      size: stat.size,
+      mtime: stat.mtime.toISOString(),
+    });
+    if (out.length >= 200) return;
+  }
+}

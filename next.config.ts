@@ -2,8 +2,11 @@ import type { NextConfig } from "next";
 
 // Le port du daemon est passé par l'env var injectée au scaffolding
 // (placeholder remplacé par init-from-template.mjs).
+const DAEMON_ENV_VAR = "{{APP_NAME_KEBAB_UPPER}}_DAEMON_PORT";
+const DAEMON_PORT_PLACEHOLDER = "{{DAEMON_PORT}}";
 const DAEMON_PORT =
-  process.env["{{APP_NAME_KEBAB_UPPER}}_DAEMON_PORT"] ?? "{{DAEMON_PORT}}";
+  process.env[DAEMON_ENV_VAR] ??
+  (/^\d+$/.test(DAEMON_PORT_PLACEHOLDER) ? DAEMON_PORT_PLACEHOLDER : "7456");
 
 const config: NextConfig = {
   reactStrictMode: true,

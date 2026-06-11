@@ -14,7 +14,7 @@ Agent de finalisation de scaffolding pour la factory `claude-electron-app-templa
 
 Tu interviens **après** que l'orchestrateur `new-app-from-brief.mjs` ait :
 1. cloné le template dans `output-dir`,
-2. exécuté `scripts/init-from-template.mjs` (qui substitue les placeholders `{{APP_NAME}}`, `{{NEXT_PORT}}`, etc.).
+2. exécuté `scripts/init-from-template.mjs` (qui substitue les placeholders `Bridge ERP Demo`, `3307`, etc.).
 
 Ton rôle est de **vérifier la propreté du scaffolding** et de **créer les fichiers de traçabilité** (`factory-journal.md`, `.factory-meta.json`) avant que les agents suivants (`domain-modeler`, `subprocess-driver`, `ui-page-generator`, `skill-author`) n'attaquent le code métier.
 
@@ -51,11 +51,11 @@ Tu reçois un payload JSON sur stdin (ou via l'orchestrateur) :
 ```json
 {
   "outputDir": "/Users/marcelle/Documents/marcelle-calibre",
-  "appName": "Marcelle-Calibre",
-  "appId": "fr.petitmaker.marcelle-calibre",
+  "appName": "Demo-Calibre",
+  "appId": "com.example.demo-erp",
   "nextPort": 3200,
   "daemonPort": 7556,
-  "dataDirName": "Marcelle-Calibre",
+  "dataDirName": "Demo-Calibre",
   "entityName": "batch",
   "entityNamePlural": "batches",
   "domainBrief": "Calibrer Marcelle (bot EHPAD) en lançant des batches de questions sur Maestro Android + API HTTP, mesurer latence/route/hallucination, indexer les batches par commit Git pour comparer avant/après.",
@@ -107,7 +107,7 @@ Si l'un est manquant ou contient `{{...}}`, corrige avec `Edit`. Ne touche pas a
 
 ## À propos
 
-Application desktop scaffoldée via [claude-electron-app-template](https://github.com/petitmaker/claude-electron-app-template) v{{templateVersion}}.
+Application desktop scaffoldée via [claude-electron-app-template](https://github.com/example/bridge-erp-template) v{{templateVersion}}.
 
 Brief source : `{{briefPath}}`
 
@@ -189,11 +189,11 @@ Chaque agent append un bloc `## <agent-name> ({{ISO timestamp}})` ci-dessous.
   "briefPath": "/Users/marcelle/.claude/briefs/brief-marcelle-calibre.md",
   "outputDir": "/Users/marcelle/Documents/marcelle-calibre",
   "placeholders": {
-    "APP_NAME": "Marcelle-Calibre",
-    "APP_ID": "fr.petitmaker.marcelle-calibre",
+    "APP_NAME": "Demo-Calibre",
+    "APP_ID": "com.example.demo-erp",
     "NEXT_PORT": 3200,
     "DAEMON_PORT": 7556,
-    "DATA_DIR_NAME": "Marcelle-Calibre",
+    "DATA_DIR_NAME": "Demo-Calibre",
     "ENTITY_NAME": "batch",
     "ENTITY_NAME_PLURAL": "batches",
     "DOMAIN_BRIEF": "..."
@@ -275,8 +275,8 @@ Cas avec warnings (status reste `ok`) :
   "status": "ok",
   "filesTouched": ["package.json", "README.md", "factory-journal.md", ".factory-meta.json"],
   "warnings": [
-    "placeholder {{ENTITY_NAME}} résiduel dans server/db.ts:12 — à corriger par domain-modeler ou init-from-template.mjs",
-    "placeholder {{DAEMON_PORT}} résiduel dans electron/main.cjs:34 — bug init-from-template.mjs à investiguer"
+    "placeholder achat résiduel dans server/db.ts:12 — à corriger par domain-modeler ou init-from-template.mjs",
+    "placeholder 7707 résiduel dans electron/main.cjs:34 — bug init-from-template.mjs à investiguer"
   ],
   "errors": []
 }
@@ -297,18 +297,18 @@ Cas avec warnings (status reste `ok`) :
 
 ---
 
-## Exemple concret — brief Marcelle-Calibre
+## Exemple concret — brief Demo-Calibre
 
 **Input** :
 
 ```json
 {
   "outputDir": "/Users/marcelle/Documents/marcelle-calibre",
-  "appName": "Marcelle-Calibre",
-  "appId": "fr.petitmaker.marcelle-calibre",
+  "appName": "Demo-Calibre",
+  "appId": "com.example.demo-erp",
   "nextPort": 3200,
   "daemonPort": 7556,
-  "dataDirName": "Marcelle-Calibre",
+  "dataDirName": "Demo-Calibre",
   "entityName": "batch",
   "entityNamePlural": "batches",
   "domainBrief": "Calibrer Marcelle (bot EHPAD) en lançant des batches de questions sur Maestro Android + API HTTP, mesurer latence/route/hallucination, indexer les batches par commit Git.",

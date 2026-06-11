@@ -387,7 +387,7 @@ Chaque item ouvre/ferme son propre run (UUID unique géré par `runs.ts` invaria
 
 ## Exemples
 
-### Exemple 1 — Marcelle-Calibre (maestro + http-api + git_binding)
+### Exemple 1 — Demo-Calibre (maestro + http-api + git_binding)
 
 **Brief** :
 
