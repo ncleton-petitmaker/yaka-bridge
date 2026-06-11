@@ -1,0 +1,53 @@
+name: Module request
+description: Propose a new ERP module for the catalog.
+title: "[Module]: "
+labels: ["module", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Modules must be generic and client-neutral. Do not include customer data.
+  - type: input
+    id: module_id
+    attributes:
+      label: Technical module id
+      description: English lowercase id, no spaces, no customer names.
+      placeholder: stock
+    validations:
+      required: true
+  - type: input
+    id: labels
+    attributes:
+      label: UI labels
+      description: French and English labels.
+      placeholder: Stocks / Inventory
+    validations:
+      required: true
+  - type: textarea
+    id: workflows
+    attributes:
+      label: Workflows
+      description: Human workflows expected in the module UI.
+    validations:
+      required: true
+  - type: textarea
+    id: agentic
+    attributes:
+      label: Agentic actions
+      description: Actions that should exist through HTTP/MCP/Bridge.
+    validations:
+      required: true
+  - type: textarea
+    id: data_model
+    attributes:
+      label: Data model
+      description: Tables, relations and external systems expected.
+    validations:
+      required: true
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy
+      options:
+        - label: This request contains no real customer data.
+          required: true

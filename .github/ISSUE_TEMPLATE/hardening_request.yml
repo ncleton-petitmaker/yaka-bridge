@@ -1,0 +1,46 @@
+name: Security hardening request
+description: Suggest non-sensitive security, CI or maintenance hardening.
+title: "[Hardening]: "
+labels: ["security-hardening", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use SECURITY.md for vulnerabilities. This public form is only for
+        non-sensitive hardening ideas.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Auth/authZ
+        - Bridge tokens/jobs
+        - Supabase RLS/migrations
+        - CI/audit/dependencies
+        - CORS/deployment
+        - Documentation/runbooks
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What should be hardened and why?
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: How should this be tested?
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety
+      options:
+        - label: This is not an active vulnerability report.
+          required: true
+        - label: This issue contains no secrets or customer data.
+          required: true
