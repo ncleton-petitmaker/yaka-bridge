@@ -27,9 +27,11 @@ explicitement décidées :
 6. Premier administrateur ERP.
 7. Modules initiaux (`MODULES`), par défaut `["purchasing"]` si le client veut
    le socle démontrable.
-8. Services attendus et sous-domaines publics.
-9. Politique de sauvegarde : cible externe, rétention, test restore.
-10. Contraintes métier et d'usage : qui utilise ChatGPT, qui installe Bridge,
+8. Design system initial : `claude`, design system existant ou création avec
+   `nexu-io/open-design`.
+9. Services attendus et sous-domaines publics.
+10. Politique de sauvegarde : cible externe, rétention, test restore.
+11. Contraintes métier et d'usage : qui utilise ChatGPT, qui installe Bridge,
     quels documents transitent, quels workflows sont sensibles.
 
 Si un secret est fourni dans le chat, demande sa rotation et ne l'écris jamais
@@ -86,7 +88,8 @@ public, dashboard proxy sans auth séparée.
 
 ## Méthode VPS
 
-1. Créer le repo privé client depuis yaka-bridge avec un brief `MODULES`.
+1. Créer le repo privé client depuis yaka-bridge avec un brief `MODULES` et
+   `DESIGN_SYSTEM`.
 2. Initialiser le VPS :
    - mises à jour système ;
    - utilisateur non-root si demandé par la politique client ;

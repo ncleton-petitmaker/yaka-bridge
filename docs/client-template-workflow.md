@@ -6,7 +6,9 @@ belong in private repositories.
 Use `skills-template/_global/yaka-bridge-create-module.skill.md` when creating
 or extracting a module. Use
 `skills-template/_global/yaka-bridge-new-client-vps.skill.md` when creating a
-new customer ERP or provisioning a VPS.
+new customer ERP or provisioning a VPS. Use
+`skills-template/_global/yaka-bridge-refactor-design-system.skill.md` when a
+client changes the design system for all modules and Bridge.
 
 ## Create a new ERP client
 
@@ -23,6 +25,7 @@ new customer ERP or provisioning a VPS.
    SUBPROCESS: codex-cli
    MODULES:
      - purchasing
+   DESIGN_SYSTEM: claude
    DOMAIN_BRIEF: Customer ERP using the purchasing module.
    ```
 
@@ -38,6 +41,10 @@ node scripts/new-app-from-brief.mjs \
 
 3. Run `npm ci`, `npm run typecheck`, `npm run build` in the generated app.
 4. Configure Supabase, auth origins and Bridge deployment secrets outside git.
+
+Choose the design system during this first setup. `claude` is the default. A
+client-specific design system must stay in the private client repo unless it is
+generic enough to anonymize and promote back into the template.
 
 ## Add a module to an existing client ERP
 

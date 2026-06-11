@@ -31,6 +31,8 @@ Avant d'écrire du code, pose ces questions si elles ne sont pas déjà résolue
 5. Quelles actions doivent être pilotables par agent via MCP et Bridge ?
 6. Quelles données doivent rester privées côté client ?
 7. Quels services web ou sous-domaines sont nécessaires ?
+8. Le module doit-il respecter le design system actif ou existe-t-il une
+   contrainte design client à garder privée ?
 
 Si l'utilisateur demande d'avancer sans réponse complète, choisis la variante
 la plus robuste en production et documente l'hypothèse dans le journal de
@@ -44,6 +46,8 @@ travail.
 - Les ids techniques restent en anglais ; les labels UI sont bilingues.
 - Chaque module possède `modules/<moduleId>/module.config.json` comme contrat
   canonique.
+- Chaque module consomme le design system actif via tokens/classes partagés ; il
+  ne crée pas sa propre charte locale.
 - Toute mutation visible dans l'UI possède une action serveur typée exposée en
   HTTP et en MCP.
 - Les actions métier reçoivent un contexte serveur (`ActionContext`) ; le

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="App mark">
+  <rect width="64" height="64" rx="14" fill="#f7f4ed"/>
+  <rect x="1.5" y="1.5" width="61" height="61" rx="12.5" fill="none" stroke="#d8d3c8" stroke-width="3"/>
+  <path d="M20 40h24M20 32h24M20 24h24" stroke="#24221f" stroke-width="5" stroke-linecap="round"/>
+</svg>

@@ -1,0 +1,17 @@
+{
+  "contractVersion": "1.0.0",
+  "active": "claude",
+  "source": "design-systems/claude",
+  "targets": [
+    "app",
+    "modules",
+    "bridge"
+  ],
+  "appliedFiles": {
+    "appCss": "app/design-system.css",
+    "designDoc": "DESIGN.md",
+    "bridgeTokens": "bridge/design-system.json",
+    "appMark": "public/app-mark.svg",
+    "bridgeMark": "public/bridge-mark.svg"
+  }
+}

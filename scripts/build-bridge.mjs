@@ -25,7 +25,7 @@ for (const [entry, outfile, externalPackages] of [
   });
 }
 
-for (const file of ["electron-main.cjs", "bridge-preload.cjs", "provider-setup.cjs"]) {
+for (const file of ["electron-main.cjs", "bridge-preload.cjs", "provider-setup.cjs", "design-system.json"]) {
   await copyFile(resolve(root, "bridge", file), resolve(outdir, file));
 }
 

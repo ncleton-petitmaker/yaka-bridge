@@ -21,6 +21,8 @@ Read:
 - Do not add unauthenticated production routes.
 - Do not add CORS wildcards for production.
 - Do not let UI code bypass server actions for business mutations.
+- Do not hardcode a module-specific visual language; use the active design
+  system tokens and shared components.
 - Do not let clients provide arbitrary `organizationId` to business actions.
 - Do not weaken RLS, scopes, token validation or audit.
 
@@ -71,6 +73,10 @@ A module contribution must include:
 - docs.
 
 Technical ids are English. UI labels may be bilingual.
+
+Module UI must consume the active design system. If the customer changes design
+system later, the module should migrate through
+`yaka-bridge-refactor-design-system` without business rewrites.
 
 ## Changing cloud or Bridge security
 

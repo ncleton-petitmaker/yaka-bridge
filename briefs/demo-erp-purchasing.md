@@ -4,6 +4,7 @@ NEXT_PORT: 3307
 DAEMON_PORT: 7707
 DATA_DIR_NAME: Bridge ERP Demo
 PROJECT_MODE: new
+DESIGN_SYSTEM: claude
 ENTITY: purchase_request
 ENTITY_PLURAL: purchase_requests
 SUBPROCESS: codex-cli
@@ -27,4 +28,3 @@ AGENTIC_FIRST: true
 MCP_ACTIONS:
   - purchasing.quote.import
   - purchasing.quote.analyze
-

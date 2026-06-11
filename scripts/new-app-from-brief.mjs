@@ -83,6 +83,8 @@ const BriefSchema = z.object({
   EXTRA_ROUTES: z.array(z.string()).optional(),
   SKILLS: z.array(z.string()).optional(),
   MODULES: z.array(z.string()).optional().default([]),
+  DESIGN_SYSTEM: z.string().optional().default("claude"),
+  DESIGN_SYSTEM_SOURCE: z.string().optional(),
   AGENTIC_FIRST: z.coerce.boolean().optional().default(true),
   MCP_ACTIONS: z.array(z.string()).optional(),
 });
@@ -159,6 +161,9 @@ function readBrief(briefPath) {
   if (typeof doc.MODULES === "string") {
     doc.MODULES = doc.MODULES.split(",").map((moduleId) => moduleId.trim()).filter(Boolean);
   }
+  if (typeof doc.DESIGN_SYSTEM === "string") {
+    doc.DESIGN_SYSTEM = doc.DESIGN_SYSTEM.trim() || "claude";
+  }
   return doc;
 }
 
@@ -229,6 +234,14 @@ function validateBrief(raw, templateDir = DEFAULT_TEMPLATE_DIR, options = {}) {
   if (unknownModules.length) {
     throw new Error(`MODULES contient des modules inconnus: ${unknownModules.join(", ")}`);
   }
+  if (!brief.DESIGN_SYSTEM_SOURCE) {
+    const knownDesignSystems = availableDesignSystemIds(templateDir);
+    if (!knownDesignSystems.includes(brief.DESIGN_SYSTEM)) {
+      throw new Error(
+        `DESIGN_SYSTEM inconnu: ${brief.DESIGN_SYSTEM}. Disponibles: ${knownDesignSystems.join(", ")}`
+      );
+    }
+  }
   if (!options.legacyEntity && brief.MODULES.length === 0) {
     throw new Error("MODULES doit contenir au moins un module catalogue. Utilise --legacy-entity pour un ancien scaffold ENTITY.");
   }
@@ -241,6 +254,17 @@ function availableModuleIds(templateDir) {
   return readdirSync(modulesDir)
     .filter((entry) => {
       const configPath = join(modulesDir, entry, "module.config.json");
+      return existsSync(configPath) && statSync(configPath).isFile();
+    })
+    .sort();
+}
+
+function availableDesignSystemIds(templateDir) {
+  const systemsDir = resolve(templateDir, "design-systems");
+  if (!existsSync(systemsDir)) return [];
+  return readdirSync(systemsDir)
+    .filter((entry) => {
+      const configPath = join(systemsDir, entry, "design-system.config.json");
       return existsSync(configPath) && statSync(configPath).isFile();
     })
     .sort();
@@ -434,6 +458,8 @@ function buildAgentPrompt(agentName, brief, outputDir) {
     ...(brief.SOURCE_PROJECT_DIR ? [`- SOURCE_PROJECT_DIR: ${brief.SOURCE_PROJECT_DIR}`] : []),
     `- AGENTIC_FIRST: ${brief.AGENTIC_FIRST !== false}`,
     `- MODULES: ${brief.MODULES.join(", ")}`,
+    `- DESIGN_SYSTEM: ${brief.DESIGN_SYSTEM}`,
+    ...(brief.DESIGN_SYSTEM_SOURCE ? [`- DESIGN_SYSTEM_SOURCE: ${brief.DESIGN_SYSTEM_SOURCE}`] : []),
     `- ENTITY: ${brief.ENTITY} (plural: ${brief.ENTITY_PLURAL})`,
     `- SUBPROCESS: ${brief.SUBPROCESS}`,
     `- OUTPUT_DIR: ${outputDir}`,
@@ -619,6 +645,32 @@ async function runInitFromTemplate(brief, outputDir, opts) {
     return;
   }
   await runCmd("node", args, { cwd: outputDir });
+}
+
+// ----- Step: apply selected design system -----
+
+async function applyDesignSystem(brief, outputDir, opts) {
+  if (opts.dryRun) {
+    console.log(
+      `[dry-run] appliquerait le design system ${brief.DESIGN_SYSTEM} dans ${outputDir}`
+    );
+    return { selected: brief.DESIGN_SYSTEM, mode: "dry-run" };
+  }
+  const args = [
+    "scripts/apply-design-system.mjs",
+    "--design-system",
+    brief.DESIGN_SYSTEM,
+    "--target-dir",
+    outputDir,
+  ];
+  if (brief.DESIGN_SYSTEM_SOURCE) {
+    args.push("--source", brief.DESIGN_SYSTEM_SOURCE);
+  }
+  await runCmd("node", args, { cwd: outputDir });
+  return {
+    selected: brief.DESIGN_SYSTEM,
+    source: brief.DESIGN_SYSTEM_SOURCE ?? `design-systems/${brief.DESIGN_SYSTEM}`,
+  };
 }
 
 // ----- Step: configure selected ERP modules -----
@@ -959,7 +1011,10 @@ async function main() {
     await runInitFromTemplate(brief, outputDir, opts);
     report.steps.init = "ok";
 
-    console.log("[factory] Step 2b — configure ERP modules");
+    console.log("[factory] Step 2b — apply design system");
+    report.steps.designSystem = await applyDesignSystem(brief, outputDir, opts);
+
+    console.log("[factory] Step 2c — configure ERP modules");
     report.steps.modules = configureModules(brief, outputDir, opts);
 
     // Initialise factory-journal.md
@@ -967,9 +1022,10 @@ async function main() {
       const journalPath = join(outputDir, "factory-journal.md");
       writeFileSync(
         journalPath,
-        `# Factory journal — ${brief.APP_NAME}\n\n` +
+          `# Factory journal — ${brief.APP_NAME}\n\n` +
           `- Brief: ${opts.briefName}\n` +
           `- Template version: ${templateVersion}\n` +
+          `- Design system: ${brief.DESIGN_SYSTEM}\n` +
           `- Started: ${report.startedAt}\n`,
         "utf8"
       );
