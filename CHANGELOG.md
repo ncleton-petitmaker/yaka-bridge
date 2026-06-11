@@ -19,6 +19,8 @@ and focus on operationally relevant changes.
   client repos, module repos, GitHub protections and SemVer promotion.
 - Repo-local Codex skill activation under `.codex/skills/` with
   `skills:sync` and `skills:check`.
+- `yaka-bridge-onboard` setup assistant and `codex:onboard` command for guided
+  GitHub, OVH/VPS, DNS, Supabase, module, design system and Bridge setup.
 - Production-hardening baseline for auth, Bridge tokens, Supabase RLS, CI and
   dependency audit.
 - Generic `purchasing` module with manifest, demo seeds and Supabase migration.

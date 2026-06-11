@@ -131,6 +131,19 @@ Requirements:
 - Supabase CLI for local database verification
 - Docker if running Supabase locally
 
+For a guided setup in Codex:
+
+```bash
+git clone https://github.com/<owner>/yaka-bridge.git
+cd yaka-bridge
+npm ci
+npm run codex:onboard
+```
+
+If you are using Codex Desktop instead of the CLI, run
+`npm --silent run codex:onboard:prompt` and paste the prompt into Codex with
+this repo open.
+
 Install and verify the template:
 
 ```bash
@@ -242,6 +255,9 @@ This repository ships Codex skills under `.codex/skills/`. They are generated
 from `skills-template/_global/` so the same operator workflows are available to
 Codex in this repo and to generated yaka-bridge apps at runtime.
 
+The entrypoint skill is `yaka-bridge-onboard`; it launches the setup assistant
+for GitHub, OVH/VPS, DNS, Supabase, modules, design system and Bridge.
+
 Synchronize after editing a shipped skill:
 
 ```bash
@@ -343,6 +359,7 @@ For customer deployments, also verify:
 Start here:
 
 - [Operator guide](docs/yaka-bridge-operator-guide.md)
+- [Onboarding](docs/onboarding.md)
 - [Architecture](docs/architecture.md)
 - [Design systems](docs/design-systems.md)
 - [Module catalog](docs/module-catalog.md)

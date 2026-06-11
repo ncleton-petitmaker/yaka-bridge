@@ -81,6 +81,8 @@
     "security:grep": "node scripts/security-grep.mjs",
     "skills:sync": "node scripts/sync-codex-skills.mjs",
     "skills:check": "node scripts/sync-codex-skills.mjs --check",
+    "codex:onboard": "node scripts/codex-onboard.mjs",
+    "codex:onboard:prompt": "node scripts/codex-onboard.mjs --print",
     "factory:check": "node scripts/factory-check.mjs",
     "deploy-data": "node scripts/postinstall.mjs",
     "lint": "next lint",
