@@ -127,7 +127,7 @@ et ne pas annoncer que le site est en ligne.
 ## Garde-Fous
 
 - Ne pas utiliser `deploy-to-vercel`, `vercel deploy`, `vercel link`,
-  `vercel ls`, ni un fallback Vercel pour Yaka-Bridge.
+  `vercel ls`, ni une solution Vercel de remplacement pour Yaka-Bridge.
 - Ne pas imprimer de token, webhook secret, service role key ou variable
   sensible.
 - Ne pas mélanger les changements de landing avec des refactors ERP non liés.
