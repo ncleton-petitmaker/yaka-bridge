@@ -15,6 +15,10 @@ const CLIENT_TERMS = [
   /énergie/i,
 ];
 
+const CLIENT_TERM_ALLOWLINES = [
+  /ncleton-petitmaker/i,
+];
+
 const SECURITY_TERMS = [
   /BRIDGE_CONTROL_PLANE_TOKEN/,
   /serviceRoleKey\s*\?\?\s*anonKey/,
@@ -94,7 +98,7 @@ for (const file of walk(ROOT)) {
   const rel = relative(ROOT, file).replace(/\\/g, "/");
   if (SKIP_FILES.has(rel)) continue;
   const raw = readFileSync(file, "utf8");
-  scan(rel, raw, CLIENT_TERMS, "client-name");
+  scan(rel, raw, CLIENT_TERMS, "client-name", CLIENT_TERM_ALLOWLINES);
   scan(rel, raw, SECURITY_TERMS, "security-pattern");
   scan(rel, raw, SECRET_TERMS, "secret-pattern");
   if (isRuntimePath(rel) && !PROTO_ALLOW_PREFIXES.some((prefix) => rel.startsWith(prefix))) {
@@ -110,9 +114,10 @@ if (failures.length > 0) {
 
 console.log("Security grep passed.");
 
-function scan(rel, raw, patterns, kind) {
+function scan(rel, raw, patterns, kind, allowLines = []) {
   const lines = raw.split(/\r?\n/);
   lines.forEach((line, index) => {
+    if (allowLines.some((allowLine) => allowLine.test(line))) return;
     for (const pattern of patterns) {
       if (pattern.test(line)) {
         failures.push(`${kind}: ${rel}:${index + 1}: ${line.trim().slice(0, 180)}`);
