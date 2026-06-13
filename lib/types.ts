@@ -73,7 +73,9 @@ export interface SkillEntry {
 export interface StartRunRequest {
   prompt: string;
   tag?: string;
+  agentProvider?: "codex-cloud" | "codex-lmstudio";
   model?: string;
+  localModel?: string;
   addDirs?: string[];
   allowedTools?: string[];
   maxTurns?: number;

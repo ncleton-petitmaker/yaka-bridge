@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AppChromeHeader } from "@/components/AppChromeHeader";
+import { AdminShell, AdminStat } from "@/components/AdminShell";
+import { Icon } from "@/components/Icon";
 import { apiFetch } from "@/lib/api-client";
 
 type Severity = "info" | "warning" | "error" | "critical";
@@ -150,26 +151,20 @@ export default function ObservabilityPage() {
   }, [selectedEvent]);
 
   return (
-    <div className="app">
-      <AppChromeHeader />
-      <main style={{ flex: 1, overflowY: "auto", padding: 32, maxWidth: 1280, width: "100%", margin: "0 auto" }}>
-        <header style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "flex-end", marginBottom: 18 }}>
-          <div>
-            <h1 style={{ fontFamily: "var(--serif)", fontWeight: 600, fontSize: 28, margin: 0 }}>Observation</h1>
-            <p style={{ color: "var(--text-muted)", fontSize: 13, margin: "6px 0 0" }}>
-              Sessions support, erreurs client et liens OpenReplay.
-            </p>
-          </div>
-          <button className="primary" type="button" onClick={() => void load()} disabled={loading}>
-            {loading ? "Actualisation..." : "Actualiser"}
-          </button>
-        </header>
-
-        <section style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10, marginBottom: 14 }}>
-          <Stat label="Ouverts" value={data?.stats.open ?? 0} />
-          <Stat label="Critiques" value={data?.stats.bySeverity.critical ?? 0} color="var(--red-fg)" />
-          <Stat label="Erreurs" value={data?.stats.bySeverity.error ?? 0} color="var(--red-fg)" />
-          <Stat label="Sessions" value={sessions.length} />
+    <AdminShell
+      title="Observation"
+      description="Sessions support, événements client et corrélations OpenReplay."
+      actions={
+        <button type="button" className="icon-btn" onClick={() => void load()} disabled={loading} title="Actualiser" aria-label="Actualiser">
+          <Icon name="refresh" size={14} />
+        </button>
+      }
+    >
+        <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 170px), 1fr))", gap: 10, marginBottom: 14 }}>
+          <AdminStat label="Ouverts" value={data?.stats.open ?? 0} />
+          <AdminStat label="Critiques" value={data?.stats.bySeverity.critical ?? 0} tone="error" />
+          <AdminStat label="Erreurs" value={data?.stats.bySeverity.error ?? 0} tone="error" />
+          <AdminStat label="Sessions" value={sessions.length} />
         </section>
 
         <section className="pane" style={{ padding: 14, display: "flex", gap: 10, alignItems: "center", marginBottom: 14 }}>
@@ -240,7 +235,7 @@ export default function ObservabilityPage() {
           )}
         </section>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1.2fr 0.8fr", gap: 14, alignItems: "start" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 360px), 1fr))", gap: 14, alignItems: "start" }}>
           <section className="pane" style={{ overflow: "hidden" }}>
             <div style={sectionHeadStyle}>
               <strong>Événements</strong>
@@ -316,17 +311,7 @@ export default function ObservabilityPage() {
             )}
           </aside>
         </div>
-      </main>
-    </div>
-  );
-}
-
-function Stat({ label, value, color }: { label: string; value: number; color?: string }) {
-  return (
-    <article className="pane" style={{ padding: 14 }}>
-      <div style={{ color: "var(--text-muted)", fontSize: 12 }}>{label}</div>
-      <strong style={{ color, fontSize: 24 }}>{value}</strong>
-    </article>
+    </AdminShell>
   );
 }
 

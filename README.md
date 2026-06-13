@@ -212,6 +212,12 @@ Apply a design system manually:
 npm run design:apply -- --design-system claude
 ```
 
+Import a raw OpenDesign/customer source and apply it:
+
+```bash
+npm run design:import -- --id customer-system --source /path/to/DESIGN.md --apply
+```
+
 Imported systems use the yaka-bridge contract:
 
 ```text
@@ -225,8 +231,9 @@ design-systems/<id>/
 
 For new visual directions, the recommended workflow is to create or explore the
 system with [nexu-io/open-design](https://github.com/nexu-io/open-design),
-adapt it to the yaka-bridge contract, then run the
-`yaka-bridge-refactor-design-system` skill across app, modules and Bridge.
+import it with `design:import`, then run the `yaka-bridge-refactor-design-system`
+skill across app, modules and Bridge when the visual change affects layout,
+density or component behavior.
 
 See [docs/design-systems.md](docs/design-systems.md).
 
@@ -339,7 +346,7 @@ See [docs/vps-provisioning-runbook.md](docs/vps-provisioning-runbook.md) and
 Security is treated as a product invariant:
 
 - No real customer names, domains, prompts or data in this public template.
-- No server fallback from service role key to anon key.
+- No server downgrade from service role key to anon key.
 - Cloud private routes require Supabase bearer auth.
 - Actions receive server-controlled `ActionContext`, never arbitrary
   client-provided `organizationId`.
@@ -388,6 +395,7 @@ Start here:
 - [Module catalog](docs/module-catalog.md)
 - [Repository governance](docs/repository-governance.md)
 - [Cloud security](docs/cloud-security.md)
+- [Local AI routing](docs/local-ai-routing.md)
 - [Client/template workflow](docs/client-template-workflow.md)
 - [Bridge multi-services](docs/bridge-multiservices.md)
 - [Supabase VPS architecture](docs/supabase-vps-architecture.md)

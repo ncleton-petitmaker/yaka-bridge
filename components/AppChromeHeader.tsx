@@ -24,7 +24,7 @@ interface NavTab {
 const baseTabs: NavTab[] = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/runs", label: "Achats" },
-  { href: "/admin/observability", label: "Observation" },
+  { href: "/admin", label: "Admin" },
 ];
 
 const APP_NAME = "Bridge ERP Demo";

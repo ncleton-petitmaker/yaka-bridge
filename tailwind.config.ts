@@ -1,20 +1,16 @@
 import type { Config } from "tailwindcss";
 
 /**
- * Tailwind config aligned with the TeamFactory design system.
- * All colors map to CSS variables defined in `app/globals.css`.
- * Components MUST consume tokens (never hex). See agent
- * `ui-page-generator.md` for enforcement rules.
- *
- * Source: /Users/marcelle/Downloads/TeamFactory/teamfactory.css
- *         + DESIGN.md + brand-spec.md (2026-05-17)
+ * Tailwind aliases for the active yaka-bridge design system.
+ * All visual values map to CSS variables from `app/design-system.css`.
  */
 const config: Config = {
   content: [
     "./app/**/*.{js,ts,jsx,tsx,mdx}",
     "./components/**/*.{js,ts,jsx,tsx,mdx}",
+    "./modules/**/*.{js,ts,jsx,tsx,mdx}",
   ],
-  // preflight off : on garde les resets TeamFactory de globals.css
+  // Shared resets live in app/globals.css; design values live in app/design-system.css.
   corePlugins: { preflight: false },
   darkMode: ["selector", "[data-theme='dark']"],
   theme: {
@@ -45,14 +41,14 @@ const config: Config = {
         "text-soft": "var(--soft)",
         "text-faint": "var(--faint)",
 
-        // Accent (rationed ≤2 uses / screen)
+        // Accent
         accent: "var(--accent)",
         "accent-strong": "var(--accent-strong)",
         "accent-soft": "var(--accent-soft)",
         "accent-tint": "var(--accent-tint)",
         "accent-hover": "var(--accent-hover)",
 
-        // Status tint families — never use the accent for these
+        // Status tint families
         green: {
           DEFAULT: "var(--green)",
           fg: "var(--green-fg)",
@@ -85,43 +81,12 @@ const config: Config = {
         },
       },
       fontFamily: {
-        display: [
-          "Source Serif Pro",
-          "Source Serif 4",
-          "Iowan Old Style",
-          "Georgia",
-          "Times New Roman",
-          "serif",
-        ],
-        serif: [
-          "Source Serif Pro",
-          "Source Serif 4",
-          "Iowan Old Style",
-          "Georgia",
-          "Times New Roman",
-          "serif",
-        ],
-        sans: [
-          "-apple-system",
-          "BlinkMacSystemFont",
-          "Inter",
-          "Segoe UI",
-          "Roboto",
-          "Helvetica Neue",
-          "Arial",
-          "sans-serif",
-        ],
-        mono: [
-          "ui-monospace",
-          "SF Mono",
-          "SFMono-Regular",
-          "Menlo",
-          "Consolas",
-          "monospace",
-        ],
+        display: ["var(--serif)"],
+        serif: ["var(--serif)"],
+        sans: ["var(--sans)"],
+        mono: ["var(--mono)"],
       },
       fontSize: {
-        // DESIGN.md §3 hierarchy
         eyebrow: ["11px", { lineHeight: "1", letterSpacing: "0.08em" }],
         caption: ["11.5px", { lineHeight: "1.4" }],
         label: ["12px", { lineHeight: "1.4", fontWeight: "500" }],
@@ -135,11 +100,11 @@ const config: Config = {
         h1: ["30px", { lineHeight: "1.2", letterSpacing: "-0.02em", fontWeight: "600" }],
       },
       borderRadius: {
-        sm: "6px",
-        DEFAULT: "10px",
-        md: "10px",
-        lg: "14px",
-        pill: "999px",
+        sm: "var(--radius-sm)",
+        DEFAULT: "var(--radius)",
+        md: "var(--radius-md)",
+        lg: "var(--radius-lg)",
+        pill: "var(--radius-pill)",
       },
       boxShadow: {
         xs: "var(--shadow-xs)",
@@ -148,10 +113,10 @@ const config: Config = {
         lg: "var(--shadow-lg)",
       },
       transitionTimingFunction: {
-        tf: "cubic-bezier(.2,0,.2,1)",
+        tf: "var(--ease)",
       },
       transitionDuration: {
-        fast: "120ms",
+        fast: "var(--t-fast)",
       },
       keyframes: {
         pulse: {

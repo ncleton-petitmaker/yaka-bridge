@@ -2,25 +2,33 @@
 
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
 import type { Session } from "@supabase/supabase-js";
 import { getApiMode } from "@/lib/api-client";
 import { getSupabaseBrowserClient } from "@/lib/supabase-client";
 
 export function CloudAuthGate({ children }: { children: ReactNode }) {
   const isCloud = getApiMode() === "cloud";
+  const pathname = usePathname();
+  const isBridgeCallback = pathname === "/auth/bridge/callback";
   const supabase = getSupabaseBrowserClient();
   const [session, setSession] = useState<Session | null>(null);
-  const [loading, setLoading] = useState(isCloud);
+  const [loading, setLoading] = useState(isCloud && !isBridgeCallback);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
+    if (isBridgeCallback) {
+      setLoading(false);
+      return;
+    }
     if (!isCloud || !supabase) {
       setLoading(false);
       return;
     }
+    setLoading(true);
     let alive = true;
     supabase.auth.getSession().then(({ data }) => {
       if (!alive) return;
@@ -35,7 +43,7 @@ export function CloudAuthGate({ children }: { children: ReactNode }) {
       alive = false;
       data.subscription.unsubscribe();
     };
-  }, [isCloud, supabase]);
+  }, [isBridgeCallback, isCloud, supabase]);
 
   useEffect(() => {
     if (!isCloud) return;
@@ -47,7 +55,7 @@ export function CloudAuthGate({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("app-auth-invalid", onInvalidAuth);
   }, [isCloud]);
 
-  if (!isCloud) return <>{children}</>;
+  if (!isCloud || isBridgeCallback) return <>{children}</>;
 
   if (!supabase) {
     return (

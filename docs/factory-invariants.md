@@ -24,7 +24,7 @@ desktop "Electron + daemon Hono + subprocess + skills".
   routing, port detection, IPC, quit cleanup, onboarding Claude.
 - `electron/preload.cjs`, `electron/setup-preload.cjs`,
   `electron/claude-dialog-preload.cjs` — bridges IPC.
-- `scripts/start.js` — fallback non-Electron (lance daemon + Next + ouvre
+- `scripts/start.mjs` — mode non-Electron (lance daemon + Next + ouvre
   browser).
 - `scripts/build-server.mjs` — bundling esbuild `server/index.ts → dist/server.cjs`.
 - `scripts/prepare-pack.mjs`, `scripts/electron-builder-after-pack.cjs` —

@@ -157,8 +157,8 @@ injectant le descripteur dans le prompt. Chaque agent est **strictement borné**
 - **Invariant** : logo le plus simple possible ; pas d'illustration métier, pas
   de dégradé décoratif, pas de mascotte, pas de palette hors design system. Si
   l'app expose plusieurs modules, leurs icônes doivent former une famille
-  cohérente : tuiles façon Odoo en structure, mais charte Claude/TeamFactory
-  en couleurs, formes et sobriété.
+  cohérente : tuiles applicatives en structure, mais couleurs, formes et
+  sobriété dictées par le design system actif.
 - **Fiche complète** :
   [`pi-electron-app-factory/claude-agents/brand-identity-designer.md`](../pi-electron-app-factory/claude-agents/brand-identity-designer.md)
 

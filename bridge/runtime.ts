@@ -24,6 +24,11 @@ import {
   type CloudBridgeJob,
 } from "./types.js";
 import {
+  resolveBridgeAgentRouteRequest,
+  selectResolvedBridgeAgentRoute,
+  type BridgeLocalAgentReadiness,
+} from "./agent-routing.js";
+import {
   attachListener,
   cancelRun,
   getRun,
@@ -32,11 +37,14 @@ import {
   waitForRun,
 } from "../server/runs.js";
 import { buildEnrichedPath, findCodexBin } from "../server/agents.js";
+import { probeLmStudioStatus } from "../server/agents-status.js";
 import { setPricingDataDir } from "../server/pricing.js";
 
 let codexStatusCache: { checkedMs: number; status: BridgeCodexStatus } | null = null;
+let localAgentReadinessCache: { checkedMs: number; model: string; readiness: BridgeLocalAgentReadiness } | null = null;
 const SUPABASE_REFRESH_MARGIN_MS =
   Number(process.env.BRIDGE_SUPABASE_REFRESH_MARGIN_MS || 10 * 60 * 1000) || 10 * 60 * 1000;
+const LOCAL_AGENT_READINESS_TTL_MS = 10_000;
 
 export interface BridgeRuntimeOptions {
   command?: "run" | "once";
@@ -117,6 +125,15 @@ class BridgeRuntime implements BridgeRuntimeHandle {
     }
     if (synced.services?.length) this.cfg.services = synced.services;
     if (synced.erpBus) this.cfg.erpBus = synced.erpBus;
+    if (synced.aiPolicy) {
+      this.cfg.aiPolicy = synced.aiPolicy;
+      if (synced.aiPolicy.localAi.enabled) {
+        this.cfg.defaultLocalModel =
+          synced.aiPolicy.localAi.allowUserModelOverride && this.cfg.defaultLocalModel
+            ? this.cfg.defaultLocalModel
+            : synced.aiPolicy.localAi.model;
+      }
+    }
     if (synced.updateBaseUrl) this.cfg.updateBaseUrl = synced.updateBaseUrl;
     if (synced.latestVersion) this.cfg.latestVersion = synced.latestVersion;
     if (synced.minimumVersion) this.cfg.minimumVersion = synced.minimumVersion;
@@ -229,11 +246,27 @@ class BridgeRuntime implements BridgeRuntimeHandle {
     let seq = 0;
     try {
       const assets = await prepareJobAssets(this.cfg, service, job);
+      const routeRequest = resolveBridgeAgentRouteRequest(job, service, this.cfg);
+      const readiness =
+        routeRequest.requestedMode === "local"
+          ? await getBridgeLocalAgentReadiness(routeRequest.localModel ?? this.cfg.defaultLocalModel ?? "openai/gpt-oss-20b")
+          : undefined;
+      const route = selectResolvedBridgeAgentRoute(routeRequest, readiness);
+      const modelOptions =
+        route.agentProvider === "codex-lmstudio"
+          ? {
+              agentProvider: route.agentProvider,
+              localModel: route.localModel,
+            }
+          : {
+              agentProvider: route.agentProvider,
+              model: route.model,
+            };
       const run = startRun({
         prompt: payload.prompt,
         cwd,
         tag: payload.tag ?? `${service.serviceId}-${job.id}`,
-        model: payload.model ?? this.cfg.defaultModel,
+        ...modelOptions,
         addDirs: Array.from(addDirs),
         allowedTools: payload.allowedTools,
         maxTurns: payload.maxTurns,
@@ -588,6 +621,9 @@ function capabilities(cfg: BridgeConfig): Record<string, unknown> {
     version: currentVersion,
     host: hostname(),
     platform: platform(),
+    agentProvider: cfg.defaultAgentProvider ?? "codex-cloud",
+    localModel: cfg.defaultLocalModel,
+    aiPolicy: cfg.aiPolicy,
     codexAvailable: codex.ready,
     codexBin: codex.path ? "detected" : "missing",
     codex,
@@ -657,8 +693,8 @@ function getRuntimeCodexStatus({ force = false } = {}): BridgeCodexStatus {
     return finish({
       ready: false,
       state: "missing",
-      label: "Codex non installé",
-      detail: "Installe Codex CLI puis connecte-le pour que Bridge puisse exécuter les agents.",
+      label: "ChatGPT Codex non installé",
+      detail: "Installe Codex CLI puis connecte-le au compte ChatGPT pour que Bridge puisse exécuter les agents.",
       path: null,
       version: null,
       loggedIn: null,
@@ -673,7 +709,7 @@ function getRuntimeCodexStatus({ force = false } = {}): BridgeCodexStatus {
     return finish({
       ready: false,
       state: "error",
-      label: "Codex à vérifier",
+      label: "ChatGPT Codex à vérifier",
       detail: "Codex est détecté, mais le test de version échoue.",
       path: bin,
       version,
@@ -695,8 +731,8 @@ function getRuntimeCodexStatus({ force = false } = {}): BridgeCodexStatus {
     return finish({
       ready: false,
       state: "login_required",
-      label: "Connexion Codex requise",
-      detail: "Codex est installé, mais il n'est pas connecté à un compte OpenAI.",
+      label: "Connexion ChatGPT Codex requise",
+      detail: "Codex est installé, mais il n'est pas connecté au compte ChatGPT.",
       path: bin,
       version,
       loggedIn: false,
@@ -708,13 +744,67 @@ function getRuntimeCodexStatus({ force = false } = {}): BridgeCodexStatus {
   return finish({
     ready: true,
     state: "ready",
-    label: "Codex prêt",
-    detail: "Codex CLI est installé et connecté. Les agents Bridge peuvent tourner sur cet ordinateur.",
+    label: "ChatGPT Codex prêt",
+    detail: "Codex CLI est installé et connecté au compte ChatGPT. Les agents Bridge peuvent tourner sur cet ordinateur.",
     path: bin,
     version,
     loggedIn: true,
     authPath: authFileExists ? authPath : null,
     diagnostic: loginOutput || undefined,
+  });
+}
+
+async function getBridgeLocalAgentReadiness(model: string): Promise<BridgeLocalAgentReadiness> {
+  const requestedModel = model.trim() || "openai/gpt-oss-20b";
+  const now = Date.now();
+  if (
+    localAgentReadinessCache &&
+    localAgentReadinessCache.model === requestedModel &&
+    now - localAgentReadinessCache.checkedMs < LOCAL_AGENT_READINESS_TTL_MS
+  ) {
+    return localAgentReadinessCache.readiness;
+  }
+
+  const finish = (readiness: BridgeLocalAgentReadiness): BridgeLocalAgentReadiness => {
+    localAgentReadinessCache = { checkedMs: now, model: requestedModel, readiness };
+    return readiness;
+  };
+
+  const bin = findCodexBin();
+  if (!bin) {
+    return finish({
+      ready: false,
+      codexReady: false,
+      supportsOss: false,
+      lmStudioAvailable: false,
+      modelAvailable: false,
+      model: requestedModel,
+      reason: "Codex CLI introuvable.",
+    });
+  }
+
+  const versionProbe = runCodexProbe(bin, ["--version"], 5_000);
+  const helpProbe = versionProbe.ok ? runCodexProbe(bin, ["exec", "--help"], 5_000) : null;
+  const helpText = `${helpProbe?.stdout ?? ""}\n${helpProbe?.stderr ?? ""}`;
+  const supportsOss = Boolean(helpProbe?.ok && /--oss\b/.test(helpText) && /--local-provider\b/.test(helpText));
+  const lmStudio = await probeLmStudioStatus(requestedModel);
+  const ready = Boolean(versionProbe.ok && supportsOss && lmStudio.available && lmStudio.modelAvailable);
+
+  return finish({
+    ready,
+    codexReady: versionProbe.ok,
+    supportsOss,
+    lmStudioAvailable: lmStudio.available,
+    modelAvailable: lmStudio.modelAvailable,
+    model: requestedModel,
+    models: lmStudio.models,
+    reason: ready
+      ? undefined
+      : !versionProbe.ok
+        ? compactProbeError(versionProbe) || "Codex CLI ne répond pas."
+        : !supportsOss
+          ? "Codex CLI ne supporte pas `--oss --local-provider`."
+          : lmStudio.error ?? "LM Studio local non prêt.",
   });
 }
 
@@ -796,6 +886,7 @@ function runtimeState(
     controlPlaneConfigured: Boolean(cfg.controlPlaneBaseUrl && (cfg.bridgeToken || cfg.session?.accessToken)),
     authenticated: Boolean(cfg.session?.accessToken || cfg.bridgeToken),
     codex: getRuntimeCodexStatus(),
+    aiPolicy: cfg.aiPolicy,
     demoMode: cfg.demoMode === true,
     services: cfg.services.map((service): BridgeRuntimeServiceState => {
       const runningJobs = runtime.runningByService.get(service.serviceId) ?? 0;

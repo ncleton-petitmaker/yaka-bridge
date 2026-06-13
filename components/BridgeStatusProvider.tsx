@@ -10,6 +10,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { usePathname } from "next/navigation";
 import { Icon } from "@/components/Icon";
 import { apiFetch } from "@/lib/api-client";
 
@@ -51,6 +52,7 @@ const POLL_MS = 15_000;
 const STORAGE_KEY = "app-template:bridge-wizard-seen";
 
 export function BridgeStatusProvider({ children }: { children: ReactNode }) {
+  const pathname = usePathname();
   const [config, setConfig] = useState<BridgeConfig | null>(null);
   const [status, setStatus] = useState<BridgeConnection>("checking");
   const [error, setError] = useState<string | null>(null);
@@ -58,6 +60,7 @@ export function BridgeStatusProvider({ children }: { children: ReactNode }) {
   const [setupOpen, setSetupOpen] = useState(false);
   const [toastDismissed, setToastDismissed] = useState(false);
   const firstLaunchHandledRef = useRef(false);
+  const suppressBridgeSetupUi = pathname === "/bridge-mascot";
 
   const refresh = useCallback(async () => {
     setStatus((current) => (current === "connected" ? current : "checking"));
@@ -76,6 +79,8 @@ export function BridgeStatusProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    if (suppressBridgeSetupUi) return;
+
     let active = true;
     async function tick() {
       if (!active) return;
@@ -87,18 +92,19 @@ export function BridgeStatusProvider({ children }: { children: ReactNode }) {
       active = false;
       window.clearInterval(id);
     };
-  }, [refresh]);
+  }, [refresh, suppressBridgeSetupUi]);
 
   useEffect(() => {
     if (!lastCheckedAt || firstLaunchHandledRef.current) return;
     firstLaunchHandledRef.current = true;
+    if (suppressBridgeSetupUi) return;
     try {
       if (localStorage.getItem(STORAGE_KEY) === "1") return;
     } catch {
       // Le badge reste utilisable si localStorage est indisponible.
     }
     setSetupOpen(true);
-  }, [lastCheckedAt]);
+  }, [lastCheckedAt, suppressBridgeSetupUi]);
 
   useEffect(() => {
     if (status === "connected") setToastDismissed(false);
@@ -126,8 +132,8 @@ export function BridgeStatusProvider({ children }: { children: ReactNode }) {
   return (
     <BridgeContext.Provider value={value}>
       {children}
-      {setupOpen && <BridgeSetupModal onClose={closeSetup} />}
-      {status === "disconnected" && !setupOpen && !toastDismissed && (
+      {setupOpen && !suppressBridgeSetupUi && <BridgeSetupModal onClose={closeSetup} />}
+      {status === "disconnected" && !setupOpen && !toastDismissed && !suppressBridgeSetupUi && (
         <button type="button" className="bridge-toast" onClick={openSetup}>
           <span className="dot" aria-hidden />
           Bridge déconnecté. Cliquer pour reconnecter.

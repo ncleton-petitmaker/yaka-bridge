@@ -45,8 +45,8 @@ function loadConfig() {
   }
   // Fallback : config app-config.json à côté de l'exécutable
   try {
-    const fallback = resolvePath(process.cwd(), ".claude", "app-config.json");
-    if (existsSync(fallback)) return JSON.parse(readFileSync(fallback, "utf8"));
+    const defaultConfigPath = resolvePath(process.cwd(), ".claude", "app-config.json");
+    if (existsSync(defaultConfigPath)) return JSON.parse(readFileSync(defaultConfigPath, "utf8"));
   } catch {
     /* ignore */
   }

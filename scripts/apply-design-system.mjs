@@ -35,6 +35,7 @@ function readJson(path) {
 }
 
 function writeJson(path, value) {
+  ensureDir(path);
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
@@ -71,7 +72,7 @@ function resolveDesignSystem(args) {
   if (!existsSync(manifestPath)) {
     throw new Error(
       `Missing design-system.config.json in ${sourceDir}.\n` +
-        `If importing from nexu-io/open-design, first create the yaka-bridge adapter manifest with the refactor skill.`
+        `Run npm run design:import -- --id <id> --source <DESIGN.md|dir> first.`
     );
   }
   const manifest = readJson(manifestPath);
@@ -144,6 +145,9 @@ function main() {
   writeJson(resolve(targetDir, "design-system.config.json"), {
     contractVersion: manifest.contractVersion ?? "1.0.0",
     active: id,
+    name: manifest.name ?? id,
+    sourceKind: manifest.sourceKind ?? "yaka-bridge",
+    sourceMeta: manifest.source ?? null,
     source: relative(targetDir, sourceDir),
     targets: manifest.targets ?? ["app", "modules", "bridge"],
     appliedFiles,

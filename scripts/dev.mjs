@@ -6,8 +6,24 @@ const NEXT_ENV_VAR = "{{APP_NAME_KEBAB_UPPER}}_NEXT_PORT";
 const DAEMON_ENV_VAR = "{{APP_NAME_KEBAB_UPPER}}_DAEMON_PORT";
 const NEXT_PORT_PLACEHOLDER = "{{NEXT_PORT}}";
 const DAEMON_PORT_PLACEHOLDER = "{{DAEMON_PORT}}";
-const NEXT_PORT = process.env[NEXT_ENV_VAR] ?? (/^\d+$/.test(NEXT_PORT_PLACEHOLDER) ? NEXT_PORT_PLACEHOLDER : "3100");
-const DAEMON_PORT = process.env[DAEMON_ENV_VAR] ?? (/^\d+$/.test(DAEMON_PORT_PLACEHOLDER) ? DAEMON_PORT_PLACEHOLDER : "7456");
+
+function valueAfter(flag) {
+  const index = process.argv.indexOf(flag);
+  return index >= 0 ? process.argv[index + 1] : undefined;
+}
+
+const cliNextPort = valueAfter("--port") ?? valueAfter("-p");
+const cliDaemonPort = valueAfter("--daemon-port");
+const NEXT_PORT =
+  cliNextPort ??
+  process.env[NEXT_ENV_VAR] ??
+  process.env.NEXT_PORT ??
+  (/^\d+$/.test(NEXT_PORT_PLACEHOLDER) ? NEXT_PORT_PLACEHOLDER : "3100");
+const DAEMON_PORT =
+  cliDaemonPort ??
+  process.env[DAEMON_ENV_VAR] ??
+  process.env.DAEMON_PORT ??
+  (/^\d+$/.test(DAEMON_PORT_PLACEHOLDER) ? DAEMON_PORT_PLACEHOLDER : "7456");
 const daemonToken = process.env.APP_DAEMON_TOKEN || randomBytes(32).toString("base64url");
 
 const children = [
@@ -25,6 +41,10 @@ const children = [
       ...process.env,
       NEXT_PUBLIC_DAEMON_PORT: String(DAEMON_PORT),
       NEXT_PUBLIC_DAEMON_TOKEN: daemonToken,
+      WATCHPACK_POLLING: process.env.WATCHPACK_POLLING ?? "true",
+      WATCHPACK_POLLING_INTERVAL: process.env.WATCHPACK_POLLING_INTERVAL ?? "1000",
+      CHOKIDAR_USEPOLLING: process.env.CHOKIDAR_USEPOLLING ?? "true",
+      CHOKIDAR_INTERVAL: process.env.CHOKIDAR_INTERVAL ?? "1000",
       [NEXT_ENV_VAR]: NEXT_PORT,
     },
   }),

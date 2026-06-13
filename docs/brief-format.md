@@ -95,7 +95,7 @@ MCP_ACTIONS:
 | ---------------- | ------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
 | `PROJECT_MODE`   | `new` \| `adapt-existing` | `new` pour un projet neuf ; `adapt-existing` si on part d'un repo/prototype existant. Défaut : `new`. | `adapt-existing`                                      |
 | `DESIGN_SYSTEM`  | string              | Design system appliqué au premier setup. Défaut : `claude`. Voir [`docs/design-systems.md`](design-systems.md). | `claude` |
-| `DESIGN_SYSTEM_SOURCE` | string        | Dossier externe d'un design system importé, déjà adapté au contrat yaka-bridge.                     | `/Users/.../design-system` |
+| `DESIGN_SYSTEM_SOURCE` | string        | Source externe à importer ou appliquer: dossier/`DESIGN.md` OpenDesign, dossier client, ou design system déjà adapté au contrat yaka-bridge. | `/Users/.../design-system` |
 | `SOURCE_PROJECT_DIR` | string          | Dossier du projet existant à auditer si `PROJECT_MODE=adapt-existing`.                                    | `/Users/.../mon-projet`                                |
 | `ADAPTATION_BRIEF` | string            | Ce qu'il faut reprendre, migrer, préserver ou éviter dans le projet existant.                              | _(bloc YAML `\|`)_                                    |
 | `ENTITY_PLURAL`  | string              | Pluriel de `ENTITY`. Si absent, déduit par ajout de `s` (sauf si singular finit déjà par `s` → identique). | `batches`                                              |
