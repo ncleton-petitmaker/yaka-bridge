@@ -127,12 +127,13 @@ export function registerBridgeControlPlaneRoutes(app: Hono, dataDir: string): vo
     const payload = envelope.payload ?? {};
     const auth = getBridgeAuth(c);
     await recordDeviceHeartbeat(auth, envelope, payload);
-    const [services, erpBus] = await Promise.all([listServices(auth), listErpBus(auth)]);
+    const [serviceRows, erpBus] = await Promise.all([listServiceRows(auth), listErpBus(auth)]);
+    const services = serviceRows.map(mapService);
     return c.json({
       ok: true,
       services,
       erpBus,
-      aiPolicy: bridgeAiPolicyFromManifests(services),
+      aiPolicy: bridgeAiPolicyFromManifests(serviceRows.map((row) => row.manifest)),
       ...bridgeUpdateInfo(),
       serverTime: new Date().toISOString(),
     });
@@ -140,12 +141,13 @@ export function registerBridgeControlPlaneRoutes(app: Hono, dataDir: string): vo
 
   app.post("/bridge/services", async (c) => {
     const auth = getBridgeAuth(c);
-    const [services, erpBus] = await Promise.all([listServices(auth), listErpBus(auth)]);
+    const [serviceRows, erpBus] = await Promise.all([listServiceRows(auth), listErpBus(auth)]);
+    const services = serviceRows.map(mapService);
     return c.json({
       ok: true,
       services,
       erpBus,
-      aiPolicy: bridgeAiPolicyFromManifests(services),
+      aiPolicy: bridgeAiPolicyFromManifests(serviceRows.map((row) => row.manifest)),
       ...bridgeUpdateInfo(),
       serverTime: new Date().toISOString(),
     });
@@ -449,6 +451,11 @@ async function bridgeAuthFromSignedToken(dataDir: string, c: Context): Promise<B
 }
 
 async function listServices(auth: BridgeAuthContext): Promise<any[]> {
+  const rows = await listServiceRows(auth);
+  return rows.map(mapService);
+}
+
+async function listServiceRows(auth: BridgeAuthContext): Promise<any[]> {
   let query = auth.supabase
     .from("bridge_services")
     .select("*")
@@ -459,7 +466,7 @@ async function listServices(auth: BridgeAuthContext): Promise<any[]> {
   if (allowed !== null) query = query.in("service_id", allowed.length ? allowed : ["__none__"]);
   const { data, error } = await query;
   if (error) throw error;
-  return (data ?? []).map(mapService);
+  return data ?? [];
 }
 
 async function listErpBus(auth: BridgeAuthContext): Promise<any> {

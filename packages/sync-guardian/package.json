@@ -1,6 +1,6 @@
 {
   "name": "@ncleton-petitmaker/yaka-sync-guardian",
-  "version": "0.0.46",
+  "version": "0.0.48",
   "private": false,
   "type": "module",
   "description": "Yaka platform/client drift detection and build guard.",

@@ -21,8 +21,10 @@ const LMSTUDIO = {
   doneTitle: "Bridge est prêt avec le moteur local",
   baseUrl: "http://127.0.0.1:1234/v1",
   defaultModel: "ibm/granite-4-micro",
+  defaultContextLength: 32768,
   macArm64DmgUrl: "https://lmstudio.ai/download/latest/darwin/arm64",
 };
+const MAC_LMSTUDIO_APP = "/Applications/LM Studio.app";
 
 const VOICE = {
   title: "Dictée locale",
@@ -236,10 +238,23 @@ async function installLmStudio(onProgress) {
   }
   if (process.platform === "darwin") {
     if (findLmStudioApp()) return;
+    const unsupportedApp = findUnsupportedLmStudioApp();
+    if (unsupportedApp) {
+      await installExistingLmStudioApp(unsupportedApp, onProgress);
+      return;
+    }
     await installLmStudioDmg(onProgress);
     return;
   }
   throw new Error("Installation automatique disponible sur Windows et macOS.");
+}
+
+async function installExistingLmStudioApp(sourceApp, onProgress) {
+  const source = safeRealpath(sourceApp) || sourceApp;
+  if (!source || !fs.existsSync(source)) throw new Error("Copie locale de LM Studio introuvable.");
+  if (findLmStudioApp()) return;
+  onProgress?.({ stage: "Déplacement de LM Studio dans /Applications...", percent: 82 });
+  await copyLmStudioAppToApplications(source, onProgress);
 }
 
 async function installLmStudioDmg(onProgress) {
@@ -270,16 +285,34 @@ async function installLmStudioDmg(onProgress) {
 
     const sourceApp = findAppBundleInDir(mountDir);
     if (!sourceApp) throw new Error("Le DMG LM Studio ne contient pas d'application installable.");
-    const targetApp = path.join(os.homedir(), "Applications", "LM Studio.app");
-    fs.mkdirSync(path.dirname(targetApp), { recursive: true });
-    fs.rmSync(targetApp, { recursive: true, force: true });
-    onProgress?.({ stage: "Installation de LM Studio...", percent: 94 });
-    const copy = await runLogged("ditto", [sourceApp, targetApp], onProgress);
-    if (copy.code !== 0) throw new Error(`Copie LM Studio échouée (code ${copy.code}). ${copy.stderr.slice(0, 300)}`);
+    onProgress?.({ stage: "Installation de LM Studio dans /Applications...", percent: 94 });
+    await copyLmStudioAppToApplications(sourceApp, onProgress);
     onProgress?.({ stage: "LM Studio installé.", percent: 100 });
   } finally {
     spawnSync("hdiutil", ["detach", mountDir, "-force"], { timeout: 10_000, encoding: "utf8" });
     fs.rmSync(workDir, { recursive: true, force: true });
+  }
+}
+
+async function copyLmStudioAppToApplications(sourceApp, onProgress) {
+  const targetApp = MAC_LMSTUDIO_APP;
+  const source = safeRealpath(sourceApp) || sourceApp;
+  if (safeRealpath(targetApp) === source && isSupportedMacAppPath(targetApp)) return;
+
+  const copyCommand = `/bin/rm -rf ${shellQuote(targetApp)} && /usr/bin/ditto ${shellQuote(source)} ${shellQuote(targetApp)}`;
+  const canWriteApplications = canWriteDir(path.dirname(targetApp));
+  if (canWriteApplications) {
+    fs.rmSync(targetApp, { recursive: true, force: true });
+    const copy = await runLogged("ditto", [source, targetApp], onProgress);
+    if (copy.code !== 0) throw new Error(`Copie LM Studio échouée (code ${copy.code}). ${copy.stderr.slice(0, 300)}`);
+    return;
+  }
+
+  onProgress?.({ stage: "macOS demande l'autorisation d'installation..." });
+  const script = `do shell script ${JSON.stringify(copyCommand)} with administrator privileges`;
+  const copy = await runLogged("osascript", ["-e", script], onProgress);
+  if (copy.code !== 0) {
+    throw new Error(`Copie LM Studio dans /Applications échouée (code ${copy.code}). ${copy.stderr.slice(0, 300)}`);
   }
 }
 
@@ -337,15 +370,14 @@ function findLmsBin() {
     candidates.push("lms.exe");
     if (process.env.LOCALAPPDATA) {
       candidates.push(path.join(process.env.LOCALAPPDATA, "Programs", "LM Studio", "lms.exe"));
+      candidates.push(path.join(process.env.LOCALAPPDATA, "Programs", "LM Studio", "resources", "app", ".webpack", "lms.exe"));
       candidates.push(path.join(process.env.LOCALAPPDATA, "Programs", "LM Studio", "resources", "app", ".webpack", "main", "lms.exe"));
     }
   } else {
     candidates.push("lms");
+    candidates.push(path.join(home, ".lmstudio", "bin", "lms"));
     candidates.push("/opt/homebrew/bin/lms");
     candidates.push("/usr/local/bin/lms");
-    candidates.push("/Applications/LM Studio.app/Contents/Resources/app/.webpack/main/lms");
-    candidates.push(path.join(home, "Applications", "LM Studio.app", "Contents", "Resources", "app", ".webpack", "main", "lms"));
-    candidates.push(path.join(home, ".lmstudio", "bin", "lms"));
   }
   for (const candidate of candidates) {
     const res = spawnSync(candidate, ["--version"], {
@@ -367,17 +399,63 @@ function findLmsBin() {
 
 function findLmStudioApp() {
   if (process.platform === "darwin") {
-    const candidates = [
-      path.join(os.homedir(), "Applications", "LM Studio.app"),
-      "/Applications/LM Studio.app",
-    ];
-    return candidates.find((p) => fs.existsSync(p)) || null;
+    return isSupportedMacAppPath(MAC_LMSTUDIO_APP) ? MAC_LMSTUDIO_APP : null;
   }
   if (process.platform === "win32" && process.env.LOCALAPPDATA) {
     const p = path.join(process.env.LOCALAPPDATA, "Programs", "LM Studio", "LM Studio.exe");
     return fs.existsSync(p) ? p : null;
   }
   return null;
+}
+
+function findUnsupportedLmStudioApp() {
+  if (process.platform !== "darwin") return null;
+  const candidates = [
+    MAC_LMSTUDIO_APP,
+    path.join(os.homedir(), "Applications", "LM Studio.app"),
+  ];
+  for (const candidate of candidates) {
+    if (!fs.existsSync(candidate)) continue;
+    if (isSupportedMacAppPath(candidate)) continue;
+    return safeRealpath(candidate) || candidate;
+  }
+  return null;
+}
+
+function isSupportedMacAppPath(appPath) {
+  if (process.platform !== "darwin" || !fs.existsSync(appPath)) return false;
+  if (isSymlink(appPath)) return false;
+  const resolved = safeRealpath(appPath);
+  return Boolean(resolved && resolved.startsWith("/Applications/"));
+}
+
+function isSymlink(filePath) {
+  try {
+    return fs.lstatSync(filePath).isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
+function safeRealpath(filePath) {
+  try {
+    return fs.realpathSync(filePath);
+  } catch {
+    return null;
+  }
+}
+
+function canWriteDir(dir) {
+  try {
+    fs.accessSync(dir, fs.constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function shellQuote(value) {
+  return `'${String(value).replace(/'/g, "'\\''")}'`;
 }
 
 async function probeLmStudioModels(timeoutMs = 1800) {
@@ -399,25 +477,36 @@ async function probeLmStudioModels(timeoutMs = 1800) {
 async function startLmStudioServer(onProgress) {
   const ready = await probeLmStudioModels();
   if (ready.ok) return ready;
-  const lms = findLmsBin();
+  let lms = await ensureLmStudioCliReady(onProgress);
   if (!lms) {
     const appPath = findLmStudioApp();
     if (appPath) {
       await shell.openPath(appPath).catch(() => {});
       onProgress?.({ stage: "Ouverture du moteur local..." });
+      await sleep(2500);
+      lms = await ensureLmStudioCliReady(onProgress);
     } else {
-      throw new Error("LM Studio est installé mais la commande `lms` est introuvable. Ouvre LM Studio une fois puis active son CLI.");
+      throw new Error("LM Studio doit être installé dans /Applications pour activer le moteur local.");
     }
-  } else {
-    onProgress?.({ stage: "Démarrage du serveur local..." });
-    const child = spawn(lms, ["server", "start", "--port", "1234"], {
-      detached: true,
-      stdio: "ignore",
-      windowsHide: true,
-    });
-    child.unref();
   }
-  for (let i = 0; i < 20; i += 1) {
+
+  if (!lms) {
+    throw new Error("La commande LM Studio `lms` est introuvable après installation.");
+  }
+
+  onProgress?.({ stage: "Démarrage du moteur local..." });
+  const daemon = await runLogged(lms, ["daemon", "up"], onProgress);
+  if (daemon.code !== 0) {
+    onProgress?.({ log: daemon.stderr.slice(0, 300), stage: "Démarrage du service LM Studio..." });
+  }
+  onProgress?.({ stage: "Démarrage du serveur local..." });
+  const started = await runLogged(lms, ["server", "start", "--port", "1234"], onProgress);
+  if (started.code !== 0) {
+    const afterFailure = await probeLmStudioModels();
+    if (!afterFailure.ok) throw new Error(`Démarrage du serveur LM Studio échoué. ${started.stderr.slice(0, 300)}`);
+  }
+
+  for (let i = 0; i < 60; i += 1) {
     await sleep(500);
     const status = await probeLmStudioModels();
     if (status.ok) return status;
@@ -427,11 +516,19 @@ async function startLmStudioServer(onProgress) {
 
 async function ensureLmStudioModel(model, onProgress) {
   const target = String(model || LMSTUDIO.defaultModel).trim() || LMSTUDIO.defaultModel;
+  const contextLength = LMSTUDIO.defaultContextLength;
   let status = await probeLmStudioModels();
-  if (status.ok && status.models.includes(target)) return { ok: true, model: target, models: status.models };
-  const lms = findLmsBin();
+  const lms = await ensureLmStudioCliReady(onProgress);
   if (!lms) {
-    throw new Error(`Modèle local requis absent: ${target}. Ouvre LM Studio et installe ce modèle.`);
+    throw new Error(`Modèle local requis absent: ${target}. La commande LM Studio \`lms\` est introuvable après installation.`);
+  }
+  if (status.ok && status.models.includes(target)) {
+    const apiModel = await findLmStudioApiModel(target);
+    if (apiModel && Number(apiModel.loaded_context_length || 0) >= contextLength) {
+      return { ok: true, model: target, models: status.models };
+    }
+    onProgress?.({ stage: "Agrandissement du contexte local...", log: `${target} -> ${contextLength}` });
+    await runLogged(lms, ["unload", target], onProgress);
   }
 
   let localModelKey = findLmStudioLocalModelKey(lms, target);
@@ -445,14 +542,70 @@ async function ensureLmStudioModel(model, onProgress) {
   }
 
   const loadKey = localModelKey || target;
-  onProgress?.({ stage: "Chargement du modèle local...", log: loadKey });
-  const { code, stderr } = await runLogged(lms, ["load", loadKey, "--identifier", target], onProgress);
+  onProgress?.({ stage: "Chargement du modèle local...", log: `${loadKey} (${contextLength} tokens)` });
+  const { code, stderr } = await runLogged(
+    lms,
+    ["load", loadKey, "--identifier", target, "--context-length", String(contextLength), "--yes"],
+    onProgress,
+  );
   if (code !== 0) throw new Error(`Chargement du modèle local échoué (${target}). ${stderr.slice(0, 300)}`);
   status = await probeLmStudioModels();
   if (!status.models.includes(target)) {
     throw new Error(`Le modèle ${target} n'est pas visible dans LM Studio après chargement.`);
   }
   return { ok: true, model: target, models: status.models };
+}
+
+async function findLmStudioApiModel(target) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 1800);
+  try {
+    const res = await fetch("http://127.0.0.1:1234/api/v0/models", { cache: "no-store", signal: controller.signal });
+    if (!res.ok) return null;
+    const payload = await res.json().catch(() => null);
+    const data = Array.isArray(payload?.data) ? payload.data : Array.isArray(payload?.models) ? payload.models : [];
+    return data.find((item) => item?.id === target || item?.identifier === target || item?.modelKey === target) || null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function ensureLmStudioCliReady(onProgress) {
+  let lms = findLmsBin();
+  if (lms) return lms;
+  const appPath = findLmStudioApp();
+  if (!appPath) return null;
+  onProgress?.({ stage: "Initialisation du CLI LM Studio..." });
+  const packagedCli = findPackagedLmStudioCli();
+  if (packagedCli) {
+    const boot = await runLogged(packagedCli, ["bootstrap"], onProgress);
+    reloadWindowsPath();
+    lms = findLmsBin();
+    if (lms) return lms;
+    if (boot.code === 0) return packagedCli;
+  }
+  await shell.openPath(appPath).catch(() => {});
+  await sleep(2500);
+  if (packagedCli) {
+    await runLogged(packagedCli, ["bootstrap"], onProgress);
+    reloadWindowsPath();
+  }
+  return findLmsBin() || packagedCli || null;
+}
+
+function findPackagedLmStudioCli() {
+  const candidates = [];
+  if (process.platform === "win32" && process.env.LOCALAPPDATA) {
+    candidates.push(path.join(process.env.LOCALAPPDATA, "Programs", "LM Studio", "resources", "app", ".webpack", "lms.exe"));
+    candidates.push(path.join(process.env.LOCALAPPDATA, "Programs", "LM Studio", "resources", "app", ".webpack", "main", "lms.exe"));
+  }
+  if (process.platform === "darwin" && findLmStudioApp()) {
+    candidates.push(path.join(MAC_LMSTUDIO_APP, "Contents", "Resources", "app", ".webpack", "lms"));
+    candidates.push(path.join(MAC_LMSTUDIO_APP, "Contents", "Resources", "app", ".webpack", "main", "lms"));
+  }
+  return candidates.find((candidate) => fs.existsSync(candidate)) || null;
 }
 
 function findLmStudioLocalModelKey(lms, target) {
@@ -979,7 +1132,10 @@ function showLmStudioSetupWindow(policy = {}) {
   const model = String(policy.model || LMSTUDIO.defaultModel).trim() || LMSTUDIO.defaultModel;
   const mandatory = policy.mandatory === true;
   const parentWindow = policy.parentWindow || BrowserWindow.getFocusedWindow() || undefined;
-  const needsInstall = !findLmsBin() && !findLmStudioApp();
+  const lmsBin = findLmsBin();
+  const lmStudioApp = findLmStudioApp();
+  const needsInstall = !lmsBin && !lmStudioApp;
+  const needsCliActivation = !lmsBin && Boolean(lmStudioApp);
   const design = loadBridgeDesign();
   return new Promise((resolve) => {
     const win = new BrowserWindow({
@@ -1004,7 +1160,7 @@ function showLmStudioSetupWindow(policy = {}) {
     win.setMenuBarVisibility(false);
     const channel = `local-ai-setup-action-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const { ipcMain } = require("electron");
-    win.loadURL(`data:text/html;charset=utf-8;base64,${Buffer.from(lmStudioSetupHtml(needsInstall, model, channel, design, mandatory), "utf8").toString("base64")}`);
+    win.loadURL(`data:text/html;charset=utf-8;base64,${Buffer.from(lmStudioSetupHtml({ needsInstall, needsCliActivation, model, channel, design, mandatory }), "utf8").toString("base64")}`);
 
     const send = (state) => {
       if (win.isDestroyed()) return;
@@ -1036,6 +1192,8 @@ function showLmStudioSetupWindow(policy = {}) {
           await installLmStudio(({ log, stage, percent }) => send({ phase: "installing", log, stage, percent }));
           send({ phase: "install-done" });
           await sleep(500);
+        } else if (needsCliActivation) {
+          send({ phase: "install-done", stage: "LM Studio détecté. Bridge va ouvrir l'app pour activer le moteur local." });
         } else {
           send({ phase: "install-done", stage: "Déjà installé" });
         }
@@ -1075,7 +1233,12 @@ function showLmStudioSetupWindow(policy = {}) {
   });
 }
 
-function lmStudioSetupHtml(needsInstall, model, channel, design, mandatory = false) {
+function lmStudioSetupHtml({ needsInstall, needsCliActivation, model, channel, design, mandatory = false }) {
+  const installDescription = needsInstall
+    ? "Installation automatique demandée par votre organisation."
+    : needsCliActivation
+      ? "LM Studio est installé. Bridge vérifie maintenant le CLI et le serveur local."
+      : "Déjà installé sur ce poste.";
   const logoHtml = bridgeLogoHtml(design);
   return `<!doctype html>
 <html lang="fr">
@@ -1116,7 +1279,7 @@ function lmStudioSetupHtml(needsInstall, model, channel, design, mandatory = fal
   <header>${logoHtml}<div><div class="eyebrow">Bridge</div><h1>Préparation du moteur local</h1></div></header>
   <main>
     <div class="steps">
-      <div class="step"><div class="step-icon ${needsInstall ? "running" : "done"}" id="icon-install">${needsInstall ? "1" : "✓"}</div><div class="step-body"><div class="step-title" id="title-install">${LMSTUDIO.installTitle}</div><div class="step-desc" id="desc-install">${needsInstall ? "Installation automatique demandée par votre organisation." : "Déjà installé sur ce poste."}</div><div class="log" id="log-install"></div></div></div>
+      <div class="step"><div class="step-icon ${needsInstall ? "running" : "done"}" id="icon-install">${needsInstall ? "1" : "✓"}</div><div class="step-body"><div class="step-title" id="title-install">${LMSTUDIO.installTitle}</div><div class="step-desc" id="desc-install">${escapeHtml(installDescription)}</div><div class="log" id="log-install"></div></div></div>
       <div class="step"><div class="step-icon pending" id="icon-server">${needsInstall ? "2" : "1"}</div><div class="step-body"><div class="step-title muted" id="title-server">Démarrage local</div><div class="step-desc" id="desc-server">Bridge démarre le moteur local sur ce poste.</div><div class="log" id="log-server"></div></div></div>
       <div class="step"><div class="step-icon pending" id="icon-model">${needsInstall ? "3" : "2"}</div><div class="step-body"><div class="step-title muted" id="title-model">Modèle local</div><div class="step-desc" id="desc-model">Modèle demandé : <code>${escapeHtml(model)}</code></div><div class="log" id="log-model"></div></div></div>
       <div class="step"><div class="step-icon pending" id="icon-done">${needsInstall ? "4" : "3"}</div><div class="step-body"><div class="step-title muted" id="title-done">${LMSTUDIO.doneTitle}</div><div class="step-desc" id="desc-done">Finalisation automatique.</div></div></div>

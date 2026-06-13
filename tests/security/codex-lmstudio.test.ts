@@ -88,7 +88,10 @@ test("local AI and voice are opt-in until the admin policy enables installation"
   assert.match(source, /scheduleRequiredAdminProvisioning\("runtime-state"\)/);
   assert.match(source, /scheduleRequiredAdminProvisioning\("runtime-start"\)/);
   assert.match(source, /function scheduleRequiredAdminProvisioning/);
-  assert.match(source, /await ensureAdminProvisioning\(loadConfig\(\), \{ silent \}\);\n\s+registerVoiceShortcut\(\);/);
+  assert.match(source, /function scheduleStartupAdminProvisioning/);
+  assert.match(source, /await syncServices\(\{ silent: true, reason: "startup" \}\)/);
+  assert.match(source, /await ensureAdminProvisioning\(loadConfig\(\), \{ silent: true, reason: "startup" \}\)/);
+  assert.match(source, /await ensureAdminProvisioning\(loadConfig\(\), \{ silent, reason \}\);\n\s+registerVoiceShortcut\(\);/);
 });
 
 test("Bridge packaging unpacks the push-to-talk sidecar executable", () => {
@@ -111,6 +114,19 @@ test("admin-required local setup windows cannot be cancelled silently", () => {
   const main = readFileSync(resolve(process.cwd(), "bridge", "electron-main.cjs"), "utf8");
   assert.match(main, /mandatory: true/);
   assert.match(main, /parentWindow/);
+});
+
+test("LM Studio macOS installer uses /Applications and bootstraps the CLI", () => {
+  const provider = readFileSync(resolve(process.cwd(), "bridge", "provider-setup.cjs"), "utf8");
+  assert.match(provider, /const MAC_LMSTUDIO_APP = "\/Applications\/LM Studio\.app"/);
+  assert.match(provider, /function findUnsupportedLmStudioApp/);
+  assert.match(provider, /copyLmStudioAppToApplications/);
+  assert.match(provider, /with administrator privileges/);
+  assert.match(provider, /\.webpack", "lms"/);
+  assert.match(provider, /"daemon", "up"/);
+  assert.match(provider, /defaultContextLength: 32768/);
+  assert.match(provider, /"--context-length", String\(contextLength\)/);
+  assert.doesNotMatch(provider, /path\.join\(os\.homedir\(\), "Applications", "LM Studio\.app"\)[\s\S]*const targetApp/);
 });
 
 test("admin-required provisioning blocks Bridge actions until setup is complete", () => {

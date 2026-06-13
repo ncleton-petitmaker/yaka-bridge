@@ -1,6 +1,6 @@
 {
   "name": "@ncleton-petitmaker/yaka-erp-shell",
-  "version": "0.0.46",
+  "version": "0.0.48",
   "private": false,
   "type": "module",
   "description": "Yaka ERP shell contract for client applications.",

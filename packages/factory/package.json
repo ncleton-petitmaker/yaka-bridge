@@ -1,6 +1,6 @@
 {
   "name": "@ncleton-petitmaker/yaka-factory",
-  "version": "0.0.46",
+  "version": "0.0.48",
   "private": false,
   "type": "module",
   "description": "Yaka project and module factory contract.",

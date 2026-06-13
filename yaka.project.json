@@ -4,7 +4,7 @@
   "name": "yaka-bridge",
   "owner": "ncleton-petitmaker",
   "repository": "github.com/ncleton-petitmaker/yaka-bridge",
-  "version": "0.0.46",
+  "version": "0.0.48",
   "packageScope": "@ncleton-petitmaker",
   "clientRegistry": {
     "mode": "local-projects-folder",
