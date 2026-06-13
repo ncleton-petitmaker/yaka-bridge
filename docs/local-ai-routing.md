@@ -40,14 +40,18 @@ the push-to-talk shortcut when the admin permits it.
 
 Bridge prepares LM Studio in this order:
 
-1. install LM Studio through the platform installer path when needed: `winget`
-   on Windows, official LM Studio DMG copied to `~/Applications` on macOS
-   Apple Silicon;
-2. start the local server on `127.0.0.1:1234`;
-3. check `/v1/models`;
-4. run `lms get <model>` if the admin model is not installed;
-5. run `lms load <model> --identifier <model>`;
-6. verify that `/v1/models` exposes the exact configured model id.
+1. install the official LM Studio headless runtime first:
+   `https://lmstudio.ai/install.sh` on macOS/Linux or
+   `https://lmstudio.ai/install.ps1` on Windows;
+2. if the headless runtime is unavailable, fall back to the desktop package,
+   using `/Applications/LM Studio.app` on macOS and launching it hidden only as a
+   last-resort bootstrap path;
+3. start the local daemon and server with `lms daemon up` and
+   `lms server start --port 1234`;
+4. check `/v1/models`;
+5. run `lms get <model> --yes` if the admin model is not installed;
+6. run `lms load <model> --identifier <model> --context-length 32768 --yes`;
+7. verify that `/v1/models` exposes the exact configured model id.
 
 The v1 target is local-only LM Studio. Remote LM Studio, Ollama, Apple
 Foundation Models and Microsoft Foundry are intentionally outside this runtime

@@ -214,6 +214,17 @@ async function installCodex(onProgress) {
 }
 
 async function installLmStudio(onProgress) {
+  if (findLmsBin()) return;
+  try {
+    await installLmStudioHeadless(onProgress);
+    if (findLmsBin()) return;
+  } catch (err) {
+    onProgress?.({
+      stage: "Installation headless indisponible, essai du paquet desktop...",
+      log: err?.message ?? String(err),
+    });
+  }
+
   if (process.platform === "win32") {
     const winget = findWingetBin();
     if (!winget) throw new Error("Installe App Installer depuis le Microsoft Store puis réessaie.");
@@ -247,6 +258,47 @@ async function installLmStudio(onProgress) {
     return;
   }
   throw new Error("Installation automatique disponible sur Windows et macOS.");
+}
+
+async function installLmStudioHeadless(onProgress) {
+  onProgress?.({ stage: "Installation du moteur local en arrière-plan...", percent: 24 });
+  if (process.platform === "win32") {
+    const { code, stderr } = await runLogged(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        "irm https://lmstudio.ai/install.ps1 | iex",
+      ],
+      onProgress,
+    );
+    reloadWindowsPath();
+    if (code !== 0) throw new Error(`Installation headless LM Studio échouée (code ${code}). ${stderr.slice(0, 300)}`);
+    return;
+  }
+
+  if (process.platform === "darwin" || process.platform === "linux") {
+    const workDir = fs.mkdtempSync(path.join(app.getPath("temp"), "bridge-lmstudio-headless-"));
+    const installerPath = path.join(workDir, "install-lmstudio.sh");
+    try {
+      await downloadFileWithProgress(
+        "https://lmstudio.ai/install.sh",
+        installerPath,
+        "Téléchargement du moteur local headless...",
+        onProgress,
+      );
+      fs.chmodSync(installerPath, 0o755);
+      const { code, stderr } = await runLogged("bash", [installerPath], onProgress);
+      if (code !== 0) throw new Error(`Installation headless LM Studio échouée (code ${code}). ${stderr.slice(0, 300)}`);
+      return;
+    } finally {
+      fs.rmSync(workDir, { recursive: true, force: true });
+    }
+  }
+
+  throw new Error("Installation headless LM Studio disponible sur Windows, macOS et Linux.");
 }
 
 async function installExistingLmStudioApp(sourceApp, onProgress) {
@@ -368,6 +420,10 @@ function findLmsBin() {
   if (process.platform === "win32") {
     candidates.push("lms");
     candidates.push("lms.exe");
+    if (process.env.USERPROFILE) {
+      candidates.push(path.join(process.env.USERPROFILE, ".lmstudio", "bin", "lms.exe"));
+      candidates.push(path.join(process.env.USERPROFILE, ".lmstudio", "bin", "lms"));
+    }
     if (process.env.LOCALAPPDATA) {
       candidates.push(path.join(process.env.LOCALAPPDATA, "Programs", "LM Studio", "lms.exe"));
       candidates.push(path.join(process.env.LOCALAPPDATA, "Programs", "LM Studio", "resources", "app", ".webpack", "lms.exe"));
@@ -481,8 +537,8 @@ async function startLmStudioServer(onProgress) {
   if (!lms) {
     const appPath = findLmStudioApp();
     if (appPath) {
-      await shell.openPath(appPath).catch(() => {});
-      onProgress?.({ stage: "Ouverture du moteur local..." });
+      await launchLmStudioHidden(appPath, onProgress);
+      onProgress?.({ stage: "Initialisation du moteur local en arrière-plan..." });
       await sleep(2500);
       lms = await ensureLmStudioCliReady(onProgress);
     } else {
@@ -534,7 +590,7 @@ async function ensureLmStudioModel(model, onProgress) {
   let localModelKey = findLmStudioLocalModelKey(lms, target);
   if (!localModelKey) {
     onProgress?.({ stage: "Téléchargement du modèle local...", log: target });
-    const download = await runLogged(lms, ["get", target], onProgress);
+    const download = await runLogged(lms, ["get", target, "--yes"], onProgress);
     if (download.code !== 0) {
       throw new Error(`Téléchargement du modèle local échoué (${target}). ${download.stderr.slice(0, 300)}`);
     }
@@ -586,13 +642,36 @@ async function ensureLmStudioCliReady(onProgress) {
     if (lms) return lms;
     if (boot.code === 0) return packagedCli;
   }
-  await shell.openPath(appPath).catch(() => {});
+  await launchLmStudioHidden(appPath, onProgress);
   await sleep(2500);
   if (packagedCli) {
     await runLogged(packagedCli, ["bootstrap"], onProgress);
     reloadWindowsPath();
   }
   return findLmsBin() || packagedCli || null;
+}
+
+async function launchLmStudioHidden(appPath, onProgress) {
+  if (!appPath) return;
+  onProgress?.({ stage: "Initialisation invisible de LM Studio..." });
+  if (process.platform === "darwin") {
+    await runLogged("open", ["-gj", appPath], onProgress);
+    try {
+      await runLogged("osascript", ["-e", 'tell application "LM Studio" to hide'], onProgress);
+    } catch {
+      // Best effort: the headless daemon path does not depend on hiding the app.
+    }
+    return;
+  }
+  if (process.platform === "win32") {
+    spawn(appPath, [], {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true,
+    }).unref();
+    return;
+  }
+  onProgress?.({ stage: "Lancement graphique ignoré : mode headless requis." });
 }
 
 function findPackagedLmStudioCli() {

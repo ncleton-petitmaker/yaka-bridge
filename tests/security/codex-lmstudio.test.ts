@@ -118,15 +118,22 @@ test("admin-required local setup windows cannot be cancelled silently", () => {
 
 test("LM Studio macOS installer uses /Applications and bootstraps the CLI", () => {
   const provider = readFileSync(resolve(process.cwd(), "bridge", "provider-setup.cjs"), "utf8");
+  assert.match(provider, /function installLmStudioHeadless/);
+  assert.match(provider, /https:\/\/lmstudio\.ai\/install\.sh/);
+  assert.match(provider, /https:\/\/lmstudio\.ai\/install\.ps1/);
   assert.match(provider, /const MAC_LMSTUDIO_APP = "\/Applications\/LM Studio\.app"/);
   assert.match(provider, /function findUnsupportedLmStudioApp/);
   assert.match(provider, /copyLmStudioAppToApplications/);
   assert.match(provider, /with administrator privileges/);
   assert.match(provider, /\.webpack", "lms"/);
   assert.match(provider, /"daemon", "up"/);
+  assert.match(provider, /"get", target, "--yes"/);
+  assert.match(provider, /function launchLmStudioHidden/);
+  assert.match(provider, /"open", \["-gj", appPath\]/);
   assert.match(provider, /defaultContextLength: 32768/);
   assert.match(provider, /"--context-length", String\(contextLength\)/);
   assert.doesNotMatch(provider, /path\.join\(os\.homedir\(\), "Applications", "LM Studio\.app"\)[\s\S]*const targetApp/);
+  assert.doesNotMatch(provider, /shell\.openPath\(appPath\)/);
 });
 
 test("admin-required provisioning blocks Bridge actions until setup is complete", () => {
