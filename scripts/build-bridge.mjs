@@ -1,6 +1,6 @@
 import { mkdir, copyFile, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { delimiter, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { build } from "esbuild";
 
@@ -117,8 +117,19 @@ async function buildVoiceSidecar() {
 function spawnCargo(args, options = {}) {
   return spawnSync("cargo", args, {
     ...options,
+    env: cargoEnv(options.env),
     shell: process.platform === "win32",
   });
+}
+
+function cargoEnv(baseEnv = process.env) {
+  const pathKey = Object.keys(baseEnv).find((key) => key.toLowerCase() === "path") || "PATH";
+  const cargoBin = baseEnv.CARGO_HOME ? resolve(baseEnv.CARGO_HOME, "bin") : "";
+  if (!cargoBin) return baseEnv;
+  return {
+    ...baseEnv,
+    [pathKey]: `${cargoBin}${delimiter}${baseEnv[pathKey] || ""}`,
+  };
 }
 
 function valueAfter(flag) {
