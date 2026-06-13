@@ -7,7 +7,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -112,6 +112,7 @@ function main() {
   const designDocPath = fileFromManifest(sourceDir, manifest, "designDoc");
   const appMarkPath = fileFromManifest(sourceDir, manifest, "appMark");
   const bridgeMarkPath = fileFromManifest(sourceDir, manifest, "bridgeMark");
+  const bridgeMarkExt = bridgeMarkPath ? extname(bridgeMarkPath) || ".svg" : ".svg";
 
   if (!tokensPath) throw new Error(`Design system ${id} has no files.tokens entry.`);
   if (!designDocPath) throw new Error(`Design system ${id} has no files.designDoc entry.`);
@@ -122,7 +123,7 @@ function main() {
     designDoc: "DESIGN.md",
     bridgeTokens: "bridge/design-system.json",
     appMark: "public/app-mark.svg",
-    bridgeMark: "public/bridge-mark.svg",
+    bridgeMark: `public/bridge-mark${bridgeMarkExt}`,
   };
 
   const appCssTarget = resolve(targetDir, appliedFiles.appCss);

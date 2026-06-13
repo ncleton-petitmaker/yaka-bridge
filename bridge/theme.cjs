@@ -51,6 +51,7 @@ const SYSTEM_BRIDGE_FALLBACK = {
   iconFg: "CanvasText",
   iconAccent: "Highlight",
   iconBorder: "ButtonBorder",
+  logoImage: "bridge-mark.png",
 };
 
 function loadBridgeDesign() {
@@ -164,9 +165,37 @@ function bridgeDesignCss(designInput) {
   return `:root {\n  color-scheme: light;\n${lines}\n}`;
 }
 
+function bridgeLogoDataUri(designInput) {
+  const design = normalizeBridgeDesign(designInput);
+  const configured = String(design.logoImage || "").trim();
+  const names = [configured, "bridge-mark.png"].filter(Boolean);
+  const candidates = [];
+  for (const name of names) {
+    if (path.isAbsolute(name)) {
+      candidates.push(name);
+    } else if (!name.includes("..")) {
+      candidates.push(path.join(__dirname, name));
+      candidates.push(path.join(process.cwd(), "public", name));
+    }
+  }
+
+  for (const candidate of candidates) {
+    try {
+      if (!fs.existsSync(candidate) || !fs.statSync(candidate).isFile()) continue;
+      const ext = path.extname(candidate).toLowerCase();
+      const mime = ext === ".svg" ? "image/svg+xml" : "image/png";
+      return `data:${mime};base64,${fs.readFileSync(candidate).toString("base64")}`;
+    } catch {
+      // Text fallback keeps the setup UI usable if the optional mark is absent.
+    }
+  }
+  return null;
+}
+
 module.exports = {
   SYSTEM_BRIDGE_FALLBACK,
   bridgeDesignCss,
+  bridgeLogoDataUri,
   loadBridgeDesign,
   normalizeBridgeDesign,
 };

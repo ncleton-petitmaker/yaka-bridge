@@ -48,5 +48,6 @@
   "iconFg": "#1a1916",
   "iconAccent": "#c96442",
   "iconBorder": "#ebe8e1",
-  "logoText": "B"
+  "logoText": "B",
+  "logoImage": "bridge-mark.png"
 }

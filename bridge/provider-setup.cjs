@@ -6,7 +6,7 @@ const path = require("node:path");
 const { spawn, spawnSync } = require("node:child_process");
 const { Readable, Transform } = require("node:stream");
 const { pipeline } = require("node:stream/promises");
-const { bridgeDesignCss, loadBridgeDesign } = require("./theme.cjs");
+const { bridgeDesignCss, bridgeLogoDataUri, loadBridgeDesign } = require("./theme.cjs");
 
 const CODEX = {
   title: "ChatGPT Codex",
@@ -52,6 +52,12 @@ function escapeHtml(value) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+function bridgeLogoHtml(design) {
+  const logo = bridgeLogoDataUri(design);
+  if (!logo) return `<div class="logo logo-text">${escapeHtml(design.logoText || "B")}</div>`;
+  return `<div class="logo"><img src="${logo}" alt="Yaka Bridge" /></div>`;
 }
 
 async function runCodexSetup() {
@@ -1070,6 +1076,7 @@ function showLmStudioSetupWindow(policy = {}) {
 }
 
 function lmStudioSetupHtml(needsInstall, model, channel, design, mandatory = false) {
+  const logoHtml = bridgeLogoHtml(design);
   return `<!doctype html>
 <html lang="fr">
 <head>
@@ -1080,7 +1087,9 @@ function lmStudioSetupHtml(needsInstall, model, channel, design, mandatory = fal
     ${bridgeDesignCss(design)}
     body { margin: 0; height: 100vh; overflow: hidden; background: var(--bg); color: var(--text); font-family: var(--font-sans); }
     header { height: 76px; padding: 18px 28px; display: flex; align-items: center; gap: 12px; background: var(--panel); border-bottom: 1px solid var(--border); }
-    .logo { width: 38px; height: 38px; border-radius: var(--radius); display: grid; place-items: center; background: var(--accent); color: var(--on-accent); font-weight: 800; }
+    .logo { width: 38px; height: 38px; border-radius: var(--radius); display: grid; place-items: center; background: var(--icon-bg); border: 1px solid var(--icon-border); overflow: hidden; box-shadow: 0 1px 2px rgb(28 27 26 / 0.08); }
+    .logo img { width: 100%; height: 100%; display: block; object-fit: cover; }
+    .logo-text { background: var(--accent); color: var(--on-accent); font-weight: 800; }
     .eyebrow { font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--soft); }
     h1 { margin: 2px 0 0; font-size: 17px; line-height: 1.2; }
     main { height: calc(100vh - 144px); overflow-y: auto; padding: 24px 28px 18px; }
@@ -1104,7 +1113,7 @@ function lmStudioSetupHtml(needsInstall, model, channel, design, mandatory = fal
   </style>
 </head>
 <body>
-  <header><div class="logo">${escapeHtml(design.logoText || "B")}</div><div><div class="eyebrow">Bridge</div><h1>Préparation du moteur local</h1></div></header>
+  <header>${logoHtml}<div><div class="eyebrow">Bridge</div><h1>Préparation du moteur local</h1></div></header>
   <main>
     <div class="steps">
       <div class="step"><div class="step-icon ${needsInstall ? "running" : "done"}" id="icon-install">${needsInstall ? "1" : "✓"}</div><div class="step-body"><div class="step-title" id="title-install">${LMSTUDIO.installTitle}</div><div class="step-desc" id="desc-install">${needsInstall ? "Installation automatique demandée par votre organisation." : "Déjà installé sur ce poste."}</div><div class="log" id="log-install"></div></div></div>
@@ -1229,6 +1238,7 @@ function showVoiceSetupWindow(policy = {}) {
 }
 
 function voiceSetupHtml(info, channel, design, mandatory = false) {
+  const logoHtml = bridgeLogoHtml(design);
   return `<!doctype html>
 <html lang="fr">
 <head>
@@ -1239,7 +1249,9 @@ function voiceSetupHtml(info, channel, design, mandatory = false) {
     ${bridgeDesignCss(design)}
     body { margin: 0; height: 100vh; overflow: hidden; background: var(--bg); color: var(--text); font-family: var(--font-sans); }
     header { height: 76px; padding: 18px 28px; display: flex; align-items: center; gap: 12px; background: var(--panel); border-bottom: 1px solid var(--border); }
-    .logo { width: 38px; height: 38px; border-radius: var(--radius); display: grid; place-items: center; background: var(--accent); color: var(--on-accent); font-weight: 800; }
+    .logo { width: 38px; height: 38px; border-radius: var(--radius); display: grid; place-items: center; background: var(--icon-bg); border: 1px solid var(--icon-border); overflow: hidden; box-shadow: 0 1px 2px rgb(28 27 26 / 0.08); }
+    .logo img { width: 100%; height: 100%; display: block; object-fit: cover; }
+    .logo-text { background: var(--accent); color: var(--on-accent); font-weight: 800; }
     .eyebrow { font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--soft); }
     h1 { margin: 2px 0 0; font-size: 17px; line-height: 1.2; }
     main { height: calc(100vh - 144px); overflow-y: auto; padding: 24px 28px 18px; }
@@ -1269,7 +1281,7 @@ function voiceSetupHtml(info, channel, design, mandatory = false) {
   </style>
 </head>
 <body>
-  <header><div class="logo">${escapeHtml(design.logoText || "B")}</div><div><div class="eyebrow">Bridge</div><h1>Préparation de la dictée locale</h1></div></header>
+  <header>${logoHtml}<div><div class="eyebrow">Bridge</div><h1>Préparation de la dictée locale</h1></div></header>
   <main>
     <div class="steps">
       <div class="step"><div class="step-icon running" id="icon-download">1</div><div class="step-body"><div class="step-title" id="title-download">${VOICE.installTitle}</div><div class="step-desc" id="desc-download">Modèle demandé : <code>${escapeHtml(info.label)}</code> · ${info.sizeMb} Mo</div><div class="progress-wrap"><div class="progress-track"><div class="progress-fill indeterminate" id="progress-fill"></div></div><div class="progress-status"><span id="progress-stage">Démarrage...</span><span id="progress-pct"></span></div></div><div class="log" id="log-download"></div></div></div>
@@ -1294,6 +1306,7 @@ function voiceSetupHtml(info, channel, design, mandatory = false) {
 }
 
 function setupHtml(needsInstall, alreadyAuthenticated, channel, design) {
+  const logoHtml = bridgeLogoHtml(design);
   return `<!doctype html>
 <html lang="fr">
 <head>
@@ -1304,7 +1317,9 @@ function setupHtml(needsInstall, alreadyAuthenticated, channel, design) {
     ${bridgeDesignCss(design)}
     body { margin: 0; height: 100vh; overflow: hidden; background: var(--bg); color: var(--text); font-family: var(--font-sans); }
     header { height: 76px; padding: 18px 28px; display: flex; align-items: center; gap: 12px; background: var(--panel); border-bottom: 1px solid var(--border); }
-    .logo { width: 38px; height: 38px; border-radius: var(--radius); display: grid; place-items: center; background: var(--accent); color: var(--on-accent); font-weight: 800; }
+    .logo { width: 38px; height: 38px; border-radius: var(--radius); display: grid; place-items: center; background: var(--icon-bg); border: 1px solid var(--icon-border); overflow: hidden; box-shadow: 0 1px 2px rgb(28 27 26 / 0.08); }
+    .logo img { width: 100%; height: 100%; display: block; object-fit: cover; }
+    .logo-text { background: var(--accent); color: var(--on-accent); font-weight: 800; }
     .eyebrow { font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--soft); }
     h1 { margin: 2px 0 0; font-size: 17px; line-height: 1.2; }
     main { height: calc(100vh - 144px); overflow-y: auto; padding: 24px 28px 18px; }
@@ -1334,7 +1349,7 @@ function setupHtml(needsInstall, alreadyAuthenticated, channel, design) {
   </style>
 </head>
 <body>
-  <header><div class="logo">${escapeHtml(design.logoText || "B")}</div><div><div class="eyebrow">Bridge</div><h1>Configuration ChatGPT Codex</h1></div></header>
+  <header>${logoHtml}<div><div class="eyebrow">Bridge</div><h1>Configuration ChatGPT Codex</h1></div></header>
   <main>
     <div class="steps">
       <div class="step"><div class="step-icon ${needsInstall ? "running" : "done"}" id="icon-install">${needsInstall ? "1" : "✓"}</div><div class="step-body"><div class="step-title" id="title-install">${CODEX.installTitle}</div><div class="step-desc" id="desc-install">${needsInstall ? "Installation automatique en cours..." : "Déjà installé sur ce poste."}</div><div class="progress-wrap" id="progress-wrap"><div class="progress-track"><div class="progress-fill indeterminate" id="progress-fill"></div></div><div class="progress-status"><span id="progress-stage">Démarrage...</span><span id="progress-pct"></span></div></div><div class="log" id="log-install"></div></div></div>

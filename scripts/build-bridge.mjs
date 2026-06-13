@@ -33,6 +33,9 @@ for (const [entry, outfile, externalPackages] of [
 for (const file of ["electron-main.cjs", "bridge-preload.cjs", "provider-setup.cjs", "theme.cjs", "design-system.json"]) {
   await copyFile(resolve(root, "bridge", file), resolve(outdir, file));
 }
+if (existsSync(resolve(root, "public", "bridge-mark.png"))) {
+  await copyFile(resolve(root, "public", "bridge-mark.png"), resolve(outdir, "bridge-mark.png"));
+}
 if (existsSync(resolve(root, "THIRD_PARTY_NOTICES.md"))) {
   await copyFile(resolve(root, "THIRD_PARTY_NOTICES.md"), resolve(outdir, "THIRD_PARTY_NOTICES.md"));
 }
