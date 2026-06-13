@@ -17,7 +17,7 @@ import type { BridgeConfig, BridgeServiceInstance, CloudBridgeJob } from "../../
 
 const cfg = {
   defaultModel: "sonnet",
-  defaultLocalModel: "openai/gpt-oss-20b",
+  defaultLocalModel: "ibm/granite-4-micro",
 } as BridgeConfig;
 
 const readyLocal = {
@@ -26,7 +26,7 @@ const readyLocal = {
   supportsOss: true,
   lmStudioAvailable: true,
   modelAvailable: true,
-  model: "openai/gpt-oss-20b",
+  model: "ibm/granite-4-micro",
 } satisfies BridgeLocalAgentReadiness;
 
 const downLocal = {
@@ -35,7 +35,7 @@ const downLocal = {
   supportsOss: true,
   lmStudioAvailable: false,
   modelAvailable: false,
-  model: "openai/gpt-oss-20b",
+  model: "ibm/granite-4-micro",
   reason: "LM Studio arrêté.",
 } satisfies BridgeLocalAgentReadiness;
 
@@ -104,7 +104,7 @@ test("action local routing uses LM Studio when ready", () => {
     readyLocal
   );
   assert.equal(route.agentProvider, "codex-lmstudio");
-  assert.equal(route.localModel, "openai/gpt-oss-20b");
+  assert.equal(route.localModel, "ibm/granite-4-micro");
   assert.equal(route.source, "action.agentRouting");
 });
 

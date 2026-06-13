@@ -15,14 +15,14 @@ function profile(partial: Partial<LocalHardwareProfile>): LocalHardwareProfile {
 test("local model recommendation keeps low-memory machines cloud-first", () => {
   const recommendation = recommendLocalModel(profile({ totalMemoryGb: 8, cpuCount: 4 }));
   assert.equal(recommendation.tier, "cloud-first");
-  assert.equal(recommendation.recommendedModel, "openai/gpt-oss-20b");
-  assert.equal(recommendation.minimumMemoryGb, 12);
+  assert.equal(recommendation.recommendedModel, "ibm/granite-4-micro");
+  assert.equal(recommendation.minimumMemoryGb, 8);
 });
 
-test("local model recommendation starts standard users on gpt-oss-20b", () => {
+test("local model recommendation starts standard users on Granite 4 Micro", () => {
   const recommendation = recommendLocalModel(profile({ totalMemoryGb: 24 }));
   assert.equal(recommendation.tier, "small-local");
-  assert.equal(recommendation.recommendedModel, "openai/gpt-oss-20b");
+  assert.equal(recommendation.recommendedModel, "ibm/granite-4-micro");
   assert.equal(recommendation.accelerator, "apple-silicon");
 });
 
@@ -36,7 +36,7 @@ test("local model recommendation can propose gpt-oss-120b on premium unified mem
 test("local model recommendation requires a large accelerator before 120b on Windows", () => {
   const cpuOnly = recommendLocalModel(profile({ platform: "win32", arch: "x64", totalMemoryGb: 128, gpuMemoryGb: undefined }));
   assert.equal(cpuOnly.tier, "standard-local");
-  assert.equal(cpuOnly.recommendedModel, "openai/gpt-oss-20b");
+  assert.equal(cpuOnly.recommendedModel, "ibm/granite-4-micro");
 
   const nvidia = recommendLocalModel(profile({ platform: "win32", arch: "x64", totalMemoryGb: 128, gpuMemoryGb: 96 }));
   assert.equal(nvidia.tier, "large-local");

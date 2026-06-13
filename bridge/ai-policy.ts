@@ -1,6 +1,6 @@
 import type { BridgeAiPolicy, BridgeLocalAiPolicy, BridgeVoicePolicy } from "./types.js";
 
-export const DEFAULT_LOCAL_AI_MODEL = "openai/gpt-oss-20b";
+export const DEFAULT_LOCAL_AI_MODEL = "ibm/granite-4-micro";
 export const DEFAULT_VOICE_MODEL = "parakeet-tdt-0.6b-v3-int8";
 export const DEFAULT_VOICE_SHORTCUT = "CommandOrControl+Shift+Space";
 

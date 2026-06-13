@@ -43,11 +43,13 @@ The model is not bundled in the source tree. Bridge downloads it on demand into
 the local application data directory when the organization admin enables local
 push-to-talk.
 
-## OpenAI gpt-oss models
+## IBM Granite and OpenAI gpt-oss models
 
-Bridge can ask LM Studio to download and load `openai/gpt-oss-20b` or, on
-premium machines selected by the admin recommendation flow, `openai/gpt-oss-120b`.
+Bridge can ask LM Studio to download and load `ibm/granite-4-micro` by default,
+or `openai/gpt-oss-20b` / `openai/gpt-oss-120b` on machines selected by the
+admin recommendation flow.
 
+Granite 4 Micro model page: https://lmstudio.ai/models/ibm/granite-4-micro
 LM Studio model page: https://lmstudio.ai/models/gpt-oss
 
 License: Apache 2.0

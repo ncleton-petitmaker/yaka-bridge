@@ -16,7 +16,7 @@ import { normalizeBridgeAiPolicy } from "./ai-policy.js";
 const DEFAULT_CONFIG_DIR = ".bridge";
 const DEFAULT_DATA_DIR = resolve(homedir(), BRIDGE_PRODUCT_NAME, "data");
 const DEFAULT_AGENT_PROVIDER: AgentProvider = "codex-cloud";
-const DEFAULT_LOCAL_MODEL = "openai/gpt-oss-20b";
+const DEFAULT_LOCAL_MODEL = "ibm/granite-4-micro";
 const SECURE_SECRETS_KEY = "_secureSecrets";
 
 interface SecureBridgeSecrets {

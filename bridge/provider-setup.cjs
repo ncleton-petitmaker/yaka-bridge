@@ -20,7 +20,8 @@ const LMSTUDIO = {
   installTitle: "Installation du moteur local",
   doneTitle: "Bridge est prêt avec le moteur local",
   baseUrl: "http://127.0.0.1:1234/v1",
-  defaultModel: "openai/gpt-oss-20b",
+  defaultModel: "ibm/granite-4-micro",
+  macArm64DmgUrl: "https://lmstudio.ai/download/latest/darwin/arm64",
 };
 
 const VOICE = {
@@ -228,13 +229,98 @@ async function installLmStudio(onProgress) {
     return;
   }
   if (process.platform === "darwin") {
-    const brew = findBrewBin();
-    if (!brew) throw new Error("Installe Homebrew depuis brew.sh puis réessaie.");
-    const { code, stderr } = await runLogged(brew, ["install", "--cask", "lm-studio"], onProgress);
-    if (code !== 0) throw new Error(`Installation du moteur local échouée (code ${code}). ${stderr.slice(0, 300)}`);
+    if (findLmStudioApp()) return;
+    await installLmStudioDmg(onProgress);
     return;
   }
   throw new Error("Installation automatique disponible sur Windows et macOS.");
+}
+
+async function installLmStudioDmg(onProgress) {
+  if (os.arch() !== "arm64") {
+    const brew = findBrewBin();
+    if (brew) {
+      const { code, stderr } = await runLogged(brew, ["install", "--cask", "lm-studio"], onProgress);
+      if (code !== 0) throw new Error(`Installation du moteur local échouée (code ${code}). ${stderr.slice(0, 300)}`);
+      return;
+    }
+    throw new Error("Installation LM Studio automatique disponible sur Mac Apple Silicon. Sur Mac Intel, installe LM Studio manuellement.");
+  }
+
+  const workDir = fs.mkdtempSync(path.join(app.getPath("temp"), "bridge-lmstudio-"));
+  const dmgPath = path.join(workDir, "LM-Studio.dmg");
+  const mountDir = path.join(workDir, "mount");
+  fs.mkdirSync(mountDir, { recursive: true });
+  try {
+    await downloadFileWithProgress(
+      process.env.BRIDGE_LMSTUDIO_MAC_DMG_URL || LMSTUDIO.macArm64DmgUrl,
+      dmgPath,
+      "Téléchargement de LM Studio...",
+      onProgress,
+    );
+    onProgress?.({ stage: "Montage de LM Studio...", percent: 88 });
+    const attach = await runLogged("hdiutil", ["attach", dmgPath, "-nobrowse", "-readonly", "-mountpoint", mountDir], onProgress);
+    if (attach.code !== 0) throw new Error(`Montage LM Studio échoué (code ${attach.code}). ${attach.stderr.slice(0, 300)}`);
+
+    const sourceApp = findAppBundleInDir(mountDir);
+    if (!sourceApp) throw new Error("Le DMG LM Studio ne contient pas d'application installable.");
+    const targetApp = path.join(os.homedir(), "Applications", "LM Studio.app");
+    fs.mkdirSync(path.dirname(targetApp), { recursive: true });
+    fs.rmSync(targetApp, { recursive: true, force: true });
+    onProgress?.({ stage: "Installation de LM Studio...", percent: 94 });
+    const copy = await runLogged("ditto", [sourceApp, targetApp], onProgress);
+    if (copy.code !== 0) throw new Error(`Copie LM Studio échouée (code ${copy.code}). ${copy.stderr.slice(0, 300)}`);
+    onProgress?.({ stage: "LM Studio installé.", percent: 100 });
+  } finally {
+    spawnSync("hdiutil", ["detach", mountDir, "-force"], { timeout: 10_000, encoding: "utf8" });
+    fs.rmSync(workDir, { recursive: true, force: true });
+  }
+}
+
+function findAppBundleInDir(dir) {
+  const stack = [dir];
+  while (stack.length) {
+    const current = stack.shift();
+    let entries = [];
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const fullPath = path.join(current, entry.name);
+      if (entry.isDirectory() && entry.name.endsWith(".app")) return fullPath;
+      if (entry.isDirectory() && !entry.name.startsWith(".")) stack.push(fullPath);
+    }
+  }
+  return null;
+}
+
+async function downloadFileWithProgress(url, targetPath, stage, onProgress) {
+  const res = await fetch(url, { cache: "no-store", redirect: "follow" });
+  if (!res.ok || !res.body) throw new Error(`Téléchargement refusé (HTTP ${res.status}).`);
+  const total = Number(res.headers.get("content-length") || 0);
+  let downloaded = 0;
+  let lastEmit = 0;
+  const progress = new Transform({
+    transform(chunk, _encoding, callback) {
+      downloaded += chunk.length;
+      const now = Date.now();
+      if (now - lastEmit > 500) {
+        lastEmit = now;
+        const percent = total ? Math.min(86, Math.round((downloaded / total) * 86)) : null;
+        onProgress?.({
+          stage,
+          percent,
+          log: total
+            ? `${Math.round(downloaded / 1024 / 1024)} / ${Math.round(total / 1024 / 1024)} Mo`
+            : `${Math.round(downloaded / 1024 / 1024)} Mo`,
+        });
+      }
+      callback(null, chunk);
+    },
+  });
+  await pipeline(Readable.fromWeb(res.body), progress, fs.createWriteStream(targetPath));
 }
 
 function findLmsBin() {
@@ -252,6 +338,7 @@ function findLmsBin() {
     candidates.push("/opt/homebrew/bin/lms");
     candidates.push("/usr/local/bin/lms");
     candidates.push("/Applications/LM Studio.app/Contents/Resources/app/.webpack/main/lms");
+    candidates.push(path.join(home, "Applications", "LM Studio.app", "Contents", "Resources", "app", ".webpack", "main", "lms"));
     candidates.push(path.join(home, ".lmstudio", "bin", "lms"));
   }
   for (const candidate of candidates) {
@@ -274,8 +361,11 @@ function findLmsBin() {
 
 function findLmStudioApp() {
   if (process.platform === "darwin") {
-    const p = "/Applications/LM Studio.app";
-    return fs.existsSync(p) ? p : null;
+    const candidates = [
+      path.join(os.homedir(), "Applications", "LM Studio.app"),
+      "/Applications/LM Studio.app",
+    ];
+    return candidates.find((p) => fs.existsSync(p)) || null;
   }
   if (process.platform === "win32" && process.env.LOCALAPPDATA) {
     const p = path.join(process.env.LOCALAPPDATA, "Programs", "LM Studio", "LM Studio.exe");

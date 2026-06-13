@@ -40,7 +40,9 @@ the push-to-talk shortcut when the admin permits it.
 
 Bridge prepares LM Studio in this order:
 
-1. install LM Studio through the platform installer path when needed;
+1. install LM Studio through the platform installer path when needed: `winget`
+   on Windows, official LM Studio DMG copied to `~/Applications` on macOS
+   Apple Silicon;
 2. start the local server on `127.0.0.1:1234`;
 3. check `/v1/models`;
 4. run `lms get <model>` if the admin model is not installed;
@@ -60,8 +62,10 @@ The admin page includes a hardware recommendation based on:
 - Apple Silicon detection;
 - NVIDIA VRAM when `nvidia-smi` is available.
 
-Low-memory machines are kept cloud-first. Standard local machines use
-`openai/gpt-oss-20b`. Premium Apple unified-memory or NVIDIA machines can be
+Low-memory machines are kept cloud-first. The default local model is
+`ibm/granite-4-micro`, a small LM Studio model that is suitable as the portable
+baseline across ordinary PCs and Macs. More capable Apple unified-memory or
+NVIDIA machines can be offered `openai/gpt-oss-20b`; premium machines can be
 offered `openai/gpt-oss-120b`.
 
 ## Push-to-talk
@@ -107,7 +111,7 @@ Manual LM Studio smoke:
 
 ```bash
 lms server start --port 1234
-lms get openai/gpt-oss-20b
-lms load openai/gpt-oss-20b --identifier openai/gpt-oss-20b
+lms get ibm/granite-4-micro
+lms load ibm/granite-4-micro --identifier ibm/granite-4-micro
 curl http://127.0.0.1:1234/v1/models
 ```
