@@ -632,12 +632,11 @@ async function changeVoiceShortcutFromMenu() {
   });
   const clean = String(nextShortcut || "").trim().slice(0, 120);
   if (!clean) return { ok: false, cancelled: true };
-  const prefs = saveVoicePrefs({ shortcut: clean });
-  registerVoiceShortcut();
-  pushActivity(`Raccourci push-to-talk configuré: ${prefs.shortcut}`);
+  const result = voiceShortcutSaveResult(clean);
+  pushActivity(result.warning ? `Raccourci push-to-talk enregistré, activation à terminer: ${result.warning}` : `Raccourci push-to-talk configuré: ${result.shortcut}`);
   refreshStatusWindow();
   updateTrayMenu();
-  return { ok: true, shortcut: prefs.shortcut };
+  return result;
 }
 
 async function changeLocalModelFromMenu() {
@@ -819,12 +818,15 @@ function localStatusPayload(options = {}) {
     ? codexStatusCache?.status || placeholderCodexStatus()
     : getCodexStatus({ fast: true });
   const base = runtimeState || stateFromConfig(cfg, codex);
+  const localAi = localAiStatusCache || placeholderLocalAiStatus(cfg);
+  const voice = getVoiceStatus(cfg);
   return {
     ...base,
     codex,
     aiPolicy: cfg.aiPolicy,
-    localAi: localAiStatusCache || placeholderLocalAiStatus(cfg),
-    voice: getVoiceStatus(cfg),
+    localAi,
+    voice,
+    requiredProvisioning: requiredProvisioningState(localAi, voice),
     authenticated: Boolean(base.authenticated && !isStoredSessionInvalid(cfg)),
     controlPlaneConfigured: Boolean(base.controlPlaneConfigured && !isStoredSessionInvalid(cfg)),
     services: base.services.map((service) => serviceWithDisplayStatus(base, service, codex)),
@@ -838,6 +840,29 @@ function localStatusPayload(options = {}) {
       currentVersion: currentBridgeVersion(),
     },
     activity: localActivity.slice(0, 30),
+  };
+}
+
+function requiredProvisioningState(localAi, voice) {
+  const items = [];
+  if (localAi?.enabled && localAi?.installRequired && !localAi?.ready) {
+    items.push({
+      id: "local-ai",
+      label: "Moteur local",
+      detail: localAi.detail || localAi.label || `Modèle requis: ${localAi.model || "local"}.`,
+    });
+  }
+  if (voice?.enabled && voice?.installRequired && (!voice?.installed || !voice?.modelInstalled)) {
+    items.push({
+      id: "voice",
+      label: "Push-to-talk",
+      detail: voice.label || `Modèle vocal requis: ${voice.model || "local"}.`,
+    });
+  }
+  return {
+    required: items.length > 0,
+    items,
+    label: items.length ? `Installation requise: ${items.map((item) => item.label).join(", ")}` : "",
   };
 }
 
@@ -971,6 +996,20 @@ function saveVoicePrefs(partial) {
   registerVoiceShortcut();
   refreshStatusWindow();
   return next;
+}
+
+function voiceShortcutSaveResult(shortcut) {
+  const prefs = saveVoicePrefs({ shortcut });
+  const voice = getVoiceStatus(loadConfig({ hydrateSecrets: false }));
+  if (voice.enabled && !voice.shortcutReady) {
+    return {
+      ok: true,
+      warning: voice.shortcutError || (voice.installed ? "Raccourci non actif." : "Push-to-talk non installé."),
+      shortcut: prefs.shortcut,
+      voice,
+    };
+  }
+  return { ok: true, shortcut: prefs.shortcut, voice };
 }
 
 function localAiPrefsPath() {
@@ -2356,6 +2395,8 @@ async function ensureAdminProvisioning(cfg = loadConfig(), options = {}) {
 
   adminProvisioningRunning = true;
   try {
+    const parentWindow = showStatusWindow({ focus: true }) || statusWindow;
+    pushActivity("Installation requise par l'organisation.");
     let shouldRunLocalSetup = false;
     let shouldRunVoiceSetup = false;
     if (needsLocal) {
@@ -2375,12 +2416,14 @@ async function ensureAdminProvisioning(cfg = loadConfig(), options = {}) {
       const result = await runLocalAiSetup({
         ...policy.localAi,
         model: effectiveLocalAiModel(policy.localAi, cfg.defaultLocalModel),
+        mandatory: true,
+        parentWindow,
       });
       localAiStatusCache = await getLocalAiStatus(loadConfig({ hydrateSecrets: false }));
       if (!result?.ok) throw new Error("Configuration locale interrompue.");
     }
     if (shouldRunVoiceSetup) {
-      const result = await runVoiceSetup(policy.voice);
+      const result = await runVoiceSetup({ ...policy.voice, mandatory: true, parentWindow });
       if (!result?.ok) throw new Error("Configuration de la dictée locale interrompue.");
       registerVoiceShortcut();
     }
@@ -2584,7 +2627,7 @@ function showStatusWindow({ focus = false } = {}) {
       statusWindow.showInactive();
     }
     refreshStatusWindow();
-    return;
+    return statusWindow;
   }
   statusWindow = new BrowserWindow({
     show: false,
@@ -2656,8 +2699,7 @@ function showStatusWindow({ focus = false } = {}) {
       if (!voice.allowUserShortcutOverride) return { ok: false, error: "shortcut-locked-by-admin" };
       const clean = String(shortcut || "").trim().slice(0, 120);
       if (!clean) return { ok: false, error: "shortcut-required" };
-      const prefs = saveVoicePrefs({ shortcut: clean });
-      return { ok: true, shortcut: prefs.shortcut, voice: getVoiceStatus(loadConfig({ hydrateSecrets: false })) };
+      return voiceShortcutSaveResult(clean);
     });
     ipcMain.handle("bridge:voice-test-overlay", () => {
       showVoiceOverlay();
@@ -2684,6 +2726,7 @@ function showStatusWindow({ focus = false } = {}) {
     }
   });
   statusWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(statusHtml())}`);
+  return statusWindow;
 }
 
 function refreshStatusWindow() {
@@ -3114,7 +3157,11 @@ function statusHtml() {
           const input = form.querySelector('[name="shortcut"]');
           if (message) message.textContent = "Enregistrement...";
           const res = await window.bridge.setVoiceShortcut(input?.value || "");
-          if (message) message.textContent = res?.ok ? "Raccourci enregistré." : (res?.error || "Enregistrement impossible.");
+          if (message) message.textContent = res?.ok
+            ? res.warning
+              ? "Raccourci enregistré, activation à terminer: " + res.warning
+              : "Raccourci enregistré et actif."
+            : (res?.error || "Enregistrement impossible.");
         });
       });
       root.querySelectorAll("[data-voice-test]").forEach((btn) => {

@@ -84,6 +84,7 @@ test("local AI and voice are opt-in until the admin policy enables installation"
   const source = readFileSync(resolve(process.cwd(), "bridge", "electron-main.cjs"), "utf8");
   assert.match(source, /Installer \/ préparer LM Studio et le modèle/);
   assert.match(source, /Changer le raccourci push-to-talk/);
+  assert.doesNotMatch(source, /data-provisioning-required/);
   assert.match(source, /await ensureAdminProvisioning\(loadConfig\(\), \{ silent \}\);\n\s+registerVoiceShortcut\(\);/);
 });
 
@@ -94,6 +95,26 @@ test("Bridge packaging unpacks the push-to-talk sidecar executable", () => {
 
   const source = readFileSync(resolve(process.cwd(), "bridge", "electron-main.cjs"), "utf8");
   assert.match(source, /app\.asar\.unpacked/);
+});
+
+test("admin-required local setup windows cannot be cancelled silently", () => {
+  const provider = readFileSync(resolve(process.cwd(), "bridge", "provider-setup.cjs"), "utf8");
+  assert.match(provider, /const mandatory = policy\.mandatory === true/);
+  assert.match(provider, /closable: !mandatory/);
+  assert.match(provider, /modal: Boolean\(mandatory && parentWindow\)/);
+  assert.match(provider, /Installation requise par votre organisation/);
+  assert.match(provider, /if \(mandatory\) return send\(\{ phase: "error"/);
+
+  const main = readFileSync(resolve(process.cwd(), "bridge", "electron-main.cjs"), "utf8");
+  assert.match(main, /mandatory: true/);
+  assert.match(main, /parentWindow/);
+});
+
+test("voice shortcut saving reports activation state instead of a false success", () => {
+  const source = readFileSync(resolve(process.cwd(), "bridge", "electron-main.cjs"), "utf8");
+  assert.match(source, /function voiceShortcutSaveResult/);
+  assert.match(source, /warning: voice\.shortcutError/);
+  assert.match(source, /Raccourci enregistré, activation à terminer/);
 });
 
 test("LM Studio diagnostic reports offline server", async () => {
