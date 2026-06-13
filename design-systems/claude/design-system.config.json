@@ -10,7 +10,7 @@
     "tokens": "tokens.css",
     "designDoc": "DESIGN.md",
     "appMark": "assets/app-mark.svg",
-    "bridgeMark": "assets/bridge-mark.svg"
+    "bridgeMark": "assets/bridge-mark.png"
   },
   "tailwind": {
     "usesCssVariables": true,
@@ -67,7 +67,8 @@
       "iconFg": "#1a1916",
       "iconAccent": "#c96442",
       "iconBorder": "#ebe8e1",
-      "logoText": "B"
+      "logoText": "B",
+      "logoImage": "bridge-mark.png"
     }
   },
   "requiredCssVariables": [

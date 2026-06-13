@@ -14,6 +14,7 @@ const required = [
   "mcp.cjs",
   "theme.cjs",
   "design-system.json",
+  "bridge-mark.png",
   "yaka-build.json",
   "THIRD_PARTY_NOTICES.md",
   `bridge-voice/${target}/${exe}`,

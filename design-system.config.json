@@ -15,6 +15,6 @@
     "designDoc": "DESIGN.md",
     "bridgeTokens": "bridge/design-system.json",
     "appMark": "public/app-mark.svg",
-    "bridgeMark": "public/bridge-mark.svg"
+    "bridgeMark": "public/bridge-mark.png"
   }
 }
