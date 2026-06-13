@@ -12,8 +12,7 @@
     "typecheck": "tsc --noEmit",
     "test": "tsx --test tests/**/*.test.ts",
     "yaka:doctor": "yaka doctor --strict",
-    "bridge:pack:mac": "yaka doctor --strict && yaka bridge pack --target darwin",
-    "bridge:pack:win": "yaka doctor --strict && yaka bridge pack --target win32"
+    "bridge:doctor": "yaka doctor --strict"
   },
   "dependencies": {
     "@ncleton-petitmaker/yaka-bridge-desktop": "0.0.46",
