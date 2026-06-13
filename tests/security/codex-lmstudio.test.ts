@@ -113,6 +113,26 @@ test("admin-required local setup windows cannot be cancelled silently", () => {
   assert.match(main, /parentWindow/);
 });
 
+test("admin-required provisioning blocks Bridge actions until setup is complete", () => {
+  const source = readFileSync(resolve(process.cwd(), "bridge", "electron-main.cjs"), "utf8");
+  assert.match(source, /async function ensureRequiredProvisioningComplete/);
+  assert.match(source, /err\.bridgeProvisioningRequired = true/);
+  assert.match(source, /if \(err\?\.bridgeProvisioningRequired\) throw err/);
+
+  const openServiceStart = source.indexOf("async function openService");
+  const provisioningGate = source.indexOf('const provisioning = await ensureRequiredProvisioningComplete("open-service")', openServiceStart);
+  const noTicketFallback = source.indexOf("Ouverture ${service.name} sans ticket Bridge", openServiceStart);
+  const openExternal = source.indexOf("await shell.openExternal(target)", openServiceStart);
+  assert.ok(openServiceStart >= 0, "openService should exist");
+  assert.ok(provisioningGate > openServiceStart, "openService should check required provisioning");
+  assert.ok(noTicketFallback > provisioningGate, "provisioning errors must be rethrown before no-ticket fallback");
+  assert.ok(openExternal > noTicketFallback, "service launch happens after the provisioning gate");
+
+  assert.match(source, /const provisioningRequired = Boolean\(state\.requiredProvisioning\?\.required\)/);
+  assert.match(source, /window\.bridge\.ensureAdminProvisioning\(\)/);
+  assert.match(source, /Le setup d\\\\'installation est ouvert/);
+});
+
 test("voice shortcut saving reports activation state instead of a false success", () => {
   const source = readFileSync(resolve(process.cwd(), "bridge", "electron-main.cjs"), "utf8");
   assert.match(source, /function voiceShortcutSaveResult/);

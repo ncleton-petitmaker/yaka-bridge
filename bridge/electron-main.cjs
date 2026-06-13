@@ -2460,9 +2460,48 @@ async function ensureAdminProvisioning(cfg = loadConfig(), options = {}) {
   }
 }
 
-async function openService(serviceId) {
+async function ensureRequiredProvisioningComplete(reason = "action") {
   const cfg = loadConfig();
-  const service = cfg.services.find((candidate) => candidate.serviceId === serviceId);
+  const policy = normalizeAiPolicy(cfg.aiPolicy);
+  const required =
+    (policy.localAi.enabled && policy.localAi.installRequired) ||
+    (policy.voice.enabled && policy.voice.installRequired);
+  if (!required) return { ok: true, skipped: true };
+  if (adminProvisioningRunning) {
+    showStatusWindow({ focus: true });
+    return {
+      ok: false,
+      error: "Installation requise en cours. Termine l'installation demandée par votre organisation.",
+    };
+  }
+
+  const result = await ensureAdminProvisioning(cfg, { silent: true, reason });
+  if (!result?.ok) {
+    return {
+      ok: false,
+      error: result?.error || "Installation requise par votre organisation.",
+    };
+  }
+
+  const refreshed = loadConfig({ hydrateSecrets: false });
+  const localAi = policy.localAi.enabled ? await getLocalAiStatus(refreshed) : placeholderLocalAiStatus(refreshed);
+  localAiStatusCache = localAi;
+  const voice = getVoiceStatus(refreshed);
+  const missing = requiredProvisioningState(localAi, voice);
+  if (missing.required) {
+    showStatusWindow({ focus: true });
+    return {
+      ok: false,
+      error: missing.label || "Installation requise par votre organisation.",
+      requiredProvisioning: missing,
+    };
+  }
+  return { ok: true };
+}
+
+async function openService(serviceId) {
+  let cfg = loadConfig();
+  let service = cfg.services.find((candidate) => candidate.serviceId === serviceId);
   if (!service) return { ok: false, error: "service-not-found" };
   localStatuses[serviceId] = "reconnecting";
   refreshStatusWindow();
@@ -2478,7 +2517,16 @@ async function openService(serviceId) {
         await runtimeHandle.syncOnce().catch((err) => {
           bridgeError = err instanceof Error ? err.message : String(err);
         });
+        cfg = loadConfig();
+        service = cfg.services.find((candidate) => candidate.serviceId === serviceId) || service;
       }
+      const provisioning = await ensureRequiredProvisioningComplete("open-service");
+      if (!provisioning.ok) {
+        const err = new Error(provisioning.error || "Installation requise par votre organisation.");
+        err.bridgeProvisioningRequired = true;
+        throw err;
+      }
+      cfg = loadConfig();
       if (cfg.controlPlaneBaseUrl && (cfg.bridgeToken || cfg.session?.accessToken)) {
         await postControlPlane(cfg, "bridge/browser-session", {
           browserSessionId,
@@ -2500,6 +2548,7 @@ async function openService(serviceId) {
         }
       }
     } catch (err) {
+      if (err?.bridgeProvisioningRequired) throw err;
       if (target) {
         bridgeError = err instanceof Error ? err.message : String(err);
         pushActivity(`Ouverture ${service.name} sans ticket Bridge: ${bridgeError}`);
@@ -2925,6 +2974,7 @@ function statusHtml() {
     function esc(value) { return String(value == null ? "" : value).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c])); }
     function render(state) {
       current = state;
+      const provisioningRequired = Boolean(state.requiredProvisioning?.required);
       document.getElementById("subtitle").textContent = (state.account?.email || "Compte Bridge non connecté") + " · " + state.services.length + " service(s)";
       const versionPill = document.getElementById("version-pill");
       versionPill.textContent = "v" + (state.version || "dev");
@@ -2937,6 +2987,15 @@ function statusHtml() {
       const services = document.getElementById("services");
       if (!state.authenticated) {
         ensureLoginHero(state);
+      } else if (provisioningRequired) {
+        setUiError(state.requiredProvisioning?.label || "Installation requise par votre organisation.");
+        services.innerHTML = '<p class="empty">Installation requise par votre organisation. Le setup d\\'installation est ouvert pour terminer la préparation de ce poste.</p>';
+        if (!window.__bridgeProvisioningPrompted) {
+          window.__bridgeProvisioningPrompted = true;
+          window.bridge.ensureAdminProvisioning().finally(() => {
+            window.__bridgeProvisioningPrompted = false;
+          });
+        }
       } else {
         setUiError(state.bridgeError || state.lastError || "");
         services.innerHTML = state.services.length ? state.services.map(service => {
