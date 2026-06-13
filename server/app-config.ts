@@ -11,7 +11,7 @@ import { resolve, dirname } from "node:path";
 export type AgentProvider = "codex-cloud" | "codex-lmstudio";
 
 export const DEFAULT_AGENT_PROVIDER: AgentProvider = "codex-cloud";
-export const DEFAULT_LOCAL_MODEL = "openai/gpt-oss-20b";
+export const DEFAULT_LOCAL_MODEL = "ibm/granite-4-micro";
 export const LMSTUDIO_BASE_URL = "http://127.0.0.1:1234/v1";
 
 export interface AppConfig {

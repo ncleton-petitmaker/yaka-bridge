@@ -249,7 +249,7 @@ class BridgeRuntime implements BridgeRuntimeHandle {
       const routeRequest = resolveBridgeAgentRouteRequest(job, service, this.cfg);
       const readiness =
         routeRequest.requestedMode === "local"
-          ? await getBridgeLocalAgentReadiness(routeRequest.localModel ?? this.cfg.defaultLocalModel ?? "openai/gpt-oss-20b")
+          ? await getBridgeLocalAgentReadiness(routeRequest.localModel ?? this.cfg.defaultLocalModel ?? "ibm/granite-4-micro")
           : undefined;
       const route = selectResolvedBridgeAgentRoute(routeRequest, readiness);
       const modelOptions =
@@ -755,7 +755,7 @@ function getRuntimeCodexStatus({ force = false } = {}): BridgeCodexStatus {
 }
 
 async function getBridgeLocalAgentReadiness(model: string): Promise<BridgeLocalAgentReadiness> {
-  const requestedModel = model.trim() || "openai/gpt-oss-20b";
+  const requestedModel = model.trim() || "ibm/granite-4-micro";
   const now = Date.now();
   if (
     localAgentReadinessCache &&

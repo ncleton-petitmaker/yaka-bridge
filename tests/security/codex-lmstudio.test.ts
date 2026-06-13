@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { buildCodexArgs } from "../../server/agents";
 import { loadAppConfig, saveAppConfig } from "../../server/app-config";
 import { probeLmStudioStatus } from "../../server/agents-status";
@@ -37,7 +37,7 @@ test("buildCodexArgs enables LM Studio OSS mode with the local model", () => {
 test("buildCodexArgs preserves MCP overrides and sandbox in LM Studio mode", () => {
   const args = buildCodexArgs({
     agentProvider: "codex-lmstudio",
-    localModel: "openai/gpt-oss-20b",
+    localModel: "ibm/granite-4-micro",
     includeMcp: true,
     sandbox: "workspace-write",
   });
@@ -51,7 +51,7 @@ test("app config defaults older files to Codex Cloud and persists local fields",
   try {
     const loaded = loadAppConfig(dir);
     assert.equal(loaded.agentProvider, "codex-cloud");
-    assert.equal(loaded.localModel, "openai/gpt-oss-20b");
+    assert.equal(loaded.localModel, "ibm/granite-4-micro");
 
     saveAppConfig(dir, {
       agentProvider: "codex-lmstudio",
@@ -65,11 +65,16 @@ test("app config defaults older files to Codex Cloud and persists local fields",
   }
 });
 
+test("packaged Bridge setup defaults LM Studio to the portable admin model", () => {
+  const source = readFileSync(resolve(process.cwd(), "bridge", "electron-main.cjs"), "utf8");
+  assert.match(source, /const DEFAULT_AI_POLICY[\s\S]*model: "ibm\/granite-4-micro"/);
+});
+
 test("LM Studio diagnostic reports offline server", async () => {
   const offlineFetch: typeof fetch = async () => {
     throw new Error("ECONNREFUSED");
   };
-  const status = await probeLmStudioStatus("openai/gpt-oss-20b", offlineFetch);
+  const status = await probeLmStudioStatus("ibm/granite-4-micro", offlineFetch);
   assert.equal(status.available, false);
   assert.equal(status.modelAvailable, false);
   assert.match(status.error ?? "", /LM Studio injoignable/);
@@ -81,7 +86,7 @@ test("LM Studio diagnostic reports empty model list", async () => {
       status: 200,
       headers: { "content-type": "application/json" },
     });
-  const status = await probeLmStudioStatus("openai/gpt-oss-20b", emptyFetch);
+  const status = await probeLmStudioStatus("ibm/granite-4-micro", emptyFetch);
   assert.equal(status.available, true);
   assert.equal(status.modelAvailable, false);
   assert.deepEqual(status.models, []);
@@ -89,12 +94,12 @@ test("LM Studio diagnostic reports empty model list", async () => {
 
 test("LM Studio diagnostic finds configured model", async () => {
   const modelsFetch: typeof fetch = async () =>
-    new Response(JSON.stringify({ data: [{ id: "openai/gpt-oss-20b" }, { id: "local/other" }] }), {
+    new Response(JSON.stringify({ data: [{ id: "ibm/granite-4-micro" }, { id: "local/other" }] }), {
       status: 200,
       headers: { "content-type": "application/json" },
     });
-  const status = await probeLmStudioStatus("openai/gpt-oss-20b", modelsFetch);
+  const status = await probeLmStudioStatus("ibm/granite-4-micro", modelsFetch);
   assert.equal(status.available, true);
   assert.equal(status.modelAvailable, true);
-  assert.deepEqual(status.models, ["local/other", "openai/gpt-oss-20b"]);
+  assert.deepEqual(status.models, ["ibm/granite-4-micro", "local/other"]);
 });

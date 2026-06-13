@@ -38,7 +38,7 @@ const DEFAULT_AI_POLICY = {
     enabled: false,
     installRequired: false,
     provider: "lmstudio",
-    model: "openai/gpt-oss-20b",
+    model: "ibm/granite-4-micro",
     allowUserModelOverride: false,
   },
   voice: {

@@ -24,9 +24,15 @@ export interface LocalHardwareProfile {
   gpuMemoryGb?: number;
 }
 
-const GPT_OSS_20B = {
+const GRANITE_4_MICRO = {
   id: DEFAULT_LOCAL_MODEL,
-  minimumMemoryGb: 12,
+  minimumMemoryGb: 8,
+  downloadSizeGb: 2.25,
+};
+
+const GPT_OSS_20B = {
+  id: "openai/gpt-oss-20b",
+  minimumMemoryGb: 16,
   downloadSizeGb: 12,
 };
 
@@ -48,10 +54,10 @@ export function recommendLocalModel(profile = readLocalHardwareProfile()): Local
       accelerator,
       ...(profile.gpuMemoryGb ? { gpuMemoryGb: profile.gpuMemoryGb } : {}),
       tier: "cloud-first",
-      recommendedModel: GPT_OSS_20B.id,
-      minimumMemoryGb: GPT_OSS_20B.minimumMemoryGb,
-      downloadSizeGb: GPT_OSS_20B.downloadSizeGb,
-      reason: "Mémoire trop limitée pour activer le local automatiquement sur des runs agentiques Bridge.",
+      recommendedModel: GRANITE_4_MICRO.id,
+      minimumMemoryGb: GRANITE_4_MICRO.minimumMemoryGb,
+      downloadSizeGb: GRANITE_4_MICRO.downloadSizeGb,
+      reason: "Machine modeste: ChatGPT Codex reste conseillé par défaut, mais Granite 4 Micro est le modèle local de secours le plus portable.",
     };
   }
 
@@ -83,13 +89,32 @@ export function recommendLocalModel(profile = readLocalHardwareProfile()): Local
       accelerator,
       ...(profile.gpuMemoryGb ? { gpuMemoryGb: profile.gpuMemoryGb } : {}),
       tier: "small-local",
-      recommendedModel: GPT_OSS_20B.id,
-      minimumMemoryGb: GPT_OSS_20B.minimumMemoryGb,
-      downloadSizeGb: GPT_OSS_20B.downloadSizeGb,
+      recommendedModel: GRANITE_4_MICRO.id,
+      minimumMemoryGb: GRANITE_4_MICRO.minimumMemoryGb,
+      downloadSizeGb: GRANITE_4_MICRO.downloadSizeGb,
       reason:
         accelerator === "apple-silicon"
-          ? "Apple Silicon avec mémoire suffisante: démarrer sur gpt-oss-20b pour garder les actions locales simples."
-          : "Mémoire suffisante: démarrer sur gpt-oss-20b pour les actions locales explicitement routées.",
+          ? "Apple Silicon standard: Granite 4 Micro garde l'installation locale légère et compatible."
+          : "Mémoire suffisante: Granite 4 Micro est le choix local compatible pour les actions explicitement routées.",
+    };
+  }
+
+  if (profile.totalMemoryGb < 64 || accelerator === "cpu") {
+    return {
+      platform: profile.platform,
+      arch: profile.arch,
+      totalMemoryGb: profile.totalMemoryGb,
+      cpuCount: profile.cpuCount,
+      accelerator,
+      ...(profile.gpuMemoryGb ? { gpuMemoryGb: profile.gpuMemoryGb } : {}),
+      tier: "standard-local",
+      recommendedModel: GRANITE_4_MICRO.id,
+      minimumMemoryGb: GRANITE_4_MICRO.minimumMemoryGb,
+      downloadSizeGb: GRANITE_4_MICRO.downloadSizeGb,
+      reason:
+        accelerator === "cpu"
+          ? "Machine confortable mais sans accélérateur explicite: Granite 4 Micro reste le choix local le plus robuste."
+          : "Machine confortable: Granite 4 Micro reste le défaut local portable avant benchmark client.",
     };
   }
 
@@ -105,9 +130,9 @@ export function recommendLocalModel(profile = readLocalHardwareProfile()): Local
     minimumMemoryGb: GPT_OSS_20B.minimumMemoryGb,
     downloadSizeGb: GPT_OSS_20B.downloadSizeGb,
     reason:
-      accelerator === "cpu"
-        ? "Machine confortable mais sans accélérateur explicite: gpt-oss-20b reste le choix local fiable."
-        : "Machine confortable: gpt-oss-20b est le choix local par défaut avant benchmark de généralisation.",
+      accelerator === "nvidia"
+        ? "GPU NVIDIA confortable détecté: gpt-oss-20b peut être proposé pour de meilleurs runs locaux."
+        : "Mémoire unifiée confortable détectée: gpt-oss-20b peut être proposé pour de meilleurs runs locaux.",
   };
 }
 

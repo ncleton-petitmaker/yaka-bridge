@@ -7,7 +7,7 @@ import type {
   CloudBridgeJob,
 } from "./types.js";
 
-const DEFAULT_LOCAL_MODEL = "openai/gpt-oss-20b";
+const DEFAULT_LOCAL_MODEL = "ibm/granite-4-micro";
 
 export interface BridgeLocalAgentReadiness {
   ready: boolean;

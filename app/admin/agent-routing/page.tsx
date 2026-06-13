@@ -72,7 +72,7 @@ interface RoutingResponse {
   services: RoutingService[];
 }
 
-const DEFAULT_LOCAL_MODEL = "openai/gpt-oss-20b";
+const DEFAULT_LOCAL_MODEL = "ibm/granite-4-micro";
 const DEFAULT_VOICE_MODEL = "parakeet-tdt-0.6b-v3-int8";
 const DEFAULT_VOICE_SHORTCUT = "CommandOrControl+Shift+Space";
 

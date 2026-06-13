@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
 
-const DEFAULT_MODEL = "openai/gpt-oss-20b";
+const DEFAULT_MODEL = "ibm/granite-4-micro";
 const BASE_URL = "http://127.0.0.1:1234/v1";
 const args = process.argv.slice(2);
 const model = valueAfter("--model") || DEFAULT_MODEL;
