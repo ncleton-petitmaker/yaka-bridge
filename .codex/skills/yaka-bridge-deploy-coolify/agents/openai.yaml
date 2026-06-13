@@ -1,0 +1,4 @@
+interface:
+  display_name: "Yaka-Bridge Coolify Deploy"
+  short_description: "Déployer Yaka-Bridge via Coolify/VPS"
+  default_prompt: "Use $yaka-bridge-deploy-coolify to deploy the Yaka-Bridge landing or ERP stack through Coolify."

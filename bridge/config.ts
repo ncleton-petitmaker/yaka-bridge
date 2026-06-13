@@ -5,14 +5,18 @@ import { dirname, resolve } from "node:path";
 import {
   BRIDGE_PRODUCT_NAME,
   type BridgeAllowedRoot,
+  type AgentProvider,
   type BridgeConfig,
   type BridgeErpBusConfig,
   type BridgeSessionInfo,
   type BridgeServiceInstance,
 } from "./types.js";
+import { normalizeBridgeAiPolicy } from "./ai-policy.js";
 
 const DEFAULT_CONFIG_DIR = ".bridge";
 const DEFAULT_DATA_DIR = resolve(homedir(), BRIDGE_PRODUCT_NAME, "data");
+const DEFAULT_AGENT_PROVIDER: AgentProvider = "codex-cloud";
+const DEFAULT_LOCAL_MODEL = "openai/gpt-oss-20b";
 const SECURE_SECRETS_KEY = "_secureSecrets";
 
 interface SecureBridgeSecrets {
@@ -62,6 +66,7 @@ export function normalizeBridgeConfig(input: Partial<BridgeConfig>): BridgeConfi
   const dataDir = resolvePath(
     input.dataDir ?? process.env.BRIDGE_DATA_DIR ?? process.env.APP_DATA_DIR ?? defaultBridgeDataDir()
   );
+  const aiPolicy = normalizeBridgeAiPolicy(input.aiPolicy);
   const controlPlaneBaseUrl = cleanOptional(
     input.controlPlaneBaseUrl ??
       input.cloudBaseUrl ??
@@ -116,7 +121,15 @@ export function normalizeBridgeConfig(input: Partial<BridgeConfig>): BridgeConfi
     session: input.session,
     label: cleanOptional(input.label) ?? hostname(),
     dataDir,
+    defaultAgentProvider: normalizeAgentProvider(input.defaultAgentProvider ?? process.env.BRIDGE_AGENT_PROVIDER ?? process.env.APP_AGENT_PROVIDER),
     defaultModel: cleanOptional(input.defaultModel),
+    defaultLocalModel:
+      aiPolicy.localAi.enabled
+        ? aiPolicy.localAi.allowUserModelOverride
+          ? cleanOptional(input.defaultLocalModel ?? process.env.BRIDGE_LOCAL_MODEL ?? process.env.APP_LOCAL_MODEL) ?? aiPolicy.localAi.model
+          : aiPolicy.localAi.model
+        : cleanOptional(input.defaultLocalModel ?? process.env.BRIDGE_LOCAL_MODEL ?? process.env.APP_LOCAL_MODEL) ?? DEFAULT_LOCAL_MODEL,
+    aiPolicy,
     maxConcurrentJobs: clampInt(input.maxConcurrentJobs, 1, 20, 10),
     pollIntervalSeconds: clampInt(input.pollIntervalSeconds, 2, 300, 5),
     services,
@@ -184,6 +197,10 @@ function normalizeAllowedRoots(roots: BridgeAllowedRoot[], basePath: string): Br
     writable: root.writable !== false,
     scopes: normalizeStringList(root.scopes),
   }));
+}
+
+function normalizeAgentProvider(value: unknown): AgentProvider {
+  return value === "codex-lmstudio" ? "codex-lmstudio" : DEFAULT_AGENT_PROVIDER;
 }
 
 function hydrateSecureBridgeSecrets(input: PersistedBridgeConfig): Partial<BridgeConfig> {

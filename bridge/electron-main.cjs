@@ -1,10 +1,24 @@
-const { app, BrowserWindow, Menu, nativeImage, shell, Tray, ipcMain, safeStorage, dialog } = require("electron");
-const { spawnSync } = require("node:child_process");
+const { app, BrowserWindow, Menu, nativeImage, shell, Tray, ipcMain, safeStorage, dialog, clipboard } = require("electron");
+const { spawn, spawnSync } = require("node:child_process");
 const { createServer } = require("node:http");
 const path = require("node:path");
 const fs = require("node:fs");
 const os = require("node:os");
-const { runCodexSetup, ensureCodexFileStore, findCodexBin: findInstalledCodexBin } = require("./provider-setup.cjs");
+const {
+  runCodexSetup,
+  runBridgeSetup,
+  runLocalAiSetup,
+  runVoiceSetup,
+  ensureCodexFileStore,
+  findCodexBin: findInstalledCodexBin,
+  findLmsBin,
+  findLmStudioApp,
+  probeLmStudioModels,
+  startLmStudioServer,
+  isVoiceModelInstalled,
+  voiceModelPath,
+} = require("./provider-setup.cjs");
+const { bridgeDesignCss, loadBridgeDesign } = require("./theme.cjs");
 
 let autoUpdater = null;
 try {
@@ -19,6 +33,25 @@ process.env.APP_BRIDGE_VERSION = process.env.APP_BRIDGE_VERSION || app.getVersio
 const PRODUCT_NAME = "Bridge";
 app.setName(PRODUCT_NAME);
 const PROTOCOL_VERSION = 2;
+const DEFAULT_AI_POLICY = {
+  localAi: {
+    enabled: false,
+    installRequired: false,
+    provider: "lmstudio",
+    model: "openai/gpt-oss-20b",
+    allowUserModelOverride: false,
+  },
+  voice: {
+    enabled: false,
+    installRequired: false,
+    provider: "bridge-voice",
+    model: "parakeet-tdt-0.6b-v3-int8",
+    defaultShortcut: "CommandOrControl+Shift+Space",
+    allowUserShortcutOverride: true,
+    allowUserModelOverride: false,
+    insertMode: "system",
+  },
+};
 const HEALTH_PORT = Number(process.env.BRIDGE_HEALTH_PORT || process.env.APP_BRIDGE_HEALTH_PORT || "7707") || 7707;
 const BRIDGE_ONLINE_THRESHOLD_SECONDS =
   Number(process.env.BRIDGE_ONLINE_THRESHOLD_SECONDS || "90") || 90;
@@ -63,10 +96,23 @@ let updateDownloaded = false;
 let codexStatusCache = null;
 let codexStatusProbeRunning = false;
 let lastCodexStatusRefreshMs = 0;
+let localAiStatusCache = null;
+let localAiStatusProbeRunning = false;
+let lastLocalAiStatusRefreshMs = 0;
 let pendingBrowserSession = null;
 let lastConfigSnapshot = null;
 let protocolLaunchHandled = false;
 let lastProtocolLaunchAt = 0;
+let adminProvisioningRunning = false;
+let voiceProcess = null;
+let voiceShortcutProcess = null;
+let voiceStdoutBuffer = "";
+let voiceShortcutStdoutBuffer = "";
+let voicePending = [];
+let voiceRecording = null;
+let voiceBusy = false;
+let voiceShortcutError = "";
+let voiceShortcutValue = "";
 let updateState = {
   enabled: false,
   status: "idle",
@@ -99,6 +145,8 @@ app.on("before-quit", () => {
   isQuitting = true;
   try {
     runtimeHandle?.stop?.();
+    voiceProcess?.kill?.();
+    stopVoiceShortcutWatcher();
     localHealthServer?.close();
     if (autoUpdateInterval) clearInterval(autoUpdateInterval);
     if (cloudHeartbeatInterval) clearInterval(cloudHeartbeatInterval);
@@ -123,8 +171,12 @@ app.whenReady().then(() => {
     startAutoUpdates();
     startCloudHeartbeat();
     refreshExternalStatuses();
+    scheduleLocalAiStatusRefresh();
     scheduleCodexStatusRefresh();
+    registerVoiceShortcut();
+    void ensureAdminProvisioning(loadConfig(), { silent: true });
     setInterval(refreshExternalStatuses, 15_000);
+    setInterval(scheduleLocalAiStatusRefresh, 15_000);
   });
 });
 
@@ -392,7 +444,7 @@ function updateTrayMenu() {
   if (!tray) return;
   const state = localStatusPayload();
   const connectedCount = state.services.filter((service) => service.status === "connected" || service.status === "active").length;
-  const codexLabel = state.codex?.ready ? "Codex prêt" : `Codex: ${state.codex?.label || "à vérifier"}`;
+  const codexLabel = state.codex?.ready ? "ChatGPT Codex prêt" : `ChatGPT Codex: ${state.codex?.label || "à vérifier"}`;
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: "Afficher Bridge", click: () => showStatusWindow({ focus: true }) },
     {
@@ -442,13 +494,13 @@ function updateApplicationMenu() {
       ],
     },
     {
-      label: "Codex",
+      label: "ChatGPT Codex",
       submenu: [
-        { label: state.codex?.ready ? "Codex prêt" : `Codex: ${state.codex?.label || "à vérifier"}`, enabled: false },
+        { label: state.codex?.ready ? "ChatGPT Codex prêt" : `ChatGPT Codex: ${state.codex?.label || "à vérifier"}`, enabled: false },
         { type: "separator" },
-        { label: "Tester Codex", click: () => { resetCodexStatusCache(); refreshStatusWindow(); updateTrayMenu(); } },
-        { label: "Configurer Codex", click: async () => { await runCodexSetup(); resetCodexStatusCache(); refreshStatusWindow(); updateTrayMenu(); } },
-        { label: "Aide Codex", click: () => shell.openExternal("https://help.openai.com/en/articles/11381614-api-codex-cli-and-sign-in-with-chatgpt") },
+        { label: "Tester ChatGPT Codex", click: () => { resetCodexStatusCache(); refreshStatusWindow(); updateTrayMenu(); } },
+        { label: "Configurer Bridge", click: async () => { await runBridgeSetup({ aiPolicy: loadConfig().aiPolicy }); resetCodexStatusCache(); scheduleLocalAiStatusRefresh(); refreshStatusWindow(); updateTrayMenu(); } },
+        { label: "Aide ChatGPT Codex", click: () => shell.openExternal("https://help.openai.com/en/articles/11381614-api-codex-cli-and-sign-in-with-chatgpt") },
       ],
     },
     {
@@ -569,6 +621,9 @@ function localStatusPayload(options = {}) {
   return {
     ...base,
     codex,
+    aiPolicy: cfg.aiPolicy,
+    localAi: localAiStatusCache || placeholderLocalAiStatus(cfg),
+    voice: getVoiceStatus(cfg),
     authenticated: Boolean(base.authenticated && !isStoredSessionInvalid(cfg)),
     controlPlaneConfigured: Boolean(base.controlPlaneConfigured && !isStoredSessionInvalid(cfg)),
     services: base.services.map((service) => serviceWithDisplayStatus(base, service, codex)),
@@ -624,6 +679,557 @@ function stateFromConfig(cfg, codex = getCodexStatus({ fast: true })) {
   };
 }
 
+function placeholderLocalAiStatus(cfg) {
+  const policy = normalizeAiPolicy(cfg.aiPolicy).localAi;
+  const prefs = loadLocalAiPrefs();
+  const model = effectiveLocalAiModel(policy, cfg.defaultLocalModel);
+  return {
+    enabled: policy.enabled,
+    installRequired: policy.installRequired,
+    provider: policy.provider,
+    model,
+    adminModel: policy.model,
+    userModel: policy.allowUserModelOverride ? prefs.localModel : undefined,
+    allowUserModelOverride: policy.allowUserModelOverride,
+    ready: false,
+    installed: Boolean(findLmsBin()),
+    serverReady: false,
+    modelReady: false,
+    models: [],
+    checkedAt: "",
+    label: policy.enabled ? "Moteur local en vérification" : "Moteur local désactivé",
+    detail: policy.enabled ? "Bridge vérifie le moteur local en arrière-plan." : "La politique admin n'impose pas de modèle local.",
+  };
+}
+
+function getVoiceStatus(cfg) {
+  const policy = normalizeAiPolicy(cfg.aiPolicy).voice;
+  const bin = findVoiceSidecar();
+  const userPrefs = loadVoicePrefs();
+  const sidecar = bin ? runVoiceSidecar(["status"], 2500) : null;
+  const audioReady = sidecar?.ok === true && sidecar.audioReady === true;
+  const transcriptionReady = sidecar?.transcriptionReady === true;
+  const modelPath = voiceModelPath(policy.model);
+  const modelInstalled = isVoiceModelInstalled(policy.model);
+  const shortcutReady = Boolean(voiceShortcutProcess && !voiceShortcutProcess.killed && !voiceShortcutError);
+  return {
+    enabled: policy.enabled,
+    installRequired: policy.installRequired,
+    provider: policy.provider,
+    model: policy.model,
+    modelPath,
+    modelInstalled,
+    shortcut: policy.allowUserShortcutOverride ? userPrefs.shortcut || policy.defaultShortcut : policy.defaultShortcut,
+    shortcutNative: toHandyShortcut(policy.allowUserShortcutOverride ? userPrefs.shortcut || policy.defaultShortcut : policy.defaultShortcut),
+    shortcutReady,
+    shortcutError: voiceShortcutError || undefined,
+    allowUserShortcutOverride: policy.allowUserShortcutOverride,
+    allowUserModelOverride: policy.allowUserModelOverride,
+    insertMode: policy.insertMode,
+    ready: Boolean(policy.enabled && bin && audioReady && modelInstalled && shortcutReady),
+    recording: Boolean(voiceRecording),
+    busy: voiceBusy,
+    audioReady,
+    transcriptionReady,
+    installed: Boolean(bin),
+    path: bin,
+    error: sidecar?.ok === false ? sidecar.error : undefined,
+    label: policy.enabled
+      ? !bin
+        ? "Push-to-talk à installer"
+        : !modelInstalled
+          ? "Modèle vocal à installer"
+          : !audioReady
+            ? "Micro à autoriser"
+            : shortcutReady
+              ? "Push-to-talk prêt"
+              : voiceShortcutError
+                ? "Raccourci à autoriser"
+                : "Raccourci en préparation"
+      : "Push-to-talk désactivé",
+  };
+}
+
+function voicePrefsPath() {
+  return path.join(app.getPath("userData"), "voice-prefs.json");
+}
+
+function loadVoicePrefs() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(voicePrefsPath(), "utf8"));
+    return raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveVoicePrefs(partial) {
+  const next = { ...loadVoicePrefs(), ...partial, updatedAt: new Date().toISOString() };
+  fs.mkdirSync(path.dirname(voicePrefsPath()), { recursive: true });
+  fs.writeFileSync(voicePrefsPath(), `${JSON.stringify(next, null, 2)}\n`, "utf8");
+  registerVoiceShortcut();
+  refreshStatusWindow();
+  return next;
+}
+
+function localAiPrefsPath() {
+  return path.join(path.dirname(CONFIG_PATH), "local-ai-prefs.json");
+}
+
+function loadLocalAiPrefs() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(localAiPrefsPath(), "utf8"));
+    return raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveLocalAiPrefs(partial) {
+  const current = loadLocalAiPrefs();
+  const next = { ...current, ...partial, updatedAt: new Date().toISOString() };
+  if (!next.localModel) delete next.localModel;
+  fs.mkdirSync(path.dirname(localAiPrefsPath()), { recursive: true });
+  fs.writeFileSync(localAiPrefsPath(), `${JSON.stringify(next, null, 2)}\n`, "utf8");
+  return next;
+}
+
+function findVoiceSidecar() {
+  const exe = process.platform === "win32" ? "bridge-voice.exe" : "bridge-voice";
+  const candidates = [
+    process.resourcesPath ? path.join(process.resourcesPath, "bridge-voice", process.platform, exe) : null,
+    path.join(__dirname, "bridge-voice", process.platform, exe),
+    path.join(__dirname, "..", "bridge-voice", process.platform, exe),
+    path.join(process.cwd(), "bridge-voice", "target", "release", exe),
+    path.join(process.cwd(), "bridge-voice", "target", "debug", exe),
+  ].filter(Boolean);
+  return candidates.find((candidate) => fs.existsSync(candidate)) || null;
+}
+
+function runVoiceSidecar(args, timeout = 5000) {
+  const bin = findVoiceSidecar();
+  if (!bin) return { ok: false, error: "bridge-voice introuvable" };
+  const res = spawnSync(bin, args, {
+    encoding: "utf8",
+    timeout,
+    windowsHide: true,
+  });
+  const raw = String(res.stdout || "").trim().split(/\r?\n/).filter(Boolean).pop() || "";
+  let parsed = null;
+  try {
+    parsed = raw ? JSON.parse(raw) : null;
+  } catch {
+    parsed = null;
+  }
+  if (parsed && typeof parsed === "object") return parsed;
+  return {
+    ok: false,
+    error: res.error?.message || res.stderr?.trim() || raw || `bridge-voice exited ${res.status}`,
+  };
+}
+
+function getVoiceProcess() {
+  if (voiceProcess && !voiceProcess.killed) return voiceProcess;
+  const bin = findVoiceSidecar();
+  if (!bin) throw new Error("bridge-voice introuvable");
+  voiceStdoutBuffer = "";
+  voiceProcess = spawn(bin, [], {
+    stdio: ["pipe", "pipe", "pipe"],
+    windowsHide: true,
+  });
+  voiceProcess.stdout.on("data", (chunk) => {
+    voiceStdoutBuffer += chunk.toString();
+    const lines = voiceStdoutBuffer.split(/\r?\n/);
+    voiceStdoutBuffer = lines.pop() || "";
+    for (const line of lines) handleVoiceProcessLine(line);
+  });
+  voiceProcess.stderr.on("data", (chunk) => {
+    const line = chunk.toString().trim();
+    if (line) pushActivity(`Dictée locale: ${line.slice(0, 180)}`);
+  });
+  voiceProcess.on("close", () => {
+    voiceProcess = null;
+    voiceRecording = null;
+    for (const pending of voicePending.splice(0)) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error("bridge-voice arrêté"));
+    }
+  });
+  voiceProcess.on("error", (err) => {
+    for (const pending of voicePending.splice(0)) {
+      clearTimeout(pending.timer);
+      pending.reject(err);
+    }
+  });
+  return voiceProcess;
+}
+
+function handleVoiceProcessLine(line) {
+  const trimmed = String(line || "").trim();
+  if (!trimmed) return;
+  let parsed = null;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return;
+  }
+  const pending = voicePending.shift();
+  if (pending) {
+    clearTimeout(pending.timer);
+    pending.resolve(parsed);
+    return;
+  }
+  if (parsed.ok === false) {
+    pushActivity(`Dictée locale: ${parsed.error || "commande refusée"}`);
+    refreshStatusWindow();
+  }
+}
+
+function sendVoiceCommand(payload, timeout = 15_000) {
+  return new Promise((resolve, reject) => {
+    let proc;
+    try {
+      proc = getVoiceProcess();
+    } catch (err) {
+      reject(err);
+      return;
+    }
+    const item = {
+      resolve,
+      reject,
+      timer: setTimeout(() => {
+        const index = voicePending.indexOf(item);
+        if (index >= 0) voicePending.splice(index, 1);
+        reject(new Error("bridge-voice ne répond pas"));
+      }, timeout),
+    };
+    voicePending.push(item);
+    proc.stdin.write(`${JSON.stringify(payload)}\n`, (err) => {
+      if (!err) return;
+      const index = voicePending.indexOf(item);
+      if (index >= 0) voicePending.splice(index, 1);
+      clearTimeout(item.timer);
+      reject(err);
+    });
+  });
+}
+
+function startVoiceShortcutWatcher() {
+  stopVoiceShortcutWatcher();
+  const cfg = loadConfig({ hydrateSecrets: false });
+  const voice = getVoiceStatus(cfg);
+  if (!voice.enabled) return;
+  const bin = findVoiceSidecar();
+  if (!bin) {
+    voiceShortcutError = "bridge-voice introuvable";
+    return;
+  }
+  const shortcut = toHandyShortcut(voice.shortcut);
+  if (!shortcut) {
+    voiceShortcutError = "raccourci vocal invalide";
+    return;
+  }
+  voiceShortcutError = "";
+  voiceShortcutValue = shortcut;
+  voiceShortcutStdoutBuffer = "";
+  const proc = spawn(bin, ["watch-shortcut", "--shortcut", shortcut], {
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+  });
+  voiceShortcutProcess = proc;
+  proc.stdout.on("data", (chunk) => {
+    voiceShortcutStdoutBuffer += chunk.toString();
+    const lines = voiceShortcutStdoutBuffer.split(/\r?\n/);
+    voiceShortcutStdoutBuffer = lines.pop() || "";
+    for (const line of lines) handleVoiceShortcutLine(line);
+  });
+  proc.stderr.on("data", (chunk) => {
+    const message = chunk.toString().trim();
+    if (message) pushActivity(`Raccourci vocal: ${message.slice(0, 180)}`);
+  });
+  proc.on("error", (err) => {
+    if (voiceShortcutProcess !== proc) return;
+    voiceShortcutError = err instanceof Error ? err.message : String(err);
+    refreshStatusWindow();
+  });
+  proc.on("close", (code) => {
+    if (voiceShortcutProcess !== proc) return;
+    voiceShortcutError = code === 0 ? "" : voiceShortcutError || `watcher vocal arrêté (${code})`;
+    voiceShortcutProcess = null;
+    refreshStatusWindow();
+  });
+}
+
+function stopVoiceShortcutWatcher() {
+  if (voiceShortcutProcess && !voiceShortcutProcess.killed) {
+    try {
+      voiceShortcutProcess.kill();
+    } catch {
+      // no-op
+    }
+  }
+  voiceShortcutProcess = null;
+  voiceShortcutStdoutBuffer = "";
+}
+
+function handleVoiceShortcutLine(line) {
+  const trimmed = String(line || "").trim();
+  if (!trimmed) return;
+  let parsed;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return;
+  }
+  if (parsed.event === "shortcut-watching") {
+    voiceShortcutError = "";
+    pushActivity(`Raccourci push-to-talk actif: ${parsed.shortcut || voiceShortcutValue}.`);
+    refreshStatusWindow();
+    return;
+  }
+  if (parsed.event !== "shortcut") return;
+  void handleVoiceShortcutEvent(parsed.pressed === true);
+}
+
+async function handleVoiceShortcutEvent(pressed) {
+  if (pressed) {
+    if (!voiceRecording) await startVoiceDictation();
+    return;
+  }
+  if (voiceRecording) await stopVoiceDictation();
+}
+
+function toHandyShortcut(shortcut) {
+  const raw = String(shortcut || "").trim();
+  if (!raw) return "";
+  return raw
+    .split("+")
+    .map((part) => part.trim().toLowerCase())
+    .filter(Boolean)
+    .map((part) => {
+      if (part === "commandorcontrol" || part === "cmdorctrl" || part === "controlorcommand") {
+        return process.platform === "darwin" ? "command" : "ctrl";
+      }
+      if (part === "cmd" || part === "meta") return process.platform === "darwin" ? "command" : "super";
+      if (part === "control") return "ctrl";
+      if (part === "option") return process.platform === "darwin" ? "option" : "alt";
+      if (part === "return") return "enter";
+      if (part === "esc") return "escape";
+      if (part === " ") return "space";
+      return part;
+    })
+    .join("+");
+}
+
+function voiceRecordingsDir() {
+  const dir = path.join(app.getPath("userData"), "voice-recordings");
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+async function toggleVoiceDictation() {
+  if (voiceBusy) return { ok: false, error: "voice-busy" };
+  return voiceRecording ? stopVoiceDictation() : startVoiceDictation();
+}
+
+async function startVoiceDictation() {
+  voiceBusy = true;
+  try {
+    const cfg = loadConfig({ hydrateSecrets: false });
+    const voice = getVoiceStatus(cfg);
+    if (!voice.enabled) throw new Error("Dictée locale désactivée par la politique admin.");
+    if (!voice.installed) throw new Error("Sidecar vocal absent. Mets à jour Bridge pour activer la dictée locale.");
+    if (!voice.modelInstalled) throw new Error(`Modèle vocal absent: ${voice.model}.`);
+    if (!voice.audioReady) throw new Error("Micro non disponible ou autorisation macOS/Windows manquante.");
+    const wavPath = path.join(voiceRecordingsDir(), `bridge-voice-${Date.now()}.wav`);
+    const started = await sendVoiceCommand({ command: "start", output: wavPath }, 8_000);
+    if (!started?.ok) throw new Error(started?.error || "Démarrage de l'enregistrement refusé.");
+    voiceRecording = {
+      wavPath,
+      modelPath: voice.modelPath,
+      startedAt: Date.now(),
+    };
+    showVoiceOverlay();
+    pushActivity("Dictée locale démarrée.");
+    return { ok: true, state: "recording", wavPath };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    pushActivity(`Dictée locale indisponible: ${message}`);
+    return { ok: false, error: message };
+  } finally {
+    voiceBusy = false;
+    refreshStatusWindow();
+  }
+}
+
+async function stopVoiceDictation() {
+  voiceBusy = true;
+  const current = voiceRecording;
+  voiceRecording = null;
+  try {
+    if (!current) return { ok: false, error: "recording-not-active" };
+    showVoiceOverlay();
+    const stopped = await sendVoiceCommand({ command: "stop", model: current.modelPath }, 120_000);
+    if (!stopped?.ok) throw new Error(stopped?.error || "Arrêt de l'enregistrement refusé.");
+    const text = String(stopped.text || "").trim();
+    if (text) {
+      const paste = await pasteTranscribedText(text);
+      pushActivity(paste.ok ? "Dictée locale insérée." : `Dictée locale copiée: ${paste.error}`);
+    } else {
+      pushActivity(stopped.speechDetected ? "Dictée locale sans texte exploitable." : "Aucune parole détectée.");
+    }
+    refreshStatusWindow();
+    return { ok: true, state: "stopped", text, result: stopped };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    pushActivity(`Dictée locale échouée: ${message}`);
+    return { ok: false, error: message };
+  } finally {
+    voiceBusy = false;
+    refreshStatusWindow();
+  }
+}
+
+async function pasteTranscribedText(text) {
+  const cfg = loadConfig({ hydrateSecrets: false });
+  const voice = normalizeAiPolicy(cfg.aiPolicy).voice;
+  const previousClipboard = clipboard.readText();
+  clipboard.writeText(text);
+  if (voice.insertMode !== "system") {
+    return { ok: true, mode: "clipboard" };
+  }
+  try {
+    const pasted = await sendVoiceCommand({ command: "paste" }, 4_000);
+    setTimeout(() => {
+      try {
+        if (clipboard.readText() === text) clipboard.writeText(previousClipboard);
+      } catch {
+        // no-op
+      }
+    }, 900);
+    if (!pasted?.ok) throw new Error(pasted?.error || "collage natif refusé");
+    return { ok: true, mode: "system" };
+  } catch (err) {
+    return { ok: false, mode: "clipboard", error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+function registerVoiceShortcut() {
+  try {
+    startVoiceShortcutWatcher();
+  } catch (err) {
+    pushActivity(`Raccourci push-to-talk non enregistré: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+let voiceOverlayWindow = null;
+function showVoiceOverlay() {
+  const design = loadBridgeDesign();
+  if (voiceOverlayWindow && !voiceOverlayWindow.isDestroyed()) {
+    voiceOverlayWindow.focus();
+    return;
+  }
+  voiceOverlayWindow = new BrowserWindow({
+    width: 220,
+    height: 220,
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
+    resizable: false,
+    skipTaskbar: true,
+    center: true,
+    show: true,
+    backgroundColor: "#00000000",
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+    },
+  });
+  voiceOverlayWindow.loadURL(`data:text/html;charset=utf-8;base64,${Buffer.from(voiceOverlayHtml(design), "utf8").toString("base64")}`);
+  setTimeout(() => {
+    try {
+      if (voiceOverlayWindow && !voiceOverlayWindow.isDestroyed()) voiceOverlayWindow.close();
+    } catch {
+      // ignore
+    }
+  }, 1600);
+}
+
+function voiceOverlayHtml(design) {
+  return `<!doctype html><html><head><meta charset="utf-8"><style>
+  ${bridgeDesignCss(design)}
+  html,body{margin:0;width:100%;height:100%;background:transparent;font-family:var(--font-sans);overflow:hidden}
+  .wrap{width:100%;height:100%;display:grid;place-items:center}
+  .pulse{width:126px;height:126px;border-radius:999px;background:var(--accent);display:grid;place-items:center;box-shadow:0 0 0 0 color-mix(in srgb,var(--accent) 34%,transparent);animation:pulse 1.05s ease-out infinite;color:var(--on-accent)}
+  .inner{width:58px;height:58px;border-radius:999px;background:color-mix(in srgb,var(--on-accent) 18%,transparent);display:grid;place-items:center}
+  .bar{width:8px;height:28px;border-radius:999px;background:currentColor;box-shadow:-14px 6px 0 -1px currentColor,14px 6px 0 -1px currentColor}
+  @keyframes pulse{0%{transform:scale(.92);box-shadow:0 0 0 0 color-mix(in srgb,var(--accent) 34%,transparent)}70%{transform:scale(1);box-shadow:0 0 0 28px color-mix(in srgb,var(--accent) 0%,transparent)}100%{transform:scale(.92);box-shadow:0 0 0 0 color-mix(in srgb,var(--accent) 0%,transparent)}}
+  </style></head><body><div class="wrap"><div class="pulse"><div class="inner"><div class="bar"></div></div></div></div></body></html>`;
+}
+
+function scheduleLocalAiStatusRefresh() {
+  const now = Date.now();
+  if (localAiStatusProbeRunning || now - lastLocalAiStatusRefreshMs < 5_000) return;
+  localAiStatusProbeRunning = true;
+  lastLocalAiStatusRefreshMs = now;
+  setTimeout(async () => {
+    try {
+      const cfg = loadConfig({ hydrateSecrets: false });
+      localAiStatusCache = await getLocalAiStatus(cfg);
+    } finally {
+      localAiStatusProbeRunning = false;
+      refreshStatusWindow();
+      updateTrayMenu();
+    }
+  }, 0);
+}
+
+async function getLocalAiStatus(cfg) {
+  const policy = normalizeAiPolicy(cfg.aiPolicy).localAi;
+  const prefs = loadLocalAiPrefs();
+  const model = effectiveLocalAiModel(policy, cfg.defaultLocalModel);
+  const installed = Boolean(findLmsBin() || findLmStudioApp());
+  if (!policy.enabled) {
+    return {
+      ...placeholderLocalAiStatus(cfg),
+      installed,
+      checkedAt: new Date().toISOString(),
+    };
+  }
+  const server = await probeLmStudioModels().catch((err) => ({ ok: false, models: [], error: err?.message || String(err) }));
+  const modelReady = Boolean(server.ok && server.models.includes(model));
+  return {
+    enabled: policy.enabled,
+    installRequired: policy.installRequired,
+    provider: policy.provider,
+    model,
+    adminModel: policy.model,
+    userModel: policy.allowUserModelOverride ? prefs.localModel : undefined,
+    allowUserModelOverride: policy.allowUserModelOverride,
+    ready: Boolean(installed && server.ok && modelReady),
+    installed,
+    serverReady: Boolean(server.ok),
+    modelReady,
+    models: server.models || [],
+    checkedAt: new Date().toISOString(),
+    label: !installed
+      ? "Moteur local non installé"
+      : !server.ok
+        ? "Moteur local arrêté"
+        : !modelReady
+          ? "Modèle local absent"
+          : "Moteur local prêt",
+    detail: !installed
+      ? "Bridge doit installer le moteur local demandé par l'organisation."
+      : !server.ok
+        ? "Bridge doit démarrer le serveur local LM Studio."
+        : !modelReady
+          ? `Modèle attendu: ${model}.`
+          : `Modèle prêt: ${model}.`,
+    error: server.error,
+  };
+}
+
 function getCodexStatus({ force = false, fast = false } = {}) {
   const now = Date.now();
   if (!force && codexStatusCache && now - codexStatusCache.checkedMs < 60_000) {
@@ -657,8 +1263,8 @@ function getCodexStatus({ force = false, fast = false } = {}) {
     return finish({
       ready: false,
       state: "missing",
-      label: "Codex non installé",
-      detail: "Installe Codex CLI puis connecte-le pour que Bridge puisse exécuter les agents.",
+      label: "ChatGPT Codex non installé",
+      detail: "Installe Codex CLI puis connecte-le au compte ChatGPT pour que Bridge puisse exécuter les agents.",
       path: null,
       version: null,
       loggedIn: null,
@@ -674,7 +1280,7 @@ function getCodexStatus({ force = false, fast = false } = {}) {
     return finish({
       ready: false,
       state: "error",
-      label: "Codex à vérifier",
+      label: "ChatGPT Codex à vérifier",
       detail: "Codex est détecté, mais le test de version échoue.",
       path: bin,
       version,
@@ -692,8 +1298,8 @@ function getCodexStatus({ force = false, fast = false } = {}) {
     return finish({
       ready: false,
       state: "login_required",
-      label: "Connexion Codex requise",
-      detail: "Codex est installé, mais il n'est pas connecté à un compte OpenAI.",
+      label: "Connexion ChatGPT Codex requise",
+      detail: "Codex est installé, mais il n'est pas connecté au compte ChatGPT.",
       path: bin,
       version,
       loggedIn: false,
@@ -705,8 +1311,8 @@ function getCodexStatus({ force = false, fast = false } = {}) {
   return finish({
     ready: true,
     state: "ready",
-    label: "Codex prêt",
-    detail: "Codex CLI est installé et connecté. Les agents Bridge peuvent tourner sur cet ordinateur.",
+    label: "ChatGPT Codex prêt",
+    detail: "Codex CLI est installé et connecté au compte ChatGPT. Les agents Bridge peuvent tourner sur cet ordinateur.",
     path: bin,
     version,
     loggedIn: true,
@@ -722,8 +1328,8 @@ function placeholderCodexStatus() {
     checkedAt: "",
     ready: false,
     state: "checking",
-    label: "Codex en vérification",
-    detail: "Bridge vérifie Codex en arrière-plan.",
+    label: "ChatGPT Codex en vérification",
+    detail: "Bridge vérifie ChatGPT Codex en arrière-plan.",
     path: null,
     version: null,
     loggedIn: null,
@@ -950,6 +1556,7 @@ function defaultConfig() {
     cloudBaseUrl: process.env.BRIDGE_DEFAULT_CONTROL_PLANE_URL || undefined,
     demoMode: process.env.BRIDGE_DEMO_MODE === "1",
     services: [],
+    aiPolicy: DEFAULT_AI_POLICY,
     erpBus: {
       enabled: true,
       mode: "typed-actions-events",
@@ -970,6 +1577,8 @@ function normalizeConfig(cfg) {
   const dataDir = cfg.dataDir || DATA_DIR;
   const organizationId = cfg.organizationId || cfg.account?.organizationId;
   const services = pruneLegacyDemoServices(Array.isArray(cfg.services) ? cfg.services : [], cfg);
+  const aiPolicy = normalizeAiPolicy(cfg.aiPolicy);
+  const defaultLocalModel = effectiveLocalAiModel(aiPolicy.localAi, cfg.defaultLocalModel);
   return {
     ...cfg,
     dataDir,
@@ -981,6 +1590,8 @@ function normalizeConfig(cfg) {
     installerBaseUrl: cfg.installerBaseUrl || process.env.BRIDGE_INSTALLER_BASE_URL,
     windowsInstallerUrl: cfg.windowsInstallerUrl || process.env.BRIDGE_WINDOWS_INSTALLER_URL,
     macInstallerUrl: cfg.macInstallerUrl || process.env.BRIDGE_MAC_INSTALLER_URL,
+    aiPolicy,
+    defaultLocalModel,
     installId: cfg.installId || stableInstallId(),
     deviceId: cfg.deviceId || cfg.installId || stableInstallId(),
     label: cfg.label || os.hostname(),
@@ -996,6 +1607,46 @@ function normalizeConfig(cfg) {
     erpBus: cfg.erpBus || { enabled: true, mode: "typed-actions-events", sharedCore: "organization", rules: [] },
     demoMode: cfg.demoMode === true || process.env.BRIDGE_DEMO_MODE === "1",
   };
+}
+
+function normalizeAiPolicy(value) {
+  const input = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const local = input.localAi && typeof input.localAi === "object" && !Array.isArray(input.localAi) ? input.localAi : {};
+  const voice = input.voice && typeof input.voice === "object" && !Array.isArray(input.voice) ? input.voice : {};
+  const localEnabled = local.enabled === true;
+  const voiceEnabled = voice.enabled === true;
+  return {
+    localAi: {
+      enabled: localEnabled,
+      installRequired: local.installRequired === true || localEnabled,
+      provider: "lmstudio",
+      model: typeof local.model === "string" && local.model.trim() ? local.model.trim().slice(0, 220) : DEFAULT_AI_POLICY.localAi.model,
+      allowUserModelOverride: local.allowUserModelOverride === true,
+    },
+    voice: {
+      enabled: voiceEnabled,
+      installRequired: voice.installRequired === true || voiceEnabled,
+      provider: "bridge-voice",
+      model: typeof voice.model === "string" && voice.model.trim() ? voice.model.trim().slice(0, 220) : DEFAULT_AI_POLICY.voice.model,
+      defaultShortcut:
+        typeof voice.defaultShortcut === "string" && voice.defaultShortcut.trim()
+          ? voice.defaultShortcut.trim().slice(0, 120)
+          : DEFAULT_AI_POLICY.voice.defaultShortcut,
+      allowUserShortcutOverride: voice.allowUserShortcutOverride === false ? false : true,
+      allowUserModelOverride: voice.allowUserModelOverride === true,
+      insertMode: voice.insertMode === "bridge-fields" ? "bridge-fields" : "system",
+    },
+  };
+}
+
+function cleanLocalAiModel(value) {
+  return typeof value === "string" && value.trim() ? value.trim().slice(0, 220) : "";
+}
+
+function effectiveLocalAiModel(localPolicy, configuredModel) {
+  const adminModel = cleanLocalAiModel(localPolicy?.model) || DEFAULT_AI_POLICY.localAi.model;
+  if (!localPolicy?.allowUserModelOverride) return adminModel;
+  return cleanLocalAiModel(loadLocalAiPrefs().localModel) || cleanLocalAiModel(configuredModel) || adminModel;
 }
 
 function pruneLegacyDemoServices(services, cfg) {
@@ -1241,6 +1892,7 @@ async function syncServices(options = {}) {
       bridgeError = err instanceof Error ? err.message : String(err);
     });
     startAutoUpdates({ reconfigure: true });
+    await ensureAdminProvisioning(loadConfig(), { silent });
     if (!silent) {
       pushActivity("Synchronisation demandée.");
       refreshStatusWindow();
@@ -1463,6 +2115,10 @@ async function syncServicesFromControlPlane(cfg) {
     cfg.organizationId = res.account.organizationId;
   }
   if (res.erpBus) cfg.erpBus = res.erpBus;
+  if (res.aiPolicy) {
+    cfg.aiPolicy = normalizeAiPolicy(res.aiPolicy);
+    if (cfg.aiPolicy.localAi.enabled) cfg.defaultLocalModel = effectiveLocalAiModel(cfg.aiPolicy.localAi, cfg.defaultLocalModel);
+  }
   const previousUpdateBaseUrl = cfg.updateBaseUrl;
   if (res.updateBaseUrl) cfg.updateBaseUrl = res.updateBaseUrl;
   if (res.latestVersion) cfg.latestVersion = res.latestVersion;
@@ -1472,11 +2128,68 @@ async function syncServicesFromControlPlane(cfg) {
   if (res.macInstallerUrl) cfg.macInstallerUrl = res.macInstallerUrl;
   bridgeError = res.error || null;
   saveConfig(cfg);
+  registerVoiceShortcut();
+  await ensureAdminProvisioning(cfg, { silent: true });
   if (cfg.updateBaseUrl && (cfg.updateBaseUrl !== previousUpdateBaseUrl || bridgeUpdateRequired(cfg))) startAutoUpdates({ reconfigure: true });
   void flushPendingBrowserSession();
   refreshStatusWindow();
   updateTrayMenu();
   return res;
+}
+
+async function ensureAdminProvisioning(cfg = loadConfig(), options = {}) {
+  const policy = normalizeAiPolicy(cfg.aiPolicy);
+  const needsLocal = policy.localAi.enabled && policy.localAi.installRequired;
+  const needsVoice =
+    policy.voice.enabled &&
+    policy.voice.installRequired &&
+    (!findVoiceSidecar() || !isVoiceModelInstalled(policy.voice.model));
+  if (!needsLocal && !needsVoice) return { ok: true, skipped: true };
+  if (adminProvisioningRunning) return { ok: true, skipped: true, running: true };
+
+  adminProvisioningRunning = true;
+  try {
+    let shouldRunLocalSetup = false;
+    let shouldRunVoiceSetup = false;
+    if (needsLocal) {
+      const localStatus = await getLocalAiStatus(cfg);
+      if (!localStatus.ready) {
+        if (!options.silent) pushActivity("Préparation du moteur local demandée par l'organisation.");
+        shouldRunLocalSetup = true;
+      } else if (!options.silent) {
+        pushActivity("Moteur local déjà prêt.");
+      }
+    }
+    if (needsVoice) {
+      if (!options.silent) pushActivity("Préparation de la dictée locale demandée par l'organisation.");
+      shouldRunVoiceSetup = true;
+    }
+    if (shouldRunLocalSetup) {
+      const result = await runLocalAiSetup({
+        ...policy.localAi,
+        model: effectiveLocalAiModel(policy.localAi, cfg.defaultLocalModel),
+      });
+      localAiStatusCache = await getLocalAiStatus(loadConfig({ hydrateSecrets: false }));
+      if (!result?.ok) throw new Error("Configuration locale interrompue.");
+    }
+    if (shouldRunVoiceSetup) {
+      const result = await runVoiceSetup(policy.voice);
+      if (!result?.ok) throw new Error("Configuration de la dictée locale interrompue.");
+      registerVoiceShortcut();
+    }
+    refreshStatusWindow();
+    updateTrayMenu();
+    return { ok: true };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    bridgeError = message;
+    pushActivity(`Préparation locale échouée: ${message}`);
+    refreshStatusWindow();
+    updateTrayMenu();
+    return { ok: false, error: message };
+  } finally {
+    adminProvisioningRunning = false;
+  }
 }
 
 async function openService(serviceId) {
@@ -1489,30 +2202,45 @@ async function openService(serviceId) {
   let target = serviceLaunchBaseUrl(service);
   if (!target) return { ok: false, error: "service-url-invalid" };
   const browserSessionId = createBrowserSessionId();
+  let usesLaunchTicket = false;
   try {
-    await refreshSupabaseSessionIfNeeded(cfg);
-    if (runtimeHandle?.syncOnce) {
-      await runtimeHandle.syncOnce().catch((err) => {
-        bridgeError = err instanceof Error ? err.message : String(err);
-      });
-    }
-    if (cfg.controlPlaneBaseUrl && (cfg.bridgeToken || cfg.session?.accessToken)) {
-      await postControlPlane(cfg, "bridge/browser-session", {
-        browserSessionId,
-        returnUrl: target,
-        state: localStatusPayload(),
-      }).catch((err) => {
-        bridgeError = err instanceof Error ? err.message : String(err);
-      });
-      const ticket = await postControlPlane(cfg, "bridge/launch-ticket", {
-        serviceId: service.serviceId,
-        serviceInstanceId: service.serviceInstanceId,
-      });
-      if (ticket.launchUrl) {
-        const launchUrl = cleanExternalUrl(ticket.launchUrl);
-        if (!launchUrl) throw new Error("Launch ticket URL invalide.");
-        target = serviceLaunchUrl(service, launchUrl);
+    try {
+      await refreshSupabaseSessionIfNeeded(cfg);
+      if (runtimeHandle?.syncOnce) {
+        await runtimeHandle.syncOnce().catch((err) => {
+          bridgeError = err instanceof Error ? err.message : String(err);
+        });
       }
+      if (cfg.controlPlaneBaseUrl && (cfg.bridgeToken || cfg.session?.accessToken)) {
+        await postControlPlane(cfg, "bridge/browser-session", {
+          browserSessionId,
+          returnUrl: target,
+          state: localStatusPayload(),
+        }).catch((err) => {
+          bridgeError = err instanceof Error ? err.message : String(err);
+        });
+        const ticket = await postControlPlane(cfg, "bridge/launch-ticket", {
+          serviceId: service.serviceId,
+          serviceInstanceId: service.serviceInstanceId,
+          returnTo: target,
+        });
+        if (ticket.launchUrl) {
+          const launchUrl = cleanExternalUrl(ticket.launchUrl);
+          if (!launchUrl) throw new Error("Launch ticket URL invalide.");
+          target = serviceLaunchUrl(service, launchUrl);
+          usesLaunchTicket = true;
+        }
+      }
+    } catch (err) {
+      if (target) {
+        bridgeError = err instanceof Error ? err.message : String(err);
+        pushActivity(`Ouverture ${service.name} sans ticket Bridge: ${bridgeError}`);
+      } else {
+        throw err;
+      }
+    }
+    if (usesLaunchTicket && cfg.controlPlaneBaseUrl) {
+      target = appendQueryParam(target, "bridgeControlPlaneUrl", cfg.controlPlaneBaseUrl);
     }
     target = appendQueryParam(target, "browserSessionId", browserSessionId);
     hideStatusWindowAfterLaunch();
@@ -1682,10 +2410,56 @@ function showStatusWindow({ focus = false } = {}) {
     ipcMain.handle("bridge:setup-codex", async () => {
       const result = await runCodexSetup();
       const codex = resetCodexStatusCache();
-      pushActivity(codex.ready ? "Codex est prêt sur ce poste." : "Configuration Codex à terminer.");
+      pushActivity(codex.ready ? "ChatGPT Codex est prêt sur ce poste." : "Configuration ChatGPT Codex à terminer.");
       refreshStatusWindow();
       updateTrayMenu();
       return { ...result, codex };
+    });
+    ipcMain.handle("bridge:setup", async () => {
+      const cfg = loadConfig();
+      const result = await runBridgeSetup({ aiPolicy: cfg.aiPolicy });
+      const codex = resetCodexStatusCache();
+      localAiStatusCache = await getLocalAiStatus(loadConfig({ hydrateSecrets: false }));
+      pushActivity(result?.ok ? "Bridge est configuré sur ce poste." : "Configuration Bridge à terminer.");
+      refreshStatusWindow();
+      updateTrayMenu();
+      return { ...result, codex, localAi: localAiStatusCache };
+    });
+    ipcMain.handle("bridge:ensure-admin-provisioning", () => ensureAdminProvisioning(loadConfig(), { silent: false }));
+    ipcMain.handle("bridge:local-ai-set-model", async (_event, model) => {
+      const cfg = loadConfig();
+      const localAi = normalizeAiPolicy(cfg.aiPolicy).localAi;
+      if (!localAi.allowUserModelOverride) return { ok: false, error: "model-locked-by-admin" };
+      const clean = cleanLocalAiModel(model);
+      if (!clean) return { ok: false, error: "model-required" };
+      const prefs = saveLocalAiPrefs({ localModel: clean });
+      cfg.defaultLocalModel = effectiveLocalAiModel(localAi, clean);
+      saveConfig(cfg);
+      const provisioning = await ensureAdminProvisioning(loadConfig(), { silent: false });
+      localAiStatusCache = await getLocalAiStatus(loadConfig({ hydrateSecrets: false }));
+      restartRuntime();
+      refreshStatusWindow();
+      updateTrayMenu();
+      return { ok: true, localModel: prefs.localModel, localAi: localAiStatusCache, provisioning };
+    });
+    ipcMain.handle("bridge:voice-status", () => getVoiceStatus(loadConfig({ hydrateSecrets: false })));
+    ipcMain.handle("bridge:voice-set-shortcut", (_event, shortcut) => {
+      const cfg = loadConfig({ hydrateSecrets: false });
+      const voice = normalizeAiPolicy(cfg.aiPolicy).voice;
+      if (!voice.allowUserShortcutOverride) return { ok: false, error: "shortcut-locked-by-admin" };
+      const clean = String(shortcut || "").trim().slice(0, 120);
+      if (!clean) return { ok: false, error: "shortcut-required" };
+      const prefs = saveVoicePrefs({ shortcut: clean });
+      return { ok: true, shortcut: prefs.shortcut, voice: getVoiceStatus(loadConfig({ hydrateSecrets: false })) };
+    });
+    ipcMain.handle("bridge:voice-test-overlay", () => {
+      showVoiceOverlay();
+      return { ok: true };
+    });
+    ipcMain.handle("bridge:voice-toggle", () => toggleVoiceDictation());
+    ipcMain.handle("bridge:voice-test-microphone", () => {
+      showVoiceOverlay();
+      return runVoiceSidecar(["test-microphone", "--duration-ms", "800"], 5000);
     });
     ipcMain.handle("bridge:open-codex-help", () => shell.openExternal("https://help.openai.com/en/articles/11381614-api-codex-cli-and-sign-in-with-chatgpt"));
     ipcMain.handle("bridge:sign-out", () => signOut());
@@ -1711,6 +2485,7 @@ function refreshStatusWindow() {
 }
 
 function statusHtml() {
+  const design = loadBridgeDesign();
   return `<!doctype html>
 <html lang="fr">
 <head>
@@ -1719,8 +2494,8 @@ function statusHtml() {
   <title>Bridge</title>
   <style>
     * { box-sizing: border-box; }
-    :root { color-scheme: light; --bg:#f7f5f0; --fg:#171716; --muted:#706c64; --soft:#9b978e; --line:#e4ded3; --panel:#ffffff; --paper:#fffdf8; --ink:#27221d; --rust:#c96442; --rust-strong:#a74f34; --teal:#2fb9a8; --green:#1e8f56; --grey:#9b9f98; --amber:#ba7a18; --blue:#2b63a8; --red:#b34236; --shadow:0 18px 44px rgba(39,34,29,.10), 0 3px 10px rgba(39,34,29,.06); }
-    body { margin: 0; min-height: 100vh; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--bg); color: var(--fg); }
+    ${bridgeDesignCss(design)}
+    body { margin: 0; min-height: 100vh; font-family: var(--font-sans); background: var(--bg); color: var(--fg); }
     main { min-height: 100vh; }
     header { display: none; }
     .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
@@ -1728,23 +2503,23 @@ function statusHtml() {
     h1 { font-size: 18px; line-height: 1.1; margin: 0; letter-spacing: 0; }
     .subtitle { color: var(--muted); font-size: 12px; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .top-actions { display: flex; gap: 8px; align-items: center; position: relative; }
-    .status-pill { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; border: 1px solid var(--line); border-radius: 999px; background: #fff; padding: 4px 9px; font-size: 12px; font-weight: 700; color: var(--muted); white-space: nowrap; }
+    .status-pill { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; border: 1px solid var(--line); border-radius: var(--radius-pill); background: var(--panel); padding: 4px 9px; font-size: 12px; font-weight: 700; color: var(--muted); white-space: nowrap; }
     .status-pill::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--grey); }
-    .status-pill.ready { color: var(--green); border-color: #b8ddc7; background: #f4fbf7; }
+    .status-pill.ready { color: var(--green); border-color: var(--green-border); background: var(--green-bg); }
     .status-pill.ready::before { background: var(--green); }
-    .status-pill.warning { color: var(--amber); border-color: #ead7bb; background: #fffaf1; }
+    .status-pill.warning { color: var(--amber); border-color: var(--amber-border); background: var(--amber-bg); }
     .status-pill.warning::before { background: var(--amber); }
     .status-pill.version::before { display: none; }
-    button { border: 1px solid var(--line); border-radius: 7px; background: #fff; color: var(--fg); padding: 8px 10px; font-size: 13px; font-weight: 650; cursor: pointer; min-height: 34px; }
-    button:hover { border-color: #b9bbb3; }
+    button { border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel); color: var(--fg); padding: 8px 10px; font-size: 13px; font-weight: 650; cursor: pointer; min-height: 34px; }
+    button:hover { border-color: var(--border-strong); }
     button:disabled { opacity: .55; cursor: progress; }
-    button.primary { background: #171716; color: #fff; border-color: #171716; }
+    button.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
     button.icon { width: 34px; padding: 0; display: grid; place-items: center; }
     .menu-wrap { position: relative; }
-    .menu-popover { position: absolute; top: calc(100% + 8px); right: 0; width: 260px; max-height: 420px; overflow: auto; border: 1px solid var(--line); background: #fff; border-radius: 10px; box-shadow: var(--shadow); padding: 8px; z-index: 20; display: none; }
+    .menu-popover { position: absolute; top: calc(100% + 8px); right: 0; width: 260px; max-height: 420px; overflow: auto; border: 1px solid var(--line); background: var(--panel); border-radius: var(--radius); box-shadow: var(--shadow); padding: 8px; z-index: 20; display: none; }
     .menu-popover.open { display: block; }
     .menu-item { width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 10px; border: 0; background: transparent; text-align: left; border-radius: 7px; padding: 9px 10px; font-weight: 650; }
-    .menu-item:hover { background: #f1eee8; }
+    .menu-item:hover { background: var(--subtle); }
     .menu-title { color: var(--muted); font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; padding: 7px 10px 5px; }
     .menu-activity { display: grid; gap: 0; margin-top: 4px; border-top: 1px solid var(--line); padding-top: 6px; }
     .menu-activity-row { display: grid; gap: 2px; border-radius: 7px; padding: 7px 10px; font-size: 12px; color: var(--muted); }
@@ -1753,11 +2528,11 @@ function statusHtml() {
     .menu-version strong { color: var(--fg); }
     nav { display: none; }
     nav button { border-color: transparent; background: transparent; color: var(--muted); min-height: 32px; }
-    nav button.active { color: var(--fg); background: #e8e8e1; border-color: #d0d0c8; }
+    nav button.active { color: var(--fg); background: var(--subtle); border-color: var(--border-strong); }
     section { display: none; padding: 54px 46px 40px; overflow: auto; }
     section.active { display: block; }
     .dashboard-intro { position: fixed; top: 16px; right: 18px; z-index: 3; display: inline-flex; gap: 8px; align-items: center; }
-    .hero-panel, .health-panel { border: 1px solid var(--line); background: rgba(255,253,248,.86); border-radius: 10px; padding: 16px; box-shadow: 0 1px 0 rgba(39,34,29,.03); }
+    .hero-panel, .health-panel { border: 1px solid var(--line); background: color-mix(in srgb, var(--paper) 86%, transparent); border-radius: var(--radius); padding: 16px; box-shadow: var(--shadow); }
     .hero-panel h2 { font-size: 22px; margin: 0 0 5px; letter-spacing: 0; }
     .hero-panel p, .health-panel p { margin: 0; color: var(--muted); font-size: 12px; }
     .health-panel { display: grid; gap: 12px; max-width: 720px; }
@@ -1767,39 +2542,39 @@ function statusHtml() {
     .health-score.warning { color: var(--amber); }
     .health-score::before { content:""; width: 9px; height: 9px; border-radius: 99px; background: currentColor; box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 14%, transparent); }
     .health-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-    .health-stat { border: 1px solid var(--line); border-radius: 8px; padding: 9px; background: #fff; min-width: 0; }
+    .health-stat { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 9px; background: var(--panel); min-width: 0; }
     .health-stat span { display: block; color: var(--muted); font-size: 11px; margin-bottom: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .health-stat strong { display: block; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .codex-mini { display: inline-flex; align-items: center; gap: 7px; min-height: 28px; border: 1px solid var(--line); border-radius: 999px; background: rgba(255,253,248,.82); padding: 4px 9px; color: var(--green); font-size: 12px; font-weight: 750; box-shadow: 0 1px 2px rgba(39,34,29,.04); backdrop-filter: blur(12px); }
+    .codex-mini { display: inline-flex; align-items: center; gap: 7px; min-height: 28px; border: 1px solid var(--line); border-radius: var(--radius-pill); background: color-mix(in srgb, var(--paper) 82%, transparent); padding: 4px 9px; color: var(--green); font-size: 12px; font-weight: 750; box-shadow: var(--shadow); backdrop-filter: blur(12px); }
     .codex-mini.version { color: var(--muted); }
     .codex-mini.version .dot { display: none; }
     button.codex-mini { cursor: pointer; }
     .codex-mini.warning { color: var(--amber); }
-    .codex-mini.error { color: var(--red); border-color: #efcbc4; background: rgba(255,247,245,.88); }
+    .codex-mini.error { color: var(--red); border-color: var(--red-border); background: var(--red-bg); }
     .codex-mini .dot { width: 8px; height: 8px; border-radius: 99px; background: currentColor; box-shadow: none; }
     .services { min-height: calc(100vh - 94px); display: grid; grid-template-columns: repeat(3, 128px); gap: 38px 42px; align-content: center; justify-content: center; align-items: start; }
     .login-hero { min-height: calc(100vh - 94px); display: grid; align-content: center; justify-content: center; }
     .login-hero .login-form { width: min(380px, calc(100vw - 64px)); }
     .login-hero .codex-card { display: none; }
-    .codex-card { display: grid; grid-template-columns: 18px 1fr auto; gap: 12px; align-items: center; border: 1px solid var(--line); background: #fff; border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+    .codex-card { display: grid; grid-template-columns: 18px 1fr auto; gap: 12px; align-items: center; border: 1px solid var(--line); background: var(--panel); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 12px; }
     .codex-card .codex-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
-    .codex-card.ready { border-color: #cfe6d7; background: #fbfffc; }
-    .codex-card.missing, .codex-card.login_required, .codex-card.error { border-color: #ead7bb; background: #fffaf1; }
-    .codex-card.ready .dot { background: var(--green); box-shadow: 0 0 0 4px #e2f2e8; }
-    .codex-card.missing .dot, .codex-card.login_required .dot, .codex-card.error .dot { background: var(--amber); box-shadow: 0 0 0 4px #f6eddc; }
-    .codex-card code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--fg); background: #f0f0ea; padding: 2px 4px; border-radius: 4px; }
+    .codex-card.ready { border-color: var(--green-border); background: var(--green-bg); }
+    .codex-card.missing, .codex-card.login_required, .codex-card.error { border-color: var(--amber-border); background: var(--amber-bg); }
+    .codex-card.ready .dot { background: var(--green); box-shadow: 0 0 0 4px color-mix(in srgb, var(--green) 14%, transparent); }
+    .codex-card.missing .dot, .codex-card.login_required .dot, .codex-card.error .dot { background: var(--amber); box-shadow: 0 0 0 4px color-mix(in srgb, var(--amber) 14%, transparent); }
+    .codex-card code { font-family: var(--font-mono); color: var(--fg); background: var(--subtle); padding: 2px 4px; border-radius: 4px; }
     .app-card { appearance: none; border: 0; background: transparent; padding: 0; color: var(--fg); min-height: 0; width: 128px; display: grid; justify-items: center; gap: 12px; text-align: center; cursor: pointer; position: relative; }
     .app-card:hover { text-decoration: none; }
     .app-card:disabled { cursor: progress; opacity: .72; }
-    .app-icon { width: 118px; height: 118px; border-radius: 8px; background: var(--panel); box-shadow: var(--shadow); display: grid; place-items: center; border: 1px solid rgba(228,222,211,.72); position: relative; transition: transform .12s ease, box-shadow .12s ease; }
-    .app-card:hover .app-icon { transform: translateY(-2px); box-shadow: 0 22px 52px rgba(39,34,29,.14), 0 4px 12px rgba(39,34,29,.07); }
+    .app-icon { width: 118px; height: 118px; border-radius: var(--radius-sm); background: var(--panel); box-shadow: var(--shadow); display: grid; place-items: center; border: 1px solid color-mix(in srgb, var(--border) 72%, transparent); position: relative; transition: transform var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease); }
+    .app-card:hover .app-icon { transform: translateY(-2px); box-shadow: var(--shadow-hover); }
     .app-icon svg { width: 74px; height: 74px; display: block; }
     .app-card.active .app-icon::after, .app-card.reconnecting .app-icon::after { content:""; position:absolute; inset:auto 12px 10px; height:3px; border-radius:99px; background: linear-gradient(90deg, transparent, var(--blue), transparent); animation: move 1.15s linear infinite; }
-    .app-card.codex_unready .app-icon, .app-card.cloud_stale .app-icon { border-color: #ead7bb; }
-    .app-card.disconnected .app-icon, .app-card.site_unreachable .app-icon, .app-card.local_unavailable .app-icon { border-color: #efcbc4; }
+    .app-card.codex_unready .app-icon, .app-card.cloud_stale .app-icon { border-color: var(--amber-border); }
+    .app-card.disconnected .app-icon, .app-card.site_unreachable .app-icon, .app-card.local_unavailable .app-icon { border-color: var(--red-border); }
     .app-card.placeholder { cursor: default; opacity: .48; filter: grayscale(.12); }
-    .app-card.placeholder .app-icon { box-shadow: 0 10px 28px rgba(39,34,29,.07), 0 2px 6px rgba(39,34,29,.04); }
-    .app-card.placeholder:hover .app-icon { transform: none; box-shadow: 0 10px 28px rgba(39,34,29,.07), 0 2px 6px rgba(39,34,29,.04); }
+    .app-card.placeholder .app-icon { box-shadow: var(--shadow); }
+    .app-card.placeholder:hover .app-icon { transform: none; box-shadow: var(--shadow); }
     .app-label { display: grid; gap: 2px; width: 100%; min-width: 0; }
     .app-label strong { font-size: 16px; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .app-label span { color: var(--muted); font-size: 11px; text-transform: lowercase; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1811,15 +2586,15 @@ function statusHtml() {
     .service-row { display: grid; grid-template-columns: 18px 1fr auto; gap: 12px; align-items: center; border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 12px; min-height: 72px; position: relative; overflow: hidden; }
     .service-row.active::before, .service-row.reconnecting::before { content:""; position:absolute; left:-30%; right:-30%; bottom:0; height:2px; background: linear-gradient(90deg, transparent, var(--blue), transparent); animation: move 1.15s linear infinite; }
     @keyframes move { from { transform: translateX(-30%); } to { transform: translateX(30%); } }
-    .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--grey); box-shadow: 0 0 0 4px #ecece8; }
-    .connected .dot { background: var(--green); box-shadow: 0 0 0 4px #e2f2e8; }
-    .service-row.active .dot, .service-row.reconnecting .dot { background: var(--blue); box-shadow: 0 0 0 4px #e3edf9; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--grey); box-shadow: 0 0 0 4px color-mix(in srgb, var(--grey) 14%, transparent); }
+    .connected .dot { background: var(--green); box-shadow: 0 0 0 4px color-mix(in srgb, var(--green) 14%, transparent); }
+    .service-row.active .dot, .service-row.reconnecting .dot { background: var(--blue); box-shadow: 0 0 0 4px color-mix(in srgb, var(--blue) 14%, transparent); }
     .service-row.paused .dot { background: var(--grey); }
-    .service-row.cloud_stale .dot { background: var(--amber); box-shadow: 0 0 0 4px #f6eddc; }
-    .service-row.disconnected .dot { background: var(--red); box-shadow: 0 0 0 4px #f5e6e3; }
-    .service-row.site_unreachable .dot { background: var(--red); box-shadow: 0 0 0 4px #f5e6e3; }
-    .service-row.local_unavailable .dot { background: var(--red); box-shadow: 0 0 0 4px #f5e6e3; }
-    .service-row.codex_unready .dot { background: var(--amber); box-shadow: 0 0 0 4px #f6eddc; }
+    .service-row.cloud_stale .dot { background: var(--amber); box-shadow: 0 0 0 4px color-mix(in srgb, var(--amber) 14%, transparent); }
+    .service-row.disconnected .dot { background: var(--red); box-shadow: 0 0 0 4px color-mix(in srgb, var(--red) 14%, transparent); }
+    .service-row.site_unreachable .dot { background: var(--red); box-shadow: 0 0 0 4px color-mix(in srgb, var(--red) 14%, transparent); }
+    .service-row.local_unavailable .dot { background: var(--red); box-shadow: 0 0 0 4px color-mix(in srgb, var(--red) 14%, transparent); }
+    .service-row.codex_unready .dot { background: var(--amber); box-shadow: 0 0 0 4px color-mix(in srgb, var(--amber) 14%, transparent); }
     .service-main { min-width: 0; }
     .service-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
     .service-title strong { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1832,8 +2607,8 @@ function statusHtml() {
     .login-form { display: grid; gap: 12px; margin-bottom: 12px; border-radius: 14px; padding: 18px; box-shadow: var(--shadow); }
     .login-form h2 { font-size: 24px; margin-bottom: 2px; }
     .login-form label { display: grid; gap: 6px; color: var(--muted); font-size: 12px; font-weight: 650; }
-    .login-form input { width: 100%; border: 1px solid var(--line); border-radius: 8px; min-height: 40px; padding: 8px 10px; font: inherit; color: var(--fg); background: #fff; }
-    .login-form input:focus { outline: 3px solid rgba(201,100,66,.18); border-color: var(--rust); }
+    .login-form input { width: 100%; border: 1px solid var(--line); border-radius: var(--radius-sm); min-height: 40px; padding: 8px 10px; font: inherit; color: var(--fg); background: var(--panel); }
+    .login-form input:focus { outline: 3px solid var(--accent-soft); border-color: var(--accent); }
     .login-form details { border: 1px solid var(--line); border-radius: 8px; padding: 9px; display: grid; gap: 8px; }
     .login-form summary { cursor: pointer; color: var(--muted); font-size: 12px; }
     .form-message { min-height: 18px; margin: 0; color: var(--red); font-size: 12px; }
@@ -1887,7 +2662,7 @@ function statusHtml() {
       versionPill.textContent = "v" + (state.version || "dev");
       const codexPill = document.getElementById("codex-pill");
       const codexState = state.codex?.state || "unknown";
-      codexPill.textContent = "Codex " + (codexLabels[codexState] || codexState);
+      codexPill.textContent = "ChatGPT Codex " + (codexLabels[codexState] || codexState);
       codexPill.className = "status-pill " + (state.codex?.ready ? "ready" : "warning");
       document.getElementById("error").textContent = state.bridgeError || state.lastError || "";
       document.getElementById("dashboard-overview").innerHTML = state.authenticated ? dashboardOverview(state) : "";
@@ -1895,6 +2670,7 @@ function statusHtml() {
       if (!state.authenticated) {
         ensureLoginHero(state);
       } else {
+        setUiError(state.bridgeError || state.lastError || "");
         services.innerHTML = state.services.length ? state.services.map(service => {
         const status = service.status || "disconnected";
         const actionLabel = status === "active" || status === "reconnecting"
@@ -1902,13 +2678,13 @@ function statusHtml() {
           : status === "connected"
             ? "Ouvrir"
             : status === "codex_unready"
-              ? "Configurer Codex"
+              ? "Ouvrir"
             : status === "cloud_stale"
               ? "Reconnecter"
             : service.lastSeenAt
               ? "Reconnecter"
               : "Connecter";
-        const actionAttr = status === "codex_unready" ? 'data-codex-setup="1"' : 'data-open="' + esc(service.serviceId) + '"';
+        const actionAttr = 'data-open="' + esc(service.serviceId) + '"';
         return '<button class="app-card ' + esc(status) + '" ' + actionAttr + ' title="' + esc(actionLabel + " " + service.name) + '" aria-label="' + esc(actionLabel + " " + service.name) + '">' +
           '<span class="app-badge" aria-hidden="true"></span>' +
           '<span class="app-icon" aria-hidden="true">' + appIcon(service) + '</span>' +
@@ -1920,7 +2696,11 @@ function statusHtml() {
           btn.dataset.bound = "1";
           btn.addEventListener("click", async () => {
             btn.disabled = true;
-            await window.bridge.openService(btn.dataset.open);
+            setUiError("");
+            const result = await window.bridge.openService(btn.dataset.open);
+            if (!result?.ok) {
+              setUiError(result?.error || "Ouverture impossible.");
+            }
             btn.disabled = false;
           });
         });
@@ -1951,17 +2731,21 @@ function statusHtml() {
           ["Jobs actifs", String(state.activeJobs || 0)],
           ["Protocole", String(state.protocolVersion || 2)]
         ]) +
-        codexIdentityPanel(state.codex);
+        codexIdentityPanel(state.codex) +
+        localAiPanel(state.localAi) +
+        voicePanel(state.voice);
       attachCodexActions(document);
+      attachLocalAiActions(document);
+      attachVoiceActions(document);
       renderMenu(state);
     }
     function dashboardOverview(state) {
       const codexState = state.codex?.state || "unknown";
       const codexOk = Boolean(state.codex?.ready);
       const tone = codexOk ? "" : (codexState === "error" || codexState === "missing" || codexState === "login_required" ? "error" : "warning");
-      const label = "Codex " + (codexLabels[codexState] || codexState);
-      if (codexOk) return '<div class="dashboard-intro"><span class="codex-mini" title="' + esc(state.codex?.detail || "Codex prêt.") + '"><span class="dot" aria-hidden="true"></span><span>' + esc(label) + '</span></span></div>';
-      return '<div class="dashboard-intro"><button class="codex-mini ' + tone + '" data-codex-setup="1" title="' + esc((state.codex?.detail || "Codex à reconnecter.") + " Cliquer pour reconnecter.") + '"><span class="dot" aria-hidden="true"></span><span>' + esc(label) + '</span></button></div>';
+      const label = "ChatGPT Codex " + (codexLabels[codexState] || codexState);
+      if (codexOk) return '<div class="dashboard-intro"><span class="codex-mini" title="' + esc(state.codex?.detail || "ChatGPT Codex prêt.") + '"><span class="dot" aria-hidden="true"></span><span>' + esc(label) + '</span></span></div>';
+      return '<div class="dashboard-intro"><button class="codex-mini ' + tone + '" data-codex-setup="1" title="' + esc((state.codex?.detail || "ChatGPT Codex à reconnecter.") + " Cliquer pour reconnecter.") + '"><span class="dot" aria-hidden="true"></span><span>' + esc(label) + '</span></button></div>';
     }
     function healthStat(label, value) {
       return '<div class="health-stat"><span>' + esc(label) + '</span><strong>' + esc(value) + '</strong></div>';
@@ -1982,6 +2766,12 @@ function statusHtml() {
       document.getElementById("menu-sync")?.addEventListener("click", () => window.bridge.sync());
       document.getElementById("menu-folder")?.addEventListener("click", () => window.bridge.revealDataDir());
       document.getElementById("menu-signout")?.addEventListener("click", () => window.bridge.signOut());
+    }
+    function setUiError(message) {
+      const el = document.getElementById("error");
+      if (!el) return;
+      el.textContent = message || "";
+      el.style.display = message ? "block" : "none";
     }
     function appIcon(service = {}) {
       const id = String(service.serviceId || service.slug || service.name || "").toLowerCase();
@@ -2006,11 +2796,11 @@ function statusHtml() {
       ).join("");
     }
     function placeholderIcon(key) {
-      if (key === "stock") return iconSvg('<path d="M48 16 76 32v32L48 80 20 64V32L48 16Z" fill="#F6F1E8"/><path d="M48 16 76 32 48 48 20 32 48 16Z" fill="#C96442"/><path d="M48 48v32L20 64V32l28 16Z" fill="#2A211B"/><path d="M48 48v32l28-16V32L48 48Z" fill="#2A211B" opacity=".72"/>');
-      if (key === "recruiting") return iconSvg('<circle cx="48" cy="31" r="14" fill="#2A211B"/><path d="M23 76c4-17 14-26 25-26s21 9 25 26" fill="#C96442"/><circle cx="25" cy="44" r="9" fill="#2A211B" opacity=".72"/><circle cx="72" cy="44" r="9" fill="#C96442" opacity=".72"/>');
-      if (key === "crm") return iconSvg('<path d="M22 36h40c9 0 16 7 16 16v4H38c-9 0-16-7-16-16v-4Z" fill="#C96442"/><path d="M54 36h20v18c0 8-6 14-14 14H40V50c0-8 6-14 14-14Z" fill="#2A211B"/><path d="M29 58 55 32" stroke="#F6F1E8" stroke-width="9" stroke-linecap="round" opacity=".9"/>');
-      if (key === "knowledge") return iconSvg('<path d="M26 22h28c9 0 16 7 16 16v36H34c-7 0-12-5-12-12V26c0-2 2-4 4-4Z" fill="#2A211B"/><path d="M34 30h26c6 0 10 4 10 10v34H40c-6 0-10-4-10-10V34c0-2 2-4 4-4Z" fill="#C96442"/><path d="M40 43h18M40 55h22" stroke="#F6F1E8" stroke-width="5" stroke-linecap="round"/>');
-      if (key === "fleet") return iconSvg('<path d="M18 56 35 36h29l14 20v12H18V56Z" fill="#C96442"/><path d="M36 36h18l8 20H26l10-20Z" fill="#2A211B"/><circle cx="34" cy="70" r="8" fill="#2A211B"/><circle cx="66" cy="70" r="8" fill="#2A211B"/><path d="M22 56h54" stroke="#F6F1E8" stroke-width="5" stroke-linecap="round" opacity=".72"/>');
+      if (key === "stock") return iconSvg('<path d="M48 16 76 32v32L48 80 20 64V32L48 16Z" fill="var(--icon-bg)"/><path d="M48 16 76 32 48 48 20 32 48 16Z" fill="var(--icon-accent)"/><path d="M48 48v32L20 64V32l28 16Z" fill="var(--icon-fg)"/><path d="M48 48v32l28-16V32L48 48Z" fill="var(--icon-fg)" opacity=".72"/>');
+      if (key === "recruiting") return iconSvg('<circle cx="48" cy="31" r="14" fill="var(--icon-fg)"/><path d="M23 76c4-17 14-26 25-26s21 9 25 26" fill="var(--icon-accent)"/><circle cx="25" cy="44" r="9" fill="var(--icon-fg)" opacity=".72"/><circle cx="72" cy="44" r="9" fill="var(--icon-accent)" opacity=".72"/>');
+      if (key === "crm") return iconSvg('<path d="M22 36h40c9 0 16 7 16 16v4H38c-9 0-16-7-16-16v-4Z" fill="var(--icon-accent)"/><path d="M54 36h20v18c0 8-6 14-14 14H40V50c0-8 6-14 14-14Z" fill="var(--icon-fg)"/><path d="M29 58 55 32" stroke="var(--icon-bg)" stroke-width="9" stroke-linecap="round" opacity=".9"/>');
+      if (key === "knowledge") return iconSvg('<path d="M26 22h28c9 0 16 7 16 16v36H34c-7 0-12-5-12-12V26c0-2 2-4 4-4Z" fill="var(--icon-fg)"/><path d="M34 30h26c6 0 10 4 10 10v34H40c-6 0-10-4-10-10V34c0-2 2-4 4-4Z" fill="var(--icon-accent)"/><path d="M40 43h18M40 55h22" stroke="var(--icon-bg)" stroke-width="5" stroke-linecap="round"/>');
+      if (key === "fleet") return iconSvg('<path d="M18 56 35 36h29l14 20v12H18V56Z" fill="var(--icon-accent)"/><path d="M36 36h18l8 20H26l10-20Z" fill="var(--icon-fg)"/><circle cx="34" cy="70" r="8" fill="var(--icon-fg)"/><circle cx="66" cy="70" r="8" fill="var(--icon-fg)"/><path d="M22 56h54" stroke="var(--icon-bg)" stroke-width="5" stroke-linecap="round" opacity=".72"/>');
       return iconGeneric("A");
     }
     function iconSvg(body) {
@@ -2018,26 +2808,26 @@ function statusHtml() {
     }
     function achatsLogoSvg() {
       return '<svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Purchasing module">' +
-        '<rect width="1024" height="1024" rx="224" fill="#F6F1E8"/>' +
-        '<path d="M306 626V398c0-34 27-61 61-61h36c34 0 61 27 61 61v228c0 34-27 61-61 61h-36c-34 0-61-27-61-61Z" fill="#2A211B"/>' +
-        '<path d="M560 626V506c0-34 27-61 61-61h36c34 0 61 27 61 61v120c0 34-27 61-61 61h-36c-34 0-61-27-61-61Z" fill="#C96442"/>' +
-        '<path d="M300 754h424" stroke="#2A211B" stroke-width="52" stroke-linecap="round"/>' +
-        '<path d="m688 718 52 36-52 36" fill="none" stroke="#2A211B" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/>' +
+        '<rect width="1024" height="1024" rx="224" fill="var(--icon-bg)"/>' +
+        '<path d="M306 626V398c0-34 27-61 61-61h36c34 0 61 27 61 61v228c0 34-27 61-61 61h-36c-34 0-61-27-61-61Z" fill="var(--icon-fg)"/>' +
+        '<path d="M560 626V506c0-34 27-61 61-61h36c34 0 61 27 61 61v120c0 34-27 61-61 61h-36c-34 0-61-27-61-61Z" fill="var(--icon-accent)"/>' +
+        '<path d="M300 754h424" stroke="var(--icon-fg)" stroke-width="52" stroke-linecap="round"/>' +
+        '<path d="m688 718 52 36-52 36" fill="none" stroke="var(--icon-fg)" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/>' +
       '</svg>';
     }
     function iconGeneric(label) {
       const initial = esc(String(label || "A").trim().slice(0, 1).toUpperCase() || "A");
-      return iconSvg('<rect x="20" y="20" width="56" height="56" rx="16" fill="#F6F1E8" stroke="#d8d3c8" stroke-width="2"/><circle cx="34" cy="36" r="12" fill="#C96442"/><path d="M29 64 64 29" stroke="#2A211B" stroke-width="13" stroke-linecap="round"/><circle cx="62" cy="60" r="12" fill="#C96442"/><text x="48" y="57" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="24" font-weight="800" fill="#F6F1E8" opacity=".92">' + initial + '</text>');
+      return iconSvg('<rect x="20" y="20" width="56" height="56" rx="16" fill="var(--icon-bg)" stroke="var(--icon-border)" stroke-width="2"/><circle cx="34" cy="36" r="12" fill="var(--icon-accent)"/><path d="M29 64 64 29" stroke="var(--icon-fg)" stroke-width="13" stroke-linecap="round"/><circle cx="62" cy="60" r="12" fill="var(--icon-accent)"/><text x="48" y="57" text-anchor="middle" font-family="var(--font-sans)" font-size="24" font-weight="800" fill="var(--icon-bg)" opacity=".92">' + initial + '</text>');
     }
     function codexCard(codex = {}) {
       const state = codex.state || "unknown";
       const version = codex.version ? " · " + codex.version : "";
       const action = codex.ready
-        ? '<button data-codex-refresh="1">Tester Codex</button>'
-        : '<button data-codex-setup="1" class="primary">' + (state === "missing" ? "Installer Codex" : "Connecter Codex") + '</button><button data-codex-refresh="1">Tester</button>';
+        ? '<button data-codex-refresh="1">Tester ChatGPT Codex</button>'
+        : '<button data-codex-setup="1" class="primary">' + (state === "missing" ? "Configurer Bridge" : "Connecter Bridge") + '</button><button data-codex-refresh="1">Tester</button>';
       return '<article class="codex-card ' + esc(state) + '">' +
         '<span class="dot" aria-hidden="true"></span>' +
-        '<div class="service-main"><div class="service-title"><strong>Codex</strong><span class="state">' + esc(codexLabels[state] || state) + esc(version) + '</span></div>' +
+        '<div class="service-main"><div class="service-title"><strong>ChatGPT Codex</strong><span class="state">' + esc(codexLabels[state] || state) + esc(version) + '</span></div>' +
         '<div class="meta">' + esc(codex.detail || "Statut Codex non vérifié.") + '</div></div>' +
         '<div class="codex-actions">' + action + '</div>' +
       '</article>';
@@ -2049,6 +2839,103 @@ function statusHtml() {
         ["Chemin", codex.path || "-"],
         ["Session", codex.loggedIn === true ? "connectée" : codex.loggedIn === false ? "à connecter" : "-"]
       ]);
+    }
+    function localAiPanel(localAi = {}) {
+      if (!localAi.enabled) return "";
+      const locked = !localAi.allowUserModelOverride;
+      return '<form class="panel local-ai-form"><h2>Moteur local</h2>' +
+        '<div class="kv">' +
+          '<span>État</span><strong>' + esc(localAi.label || "-") + '</strong>' +
+          '<span>Modèle actif</span><strong>' + esc(localAi.model || "-") + '</strong>' +
+          '<span>Modèle admin</span><strong>' + esc(localAi.adminModel || localAi.model || "-") + '</strong>' +
+          '<span>LM Studio</span><strong>' + esc(localAi.serverReady ? "actif" : localAi.installed ? "à démarrer" : "à installer") + '</strong>' +
+          '<span>Modèle chargé</span><strong>' + esc(localAi.modelReady ? "oui" : "non") + '</strong>' +
+        '</div>' +
+        '<details><summary>Options locales</summary>' +
+          '<label>Modèle local<input name="localModel" value="' + esc(localAi.userModel || localAi.model || "") + '" ' + (locked ? "disabled" : "") + ' /></label>' +
+          '<div class="codex-actions"><button type="submit" ' + (locked ? "disabled" : "") + '>Enregistrer</button></div>' +
+        '</details>' +
+        '<p class="form-message">' + esc(locked ? "Modèle verrouillé par l'organisation." : "") + '</p>' +
+      '</form>';
+    }
+    function voicePanel(voice = {}) {
+      if (!voice.enabled) return "";
+      const locked = !voice.allowUserShortcutOverride;
+      return '<form class="panel voice-form"><h2>Push-to-talk</h2>' +
+        '<div class="kv">' +
+          '<span>État</span><strong>' + esc(voice.label || "-") + '</strong>' +
+          '<span>Modèle</span><strong>' + esc(voice.model || "-") + '</strong>' +
+          '<span>Fichier modèle</span><strong>' + esc(voice.modelInstalled ? "installé" : "à installer") + '</strong>' +
+          '<span>Micro</span><strong>' + esc(voice.audioReady ? "prêt" : (voice.error || "à autoriser")) + '</strong>' +
+          '<span>Transcription</span><strong>' + esc(voice.transcriptionReady ? "active" : "moteur à finaliser") + '</strong>' +
+          '<span>Raccourci natif</span><strong>' + esc(voice.shortcutNative || "-") + '</strong>' +
+          '<span>Commande</span><strong>' + esc(voice.shortcutReady ? "active" : (voice.shortcutError || "préparation")) + '</strong>' +
+          '<span>Écoute</span><strong>' + esc(voice.recording ? "en cours" : voice.busy ? "traitement" : "arrêtée") + '</strong>' +
+        '</div>' +
+        '<label>Raccourci<input name="shortcut" value="' + esc(voice.shortcut || "") + '" ' + (locked ? "disabled" : "") + ' /></label>' +
+        '<div class="codex-actions"><button type="submit" ' + (locked ? "disabled" : "") + '>Enregistrer</button><button type="button" data-voice-toggle="1">' + esc(voice.recording ? "Arrêter" : "Démarrer") + '</button><button type="button" data-voice-test="1">Tester micro</button></div>' +
+        '<p class="form-message"></p>' +
+      '</form>';
+    }
+    function attachLocalAiActions(root) {
+      root.querySelectorAll(".local-ai-form").forEach((form) => {
+        if (form.dataset.bound === "1") return;
+        form.dataset.bound = "1";
+        form.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          const message = form.querySelector(".form-message");
+          const input = form.querySelector('[name="localModel"]');
+          if (message) message.textContent = "Enregistrement...";
+          const res = await window.bridge.setLocalAiModel(input?.value || "");
+          if (message) {
+            message.textContent = res?.ok
+              ? res.provisioning?.ok === false
+                ? "Modèle enregistré, préparation locale à terminer: " + (res.provisioning.error || "erreur inconnue")
+                : "Modèle local enregistré."
+              : (res?.error || "Enregistrement impossible.");
+          }
+        });
+      });
+    }
+    function attachVoiceActions(root) {
+      root.querySelectorAll(".voice-form").forEach((form) => {
+        if (form.dataset.bound === "1") return;
+        form.dataset.bound = "1";
+        form.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          const message = form.querySelector(".form-message");
+          const input = form.querySelector('[name="shortcut"]');
+          if (message) message.textContent = "Enregistrement...";
+          const res = await window.bridge.setVoiceShortcut(input?.value || "");
+          if (message) message.textContent = res?.ok ? "Raccourci enregistré." : (res?.error || "Enregistrement impossible.");
+        });
+      });
+      root.querySelectorAll("[data-voice-test]").forEach((btn) => {
+        if (btn.dataset.bound === "1") return;
+        btn.dataset.bound = "1";
+        btn.addEventListener("click", async () => {
+          const form = btn.closest(".voice-form");
+          const message = form?.querySelector(".form-message");
+          btn.disabled = true;
+          if (message) message.textContent = "Test du micro...";
+          const res = await window.bridge.testVoiceMicrophone();
+          if (message) message.textContent = res?.ok ? "Micro détecté." : (res?.error || "Micro indisponible.");
+          btn.disabled = false;
+        });
+      });
+      root.querySelectorAll("[data-voice-toggle]").forEach((btn) => {
+        if (btn.dataset.bound === "1") return;
+        btn.dataset.bound = "1";
+        btn.addEventListener("click", async () => {
+          const form = btn.closest(".voice-form");
+          const message = form?.querySelector(".form-message");
+          btn.disabled = true;
+          if (message) message.textContent = btn.textContent === "Arrêter" ? "Transcription..." : "Écoute...";
+          const res = await window.bridge.toggleVoice();
+          if (message) message.textContent = res?.ok ? (res.text ? "Texte inséré." : "Action effectuée.") : (res?.error || "Dictée indisponible.");
+          btn.disabled = false;
+        });
+      });
     }
     function attachCodexActions(root) {
       root.querySelectorAll("[data-codex-refresh]").forEach((btn) => {
@@ -2072,8 +2959,8 @@ function statusHtml() {
           btn.disabled = true;
           const old = btn.textContent;
           btn.textContent = "Configuration...";
-          await window.bridge.setupCodex();
-          btn.textContent = old || "Configurer Codex";
+          await window.bridge.setupBridge();
+          btn.textContent = old || "Configurer Bridge";
           btn.disabled = false;
         });
       });
@@ -2199,12 +3086,12 @@ function cleanExternalUrl(value) {
 
 function bridgeLogoSvg(className = "") {
   return `<svg class="${escapeHtmlAttr(className)}" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Bridge">
-    <rect width="1024" height="1024" rx="224" fill="#F6F1E8"/>
-    <path d="M322 516h380" fill="none" stroke="#2A211B" stroke-width="54" stroke-linecap="round"/>
-    <path d="M500 360v312" fill="none" stroke="#2A211B" stroke-width="42" stroke-linecap="round"/>
-    <rect x="238" y="376" width="172" height="172" rx="54" fill="#2A211B"/>
-    <rect x="614" y="476" width="172" height="172" rx="54" fill="#C96442"/>
-    <circle cx="500" cy="516" r="58" fill="#F6F1E8" stroke="#2A211B" stroke-width="42"/>
+    <rect width="1024" height="1024" rx="224" fill="var(--icon-bg)"/>
+    <path d="M322 516h380" fill="none" stroke="var(--icon-fg)" stroke-width="54" stroke-linecap="round"/>
+    <path d="M500 360v312" fill="none" stroke="var(--icon-fg)" stroke-width="42" stroke-linecap="round"/>
+    <rect x="238" y="376" width="172" height="172" rx="54" fill="var(--icon-fg)"/>
+    <rect x="614" y="476" width="172" height="172" rx="54" fill="var(--icon-accent)"/>
+    <circle cx="500" cy="516" r="58" fill="var(--icon-bg)" stroke="var(--icon-fg)" stroke-width="42"/>
   </svg>`;
 }
 

@@ -1,14 +1,18 @@
 ---
 name: yaka-bridge-new-client-vps
-description: Créer un nouveau client yaka-bridge sur un VPS neuf, avec cadrage, DNS, Supabase, services ERP, Bridge, sécurité et validation production.
+description: Créer un nouveau client yaka-bridge sur un VPS neuf, avec cadrage, DNS, Supabase, services ERP, Bridge, sécurité et validation production. Ne pas utiliser pour un simple redeploy Coolify ou une mise à jour de landing : utiliser yaka-bridge-deploy-coolify.
 version: 1.0.0
 ---
 
 # yaka-bridge-new-client-vps
 
 Utilise cette skill quand l'utilisateur demande de créer un nouveau client,
-un nouvel ERP client, une nouvelle installation VPS, un déploiement yaka-bridge
-ou une mise en production complète.
+un nouvel ERP client, une nouvelle installation VPS ou une mise en production
+complète depuis un VPS neuf.
+
+Pour un simple redeploy Coolify, une mise à jour de landing, une publication
+d'app existante ou une relance de ressource Coolify, utiliser
+`yaka-bridge-deploy-coolify`.
 
 Objectif : partir d'un VPS propre et obtenir un ERP client sécurisé,
 maintenable, avec domaines, DNS, Supabase, services web, Bridge installé et

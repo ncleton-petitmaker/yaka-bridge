@@ -8,6 +8,12 @@ import { spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync, type Dirent } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
+import {
+  DEFAULT_AGENT_PROVIDER,
+  DEFAULT_LOCAL_MODEL,
+  normalizeAgentProvider,
+  type AgentProvider,
+} from "./app-config.js";
 
 const CANDIDATES_BIN = ["codex"] as const;
 
@@ -178,6 +184,10 @@ export interface BuildArgsOptions {
   allowedTools?: string[];
   /** Modèle, par défaut "default" (héritage du compte ChatGPT) */
   model?: string;
+  /** Provider agentique. `codex-cloud` par défaut, `codex-lmstudio` en opt-in local. */
+  agentProvider?: AgentProvider;
+  /** Modèle local exposé par LM Studio quand `agentProvider` vaut `codex-lmstudio`. */
+  localModel?: string;
   /**
    * Politique sandbox appliquée aux commandes shell générées par le modèle.
    * "read-only" par défaut : les mutations métier passent par les outils MCP
@@ -320,7 +330,11 @@ export function buildCodexArgs(opts: BuildArgsOptions = {}): string[] {
     "--sandbox", opts.sandbox ?? "read-only",
   ];
 
-  if (opts.model && opts.model !== "default") {
+  const agentProvider = normalizeAgentProvider(opts.agentProvider ?? DEFAULT_AGENT_PROVIDER);
+  if (agentProvider === "codex-lmstudio") {
+    args.push("--oss", "--local-provider", "lmstudio");
+    args.push("--model", opts.localModel?.trim() || DEFAULT_LOCAL_MODEL);
+  } else if (opts.model && opts.model !== "default") {
     args.push("--model", opts.model);
   }
 

@@ -31,6 +31,7 @@
   --accent-soft: #f5d8cb;
   --accent-tint: #fbeee5;
   --accent-hover: #b45a3b;
+  --on-accent: #ffffff;
 
   --green: #1f7a3a;
   --green-fg: #1f7a3a;
@@ -70,6 +71,7 @@
 
   --ease: cubic-bezier(.2,0,.2,1);
   --t-fast: 120ms;
+  --modal-padding: 22px;
 }
 
 [data-theme="dark"] {
@@ -103,6 +105,7 @@
   --accent-soft: #3d2318;
   --accent-tint: #2e1a12;
   --accent-hover: #e8896a;
+  --on-accent: #1a1917;
 
   --green: #4caf72;
   --green-fg: #4caf72;

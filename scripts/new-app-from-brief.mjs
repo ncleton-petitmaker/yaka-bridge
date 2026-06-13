@@ -289,6 +289,14 @@ function availableDesignSystemIds(templateDir) {
     .sort();
 }
 
+function hasDesignSystemManifest(sourceDir) {
+  try {
+    return statSync(sourceDir).isDirectory() && existsSync(join(sourceDir, "design-system.config.json"));
+  } catch {
+    return false;
+  }
+}
+
 // ----- Interactive helpers -----
 
 function ask(rl, question) {
@@ -423,7 +431,7 @@ const ADAPTATION_PRE_AGENTS = [
 const ADAPTATION_POST_AGENTS = [
   { name: "data-migration-agent", description: "Prépare imports/migrations de données si nécessaires." },
   { name: "subprocess-adapter", description: "Adapte scripts/CLI/drivers existants en drivers Hono/Electron." },
-  { name: "ui-migration-agent", description: "Porte l'UI existante vers le shell TeamFactory." },
+  { name: "ui-migration-agent", description: "Porte l'UI existante vers le shell du design system actif." },
 ];
 
 const AGENTIC_FINAL_AGENTS = [
@@ -675,6 +683,26 @@ async function applyDesignSystem(brief, outputDir, opts) {
     );
     return { selected: brief.DESIGN_SYSTEM, mode: "dry-run" };
   }
+  let sourceArg = null;
+  let imported = false;
+  if (brief.DESIGN_SYSTEM_SOURCE) {
+    const designSource = resolve(String(brief.DESIGN_SYSTEM_SOURCE));
+    if (hasDesignSystemManifest(designSource)) {
+      sourceArg = designSource;
+    } else {
+      await runCmd("node", [
+        "scripts/import-design-system.mjs",
+        "--id",
+        brief.DESIGN_SYSTEM,
+        "--source",
+        designSource,
+        "--target-dir",
+        outputDir,
+      ], { cwd: outputDir });
+      sourceArg = join(outputDir, "design-systems", brief.DESIGN_SYSTEM);
+      imported = true;
+    }
+  }
   const args = [
     "scripts/apply-design-system.mjs",
     "--design-system",
@@ -682,13 +710,14 @@ async function applyDesignSystem(brief, outputDir, opts) {
     "--target-dir",
     outputDir,
   ];
-  if (brief.DESIGN_SYSTEM_SOURCE) {
-    args.push("--source", brief.DESIGN_SYSTEM_SOURCE);
+  if (sourceArg) {
+    args.push("--source", sourceArg);
   }
   await runCmd("node", args, { cwd: outputDir });
   return {
     selected: brief.DESIGN_SYSTEM,
-    source: brief.DESIGN_SYSTEM_SOURCE ?? `design-systems/${brief.DESIGN_SYSTEM}`,
+    source: sourceArg ?? `design-systems/${brief.DESIGN_SYSTEM}`,
+    imported,
   };
 }
 

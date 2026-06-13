@@ -2,234 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ============================================================
-   TeamFactory — design system (drop-in)
-   Source: /Users/marcelle/Downloads/TeamFactory/teamfactory.css
-   + DESIGN.md + brand-spec.md (2026-05-17)
-
-   Warm paper-toned visual language for desktop AI tools.
-   - Six core tokens (bg/surface/fg/muted/border/accent) in OKLch terms.
-   - Five status tint families (green/blue/purple/red/amber) — STATUS ONLY.
-   - One rust accent rationed to ≤2 uses per screen.
-   - Radius scale 6/10/14/999px. Warm-black 4-step shadow scale.
-   - 13.5px base, serif headings, sans body, mono identity.
-   - Functional motion only (120ms ease) + one `pulse` reserved for "running".
-
-   IMPORTANT for components: never hardcode a hex. Always pass through a
-   `var(--token)` or `color-mix(in oklch, var(--accent) X%, transparent)`.
-   ============================================================ */
-
-/* ---- 1. TOKENS ------------------------------------------------ */
-:root {
-  /* Surfaces — warm cream paper, hairline borders, soft shadows. */
-  --bg:            #faf9f7;
-  --surface:       #ffffff;   /* cards, panels, elevated */
-  --subtle:        #f4f2ed;   /* hover fills, inset rows */
-  --bg-subtle:     #f4f2ed;   /* alias */
-  --bg-muted:      #ece9e2;   /* deeper inset */
-  --muted-surface: #ece9e2;
-  --border:        #ebe8e1;   /* default hairline */
-  --border-strong: #d8d4cb;   /* hover / emphasized containment */
-  --border-soft:   #f1eee7;   /* sub-divider inside a card */
-
-  /* Backward-compat aliases for the shell selectors (--bg-app, --bg-panel,
-     --bg-elevated). The template predates TeamFactory; new code should
-     prefer the canonical --bg / --surface names. */
-  --bg-app:        #faf9f7;
-  --bg-panel:      #ffffff;
-  --bg-elevated:   #ffffff;
-
-  /* Text — every grey carries a warm yellow-brown undertone. */
-  --fg:            #1a1916;
-  --fg-strong:     #0d0c0a;
-  --muted:         #74716b;
-  --soft:          #989590;
-  --faint:         #b3b0a8;
-
-  /* Backward-compat text aliases. */
-  --text:          #1a1916;
-  --text-strong:   #0d0c0a;
-  --text-muted:    #74716b;
-  --text-soft:     #989590;
-  --text-faint:    #b3b0a8;
-
-  /* Accent — Claude rust / burnt sienna. Ration it: ≤2 uses / screen. */
-  --accent:        #c96442;
-  --accent-strong: #b45a3b;
-  --accent-soft:   #f5d8cb;   /* focus ring */
-  --accent-tint:   #fbeee5;   /* ghost hover wash */
-  --accent-hover:  #b45a3b;
-
-  /* Semantic tints — STATUS ONLY, never decoration.
-     purple = running/active · green = ok · red = error
-     amber  = awaiting input · blue = informational */
-  --green:        #1f7a3a;
-  --green-fg:     #1f7a3a;
-  --green-bg:     #e8f7ee;
-  --green-border: #c6ead2;
-  --blue:         #2348b8;
-  --blue-fg:      #2348b8;
-  --blue-bg:      #e8efff;
-  --blue-border:  #c8d6ff;
-  --purple:       #6c3aa6;
-  --purple-fg:    #6c3aa6;
-  --purple-bg:    #f3ecf9;
-  --purple-border:#e4d4f1;
-  --red:          #9c2a25;
-  --red-fg:       #9c2a25;
-  --red-bg:       #fdecea;
-  --red-border:   #f5c6c2;
-  --amber:        #b26200;
-  --amber-fg:     #b26200;
-  --amber-bg:     #fff3e0;
-  --amber-border: #f5d7a5;
-
-  /* Warm-black shadow scale (never neutral grey). */
-  --shadow-xs: 0 1px 0 rgba(28,27,26,.04);
-  --shadow-sm: 0 1px 2px rgba(28,27,26,.05), 0 1px 3px rgba(28,27,26,.04);
-  --shadow-md: 0 6px 24px rgba(28,27,26,.07), 0 2px 6px rgba(28,27,26,.04);
-  --shadow-lg: 0 24px 60px rgba(28,27,26,.16), 0 8px 16px rgba(28,27,26,.07);
-
-  /* The whole scale — exactly four radii. */
-  --radius-sm:   6px;
-  --radius:      10px;
-  --radius-md:   10px;
-  --radius-lg:   14px;
-  --radius-pill: 999px;
-
-  /* Type. Serif = authority. Sans = utility. Mono = identity. */
-  --serif: 'Source Serif Pro', 'Source Serif 4', 'Iowan Old Style', Georgia, 'Times New Roman', serif;
-  --sans:  -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  --mono:  ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
-
-  /* One motion vocabulary. Functional, not decorative. */
-  --ease:   cubic-bezier(.2,0,.2,1);
-  --t-fast: 120ms;
-
-  /* Misc local */
-  --modal-padding: 22px;
-}
-
-[data-theme="dark"] {
-  color-scheme: dark;
-  --bg:            #1a1917;
-  --surface:       #222120;
-  --subtle:        #272523;
-  --bg-subtle:     #272523;
-  --bg-muted:      #2e2c29;
-  --muted-surface: #2e2c29;
-  --bg-app:        #1a1917;
-  --bg-panel:      #222120;
-  --bg-elevated:   #2a2825;
-  --border:        #333128;
-  --border-strong: #46433c;
-  --border-soft:   #2a2825;
-
-  --fg:            #e8e4dc;
-  --fg-strong:     #f2ede4;
-  --muted:         #9a9690;
-  --soft:          #6e6b65;
-  --faint:         #4e4b46;
-  --text:          #e8e4dc;
-  --text-strong:   #f2ede4;
-  --text-muted:    #9a9690;
-  --text-soft:     #6e6b65;
-  --text-faint:    #4e4b46;
-
-  --accent:        #d97a56;
-  --accent-strong: #e8896a;
-  --accent-soft:   #3d2318;
-  --accent-tint:   #2e1a12;
-  --accent-hover:  #e8896a;
-
-  --green:        #4caf72;
-  --green-fg:     #4caf72;
-  --green-bg:     #0f2a18;
-  --green-border: #1a4028;
-  --blue:         #6b8fe8;
-  --blue-fg:      #6b8fe8;
-  --blue-bg:      #0f1a38;
-  --blue-border:  #1a2c58;
-  --purple:       #a87dd4;
-  --purple-fg:    #a87dd4;
-  --purple-bg:    #1e1030;
-  --purple-border:#321a50;
-  --red:          #e06b65;
-  --red-fg:       #e06b65;
-  --red-bg:       #2a0e0c;
-  --red-border:   #451714;
-  --amber:        #e09a40;
-  --amber-fg:     #e09a40;
-  --amber-bg:     #2a1a04;
-  --amber-border: #4a2e08;
-
-  --shadow-xs: 0 1px 0 rgba(0,0,0,.2);
-  --shadow-sm: 0 1px 2px rgba(0,0,0,.3), 0 1px 3px rgba(0,0,0,.2);
-  --shadow-md: 0 6px 24px rgba(0,0,0,.4), 0 2px 6px rgba(0,0,0,.25);
-  --shadow-lg: 0 24px 60px rgba(0,0,0,.6), 0 8px 16px rgba(0,0,0,.3);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]):not([data-theme="dark"]) {
-    color-scheme: dark;
-    --bg:            #1a1917;
-    --surface:       #222120;
-    --subtle:        #272523;
-    --bg-subtle:     #272523;
-    --bg-muted:      #2e2c29;
-    --bg-app:        #1a1917;
-    --bg-panel:      #222120;
-    --bg-elevated:   #2a2825;
-    --border:        #333128;
-    --border-strong: #46433c;
-    --border-soft:   #2a2825;
-
-    --fg:            #e8e4dc;
-    --fg-strong:     #f2ede4;
-    --muted:         #9a9690;
-    --soft:          #6e6b65;
-    --faint:         #4e4b46;
-    --text:          #e8e4dc;
-    --text-strong:   #f2ede4;
-    --text-muted:    #9a9690;
-    --text-soft:     #6e6b65;
-    --text-faint:    #4e4b46;
-
-    --accent:        #d97a56;
-    --accent-strong: #e8896a;
-    --accent-soft:   #3d2318;
-    --accent-tint:   #2e1a12;
-    --accent-hover:  #e8896a;
-
-    --green:        #4caf72;
-    --green-fg:     #4caf72;
-    --green-bg:     #0f2a18;
-    --green-border: #1a4028;
-    --blue:         #6b8fe8;
-    --blue-fg:      #6b8fe8;
-    --blue-bg:      #0f1a38;
-    --blue-border:  #1a2c58;
-    --purple:       #a87dd4;
-    --purple-fg:    #a87dd4;
-    --purple-bg:    #1e1030;
-    --purple-border:#321a50;
-    --red:          #e06b65;
-    --red-fg:       #e06b65;
-    --red-bg:       #2a0e0c;
-    --red-border:   #451714;
-    --amber:        #e09a40;
-    --amber-fg:     #e09a40;
-    --amber-bg:     #2a1a04;
-    --amber-border: #4a2e08;
-
-    --shadow-xs: 0 1px 0 rgba(0,0,0,.2);
-    --shadow-sm: 0 1px 2px rgba(0,0,0,.3), 0 1px 3px rgba(0,0,0,.2);
-    --shadow-md: 0 6px 24px rgba(0,0,0,.4), 0 2px 6px rgba(0,0,0,.25);
-    --shadow-lg: 0 24px 60px rgba(0,0,0,.6), 0 8px 16px rgba(0,0,0,.3);
-  }
-}
-
-/* ---- 2. RESET / BASE ------------------------------------------ */
+/* ---- 1. RESET / BASE ------------------------------------------ */
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; padding: 0; }
 body {
@@ -263,7 +36,7 @@ a:hover { text-decoration: underline; }
 .tf-mono { font-family: var(--mono); }
 .tf-muted { color: var(--muted); }
 
-/* ---- 3. BUTTONS ----------------------------------------------- */
+/* ---- 2. BUTTONS ----------------------------------------------- */
 .btn, button {
   font: inherit;
   color: var(--fg);
@@ -272,8 +45,8 @@ a:hover { text-decoration: underline; }
   border-radius: var(--radius-sm);
   padding: 6px 12px;
   cursor: pointer;
-  transition: background var(--t-fast) ease, border-color var(--t-fast) ease,
-              color var(--t-fast) ease, box-shadow var(--t-fast) ease;
+  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease),
+              color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease);
 }
 .btn:hover:not(:disabled), button:hover:not(:disabled) {
   background: var(--subtle); border-color: var(--border-strong);
@@ -284,9 +57,9 @@ a:hover { text-decoration: underline; }
 .btn:disabled, button:disabled { opacity: .5; cursor: not-allowed; }
 
 .btn.primary, button.primary {
-  background: var(--accent); border-color: var(--accent); color: #fff;
+  background: var(--accent); border-color: var(--accent); color: var(--on-accent);
   font-weight: 500;
-  box-shadow: 0 1px 0 rgba(180,90,59,.18) inset, var(--shadow-xs);
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--accent-strong) 18%, transparent) inset, var(--shadow-xs);
 }
 .btn.primary:hover:not(:disabled), button.primary:hover:not(:disabled) {
   background: var(--accent-hover); border-color: var(--accent-hover);
@@ -307,7 +80,7 @@ a:hover { text-decoration: underline; }
 }
 .btn.icon-btn, button.icon-btn { padding: 6px 10px; line-height: 1; }
 
-/* ---- 4. INPUTS ------------------------------------------------ */
+/* ---- 3. INPUTS ------------------------------------------------ */
 input, textarea, select {
   font: inherit;
   color: var(--fg);
@@ -316,7 +89,7 @@ input, textarea, select {
   border-radius: var(--radius-sm);
   padding: 7px 10px;
   width: 100%;
-  transition: border-color var(--t-fast) ease, box-shadow var(--t-fast) ease;
+  transition: border-color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease);
 }
 input::placeholder, textarea::placeholder { color: var(--faint); }
 input:focus, textarea:focus, select:focus {
@@ -337,7 +110,7 @@ code, .code {
   color: var(--fg);
 }
 
-/* ---- 5. CARDS ------------------------------------------------- */
+/* ---- 4. CARDS ------------------------------------------------- */
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -356,7 +129,7 @@ code, .code {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden; cursor: pointer; min-height: 150px;
-  transition: border-color var(--t-fast) ease, box-shadow var(--t-fast) ease, transform var(--t-fast) ease;
+  transition: border-color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
 }
 .object-card:hover {
   border-color: var(--border-strong);
@@ -369,7 +142,7 @@ code, .code {
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
 }
 
-/* ---- 6. PILLS / STATUS ---------------------------------------- */
+/* ---- 5. PILLS / STATUS ---------------------------------------- */
 .pill {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 3px 11px; border-radius: var(--radius-pill);
@@ -395,7 +168,7 @@ code, .code {
   animation: pulse 1.4s ease-in-out infinite;
 }
 
-/* ---- 7. EMPTY / SKELETON / SPINNER ---------------------------- */
+/* ---- 6. EMPTY / SKELETON / SPINNER ---------------------------- */
 .empty {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 8px; padding: 56px 24px; text-align: center; color: var(--muted);
@@ -417,7 +190,7 @@ code, .code {
   animation: spin .8s linear infinite; display: inline-block;
 }
 
-/* ---- 8. APP SHELL (template invariants) ----------------------- */
+/* ---- 7. APP SHELL (template invariants) ----------------------- */
 .app {
   display: grid;
   grid-template-rows: auto 1fr;
@@ -448,7 +221,7 @@ code, .code {
   font-size: 13px;
   color: var(--muted);
   font-weight: 500;
-  transition: color var(--t-fast) ease, border-color var(--t-fast) ease;
+  transition: color var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
 }
 .chat-header-tab:hover {
   color: var(--fg);
@@ -472,16 +245,67 @@ code, .code {
   box-shadow: var(--shadow-xs);
 }
 
+.admin-shell {
+  min-height: 0;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: minmax(200px, 240px) minmax(0, 1fr);
+  background: var(--bg);
+}
+
+.admin-sidebar {
+  min-height: 0;
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.admin-content {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.admin-page-inner {
+  width: min(1180px, 100%);
+  margin: 0 auto;
+  padding: 28px;
+}
+
+@media (max-width: 820px) {
+  .admin-shell {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .admin-sidebar {
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .admin-sidebar nav {
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(150px, 1fr);
+    overflow-x: auto;
+  }
+
+  .admin-page-inner {
+    padding: 18px;
+  }
+}
+
 /* ---- Resize handle (PanelLayout3 + ResizeHandle.tsx) ---------- */
 [data-panel-group] { height: 100%; }
 
 .app-resize-handle {
   z-index: 5;
-  transition: background var(--t-fast) ease;
+  transition: background var(--t-fast) var(--ease);
 }
 .app-resize-handle > span {
   background: var(--border);
-  transition: background var(--t-fast) ease;
+  transition: background var(--t-fast) var(--ease);
 }
 .app-resize-handle:hover > span,
 .app-resize-handle[data-resize-handle-active] > span {
@@ -493,6 +317,256 @@ code, .code {
 .app-resize-handle:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
+}
+
+/* ---- Bridge mascot lab --------------------------------------- */
+.bridge-mascot-topbar {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 4px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.bridge-mascot-brand {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.bridge-mascot-brand:hover {
+  text-decoration: none;
+}
+
+.bridge-mascot-brand span {
+  color: var(--fg-strong);
+  font-family: var(--serif);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.bridge-mascot-topbar nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 16px;
+  margin-left: auto;
+}
+
+.bridge-mascot-topbar nav a {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.bridge-mascot-topbar nav a:hover {
+  color: var(--fg);
+}
+
+.bridge-mascot-page {
+  min-height: 0;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 292px;
+  background: var(--bg);
+}
+
+.bridge-mascot-stage {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+}
+
+.bridge-mascot-host {
+  position: absolute;
+  inset: 0;
+  min-width: 0;
+  min-height: 0;
+}
+
+.bridge-mascot-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+.bridge-mascot-loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  background: var(--bg);
+}
+
+.bridge-mascot-a11y {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.bridge-mascot-stage-caption {
+  position: absolute;
+  left: 24px;
+  top: 22px;
+  max-width: 320px;
+  pointer-events: none;
+}
+
+.bridge-mascot-stage-caption h1 {
+  margin-top: 6px;
+  font-size: 22px;
+}
+
+.bridge-mascot-stage-caption p {
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.bridge-mascot-panel {
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 20px;
+  background: var(--surface);
+}
+
+.bridge-mascot-panel h2 {
+  margin-top: 6px;
+  font-size: 19px;
+}
+
+.bridge-mascot-panel p {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.bridge-mascot-mode-list {
+  display: grid;
+  gap: 8px;
+}
+
+.bridge-mascot-mode {
+  width: 100%;
+  min-height: 62px;
+  display: grid;
+  gap: 4px;
+  text-align: left;
+  padding: 11px 12px;
+  background: var(--surface);
+  border-color: var(--border);
+}
+
+.bridge-mascot-mode span {
+  color: var(--fg-strong);
+  font-weight: 600;
+}
+
+.bridge-mascot-mode small {
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+
+.bridge-mascot-mode.active {
+  background: var(--accent-tint);
+  border-color: var(--accent);
+}
+
+.bridge-mascot-layer-map {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 7px;
+  padding-top: 4px;
+}
+
+.bridge-mascot-layer-map span {
+  height: 38px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--subtle);
+}
+
+.bridge-mascot-layer-map span:nth-child(2) {
+  background: var(--accent-tint);
+}
+
+.bridge-mascot-layer-map span:nth-child(3) {
+  background: var(--blue-bg);
+}
+
+.bridge-mascot-layer-map span:nth-child(4) {
+  background: var(--amber-bg);
+}
+
+@media (max-width: 760px) {
+  .bridge-mascot-topbar {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+    padding: 8px 14px 10px;
+  }
+
+  .bridge-mascot-topbar nav {
+    width: 100%;
+    margin-left: 0;
+    overflow-x: auto;
+  }
+
+  .bridge-mascot-page {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(420px, 1fr) auto;
+    overflow-y: auto;
+  }
+
+  .bridge-mascot-stage {
+    min-height: 420px;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .bridge-mascot-stage-caption {
+    left: 16px;
+    top: 14px;
+    max-width: calc(100% - 32px);
+  }
+
+  .bridge-mascot-stage-caption h1 {
+    font-size: 19px;
+  }
+
+  .bridge-mascot-panel {
+    padding: 14px;
+    gap: 12px;
+  }
+
+  .bridge-mascot-mode-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .bridge-mascot-mode {
+    min-height: 74px;
+  }
 }
 
 /* ---- Generic agent workspace --------------------------- */
@@ -664,7 +738,7 @@ code, .code {
 .ai-avatar.accent {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 .ai-bubble {
   min-width: 0;
@@ -991,7 +1065,7 @@ code, .code {
   padding: 10px 12px;
   text-align: left;
   cursor: pointer;
-  transition: background var(--t-fast) ease, color var(--t-fast) ease, border-color var(--t-fast) ease;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
 }
 .settings-nav-item:hover {
   background: var(--subtle);
@@ -1109,7 +1183,7 @@ code, .code {
   background: var(--red-bg);
   color: var(--red);
   box-shadow: var(--shadow-md);
-  animation: pop-in 140ms ease;
+  animation: pop-in var(--t-fast) var(--ease);
 }
 .bridge-toast .dot {
   width: 7px;
@@ -1123,19 +1197,19 @@ code, .code {
   position: fixed;
   inset: 0;
   z-index: 80;
-  background: rgba(20, 20, 19, 0.35);
+  background: color-mix(in srgb, var(--fg) 35%, transparent);
   backdrop-filter: blur(3px);
   display: flex;
   align-items: flex-start;
   justify-content: center;
   padding: 60px 20px;
-  animation: fade-in 140ms ease;
+  animation: fade-in var(--t-fast) var(--ease);
 }
 .modal {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 14px;
-  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.22);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
   width: 100%;
   max-width: 720px;
   max-height: calc(100vh - 120px);
@@ -1388,7 +1462,7 @@ code, .code {
   }
 }
 
-/* ---- 9. KEYFRAMES --------------------------------------------- */
+/* ---- 8. KEYFRAMES --------------------------------------------- */
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes pop-in  { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes pulse   { 0%,100% { opacity: 1; } 50% { opacity: .45; } }

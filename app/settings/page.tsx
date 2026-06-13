@@ -6,6 +6,7 @@ import { Icon } from "@/components/Icon";
 import { apiFetch } from "@/lib/api-client";
 
 type SettingsTab = "general" | "automations" | "advanced";
+type AgentProvider = "codex-cloud" | "codex-lmstudio";
 
 interface GmailSupplierInvoiceAutomation {
   enabled?: boolean;
@@ -19,6 +20,7 @@ interface GmailSupplierInvoiceAutomation {
 }
 
 interface AppConfigShape {
+  agentProvider?: AgentProvider;
   model: string;
   databaseProvider?: "supabase";
   supabaseUrl?: string;
@@ -34,6 +36,28 @@ interface AvailableModel {
   id: string;
   label: string;
   description: string;
+}
+
+interface LmStudioStatus {
+  available: boolean;
+  baseUrl: string;
+  configuredModel: string;
+  modelAvailable: boolean;
+  models: string[];
+  error?: string;
+}
+
+interface AgentStatusShape {
+  id: "codex";
+  name: string;
+  provider: AgentProvider;
+  available: boolean;
+  path: string | null;
+  version: string | null;
+  loggedIn: boolean | null;
+  supportsOss: boolean | null;
+  lmStudio: LmStudioStatus;
+  error?: string;
 }
 
 interface ActionRegistryEntry {
@@ -97,28 +121,48 @@ function defaultGmailAutomation(): Required<GmailSupplierInvoiceAutomation> {
 
 /**
  * Page paramètres : sous-sections inspirées d'OIF.
- * - Général : base Supabase + modèle Claude Code.
+ * - Général : base Supabase + diagnostic agentique.
  * - Automatisations : bloc Gmail pour importer les factures fournisseurs.
- * - Avancé : registre des actions exposées au daemon / Bridge / MCP.
+ * - Avancé : provider, modèles et registre des actions exposées au daemon / Bridge / MCP.
  */
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<SettingsTab>("general");
   const [config, setConfig] = useState<AppConfigShape | null>(null);
   const [models, setModels] = useState<AvailableModel[]>([]);
+  const [agentStatus, setAgentStatus] = useState<AgentStatusShape | null>(null);
+  const [agentsError, setAgentsError] = useState<string | null>(null);
   const [actions, setActions] = useState<ActionRegistryEntry[]>([]);
   const [actionsError, setActionsError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [info, setInfo] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  async function loadAgentStatus() {
+    try {
+      const r = await apiFetch("/api/agents");
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const j = (await r.json()) as { agents?: AgentStatusShape[] };
+      setAgentStatus(j.agents?.[0] ?? null);
+      setAgentsError(null);
+    } catch (err) {
+      setAgentStatus(null);
+      setAgentsError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   useEffect(() => {
     apiFetch("/api/app-config")
       .then((r) => r.json())
-      .then((j: { config: AppConfigShape; availableModels: AvailableModel[] }) => {
+      .then((j: {
+        config: AppConfigShape;
+        availableModels: AvailableModel[];
+      }) => {
         setConfig(j.config);
         setModels(j.availableModels);
       })
       .catch((err) => setError(String(err)));
+
+    void loadAgentStatus();
 
     apiFetch("/api/actions")
       .then((r) => {
@@ -139,6 +183,7 @@ export default function SettingsPage() {
     }),
     [config]
   );
+  const activeAgentProvider = config?.agentProvider ?? "codex-cloud";
 
   async function save(partial: Partial<AppConfigShape>) {
     setSaving(true);
@@ -154,6 +199,7 @@ export default function SettingsPage() {
       const j = (await r.json()) as { config: AppConfigShape };
       setConfig(j.config);
       setInfo("Enregistré.");
+      void loadAgentStatus();
       window.dispatchEvent(new Event("app-config-changed"));
     } catch (err) {
       setError((err as Error).message);
@@ -286,28 +332,13 @@ export default function SettingsPage() {
                       </Field>
                     </Section>
 
-                    <Section title="Modèle Claude Code">
-                      <Field label="Modèle">
-                        <select
-                          value={config.model}
-                          onChange={(e) => save({ model: e.target.value })}
-                        >
-                          {models.map((m) => (
-                            <option key={m.id} value={m.id}>
-                              {m.label}
-                            </option>
-                          ))}
-                        </select>
-                      </Field>
-                      <Field label="Max runs concurrents">
-                        <input
-                          type="number"
-                          defaultValue={config.maxConcurrentRuns ?? 5}
-                          onBlur={(e) =>
-                            save({ maxConcurrentRuns: Number(e.target.value) || undefined })
-                          }
-                        />
-                      </Field>
+                    <Section title="Agent IA">
+                      <AgentDiagnostic
+                        provider={activeAgentProvider}
+                        status={agentStatus}
+                        error={agentsError}
+                        onRefresh={() => void loadAgentStatus()}
+                      />
                     </Section>
                   </>
                 )}
@@ -429,73 +460,114 @@ export default function SettingsPage() {
                 )}
 
                 {activeTab === "advanced" && (
-                  <Section title="Avancé · actions système">
-                    <p style={{ fontSize: 12, color: "var(--muted)", marginBottom: 4 }}>
-                      Les actions ne sont pas une page métier. Ce sont les commandes
-                      internes utilisées par l&apos;interface, Bridge, Codex et MCP avec
-                      validation, droits et audit.
-                    </p>
-                    <details>
-                      <summary
-                        style={{
-                          cursor: "pointer",
-                          fontSize: 13,
-                          fontWeight: 600,
-                          color: "var(--fg)",
-                        }}
-                      >
-                        Voir le registre des actions
-                      </summary>
-                      {actionsError ? (
-                        <p style={{ fontSize: 12, color: "var(--red-fg)", marginTop: 12 }}>
-                          Impossible de charger les actions : {actionsError}
-                        </p>
-                      ) : actions.length === 0 ? (
-                        <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 12 }}>
-                          Aucune action exposée par le daemon.
-                        </p>
-                      ) : (
+                  <>
+                    <Section title="Avancé · agent IA">
+                      <Field label="Mode configuré">
                         <div
                           style={{
-                            display: "flex",
-                            flexDirection: "column",
-                            gap: 8,
-                            marginTop: 12,
+                            minHeight: 36,
+                            border: "1px solid var(--border)",
+                            borderRadius: "var(--radius-sm)",
+                            background: "var(--surface)",
+                            color: "var(--fg)",
+                            padding: "8px 10px",
+                            fontSize: 13,
+                            fontWeight: 600,
                           }}
                         >
-                          {actions.map((action) => (
-                            <div
-                              key={action.id}
-                              style={{
-                                border: "1px solid var(--border-soft, var(--border))",
-                                borderRadius: "var(--radius-sm, 6px)",
-                                padding: "10px 12px",
-                                background: "var(--surface)",
-                              }}
-                            >
+                          {agentProviderLabel(activeAgentProvider)}
+                        </div>
+                      </Field>
+
+                      <Field label="Modèle ChatGPT Codex">
+                        <select value={config.model} onChange={(e) => save({ model: e.target.value })}>
+                          {models.map((m) => (
+                            <option key={m.id} value={m.id}>
+                              {m.label}
+                            </option>
+                          ))}
+                        </select>
+                      </Field>
+
+                      <Field label="Max runs concurrents">
+                        <input
+                          type="number"
+                          defaultValue={config.maxConcurrentRuns ?? 5}
+                          onBlur={(e) =>
+                            save({ maxConcurrentRuns: Number(e.target.value) || undefined })
+                          }
+                        />
+                      </Field>
+                    </Section>
+
+                    <Section title="Avancé · actions système">
+                      <p style={{ fontSize: 12, color: "var(--muted)", marginBottom: 4 }}>
+                        Les actions ne sont pas une page métier. Ce sont les commandes
+                        internes utilisées par l&apos;interface, Bridge, Codex et MCP avec
+                        validation, droits et audit.
+                      </p>
+                      <details>
+                        <summary
+                          style={{
+                            cursor: "pointer",
+                            fontSize: 13,
+                            fontWeight: 600,
+                            color: "var(--fg)",
+                          }}
+                        >
+                          Voir le registre des actions
+                        </summary>
+                        {actionsError ? (
+                          <p style={{ fontSize: 12, color: "var(--red-fg)", marginTop: 12 }}>
+                            Impossible de charger les actions : {actionsError}
+                          </p>
+                        ) : actions.length === 0 ? (
+                          <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 12 }}>
+                            Aucune action exposée par le daemon.
+                          </p>
+                        ) : (
+                          <div
+                            style={{
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: 8,
+                              marginTop: 12,
+                            }}
+                          >
+                            {actions.map((action) => (
                               <div
+                                key={action.id}
                                 style={{
-                                  display: "flex",
-                                  alignItems: "center",
-                                  gap: 8,
-                                  flexWrap: "wrap",
-                                  marginBottom: 4,
+                                  border: "1px solid var(--border-soft, var(--border))",
+                                  borderRadius: "var(--radius-sm, 6px)",
+                                  padding: "10px 12px",
+                                  background: "var(--surface)",
                                 }}
                               >
-                                <code style={{ fontSize: 12 }}>{action.id}</code>
-                                {action.audit && <ActionBadge>audit</ActionBadge>}
-                                {action.audit?.adminOnly && <ActionBadge>admin</ActionBadge>}
-                                {action.audit?.dangerous && <ActionBadge>critique</ActionBadge>}
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 8,
+                                    flexWrap: "wrap",
+                                    marginBottom: 4,
+                                  }}
+                                >
+                                  <code style={{ fontSize: 12 }}>{action.id}</code>
+                                  {action.audit && <ActionBadge>audit</ActionBadge>}
+                                  {action.audit?.adminOnly && <ActionBadge>admin</ActionBadge>}
+                                  {action.audit?.dangerous && <ActionBadge>critique</ActionBadge>}
+                                </div>
+                                <p style={{ fontSize: 12, color: "var(--text-muted)", margin: 0 }}>
+                                  {action.description}
+                                </p>
                               </div>
-                              <p style={{ fontSize: 12, color: "var(--text-muted)", margin: 0 }}>
-                                {action.description}
-                              </p>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </details>
-                  </Section>
+                            ))}
+                          </div>
+                        )}
+                      </details>
+                    </Section>
+                  </>
                 )}
 
                 {saving && <p style={{ fontSize: 13, color: "var(--text-muted)" }}>Enregistrement…</p>}
@@ -571,6 +643,136 @@ function ActionBadge({ children }: { children: React.ReactNode }) {
       {children}
     </span>
   );
+}
+
+function AgentDiagnostic({
+  provider,
+  status,
+  error,
+  onRefresh,
+}: {
+  provider: AgentProvider;
+  status: AgentStatusShape | null;
+  error: string | null;
+  onRefresh: () => void;
+}) {
+  const state = describeAgentReadiness(provider, status, error);
+  return (
+    <div
+      style={{
+        border: "1px solid var(--border-soft, var(--border))",
+        borderRadius: "var(--radius-sm)",
+        padding: "10px 12px",
+        background: "var(--surface)",
+        display: "flex",
+        flexDirection: "column",
+        gap: 8,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 700 }}>
+          <span
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: 999,
+              background: state.tone === "ready" ? "var(--green)" : state.tone === "blocked" ? "var(--red-fg)" : "var(--text-muted)",
+            }}
+          />
+          {state.label}
+        </span>
+        <button
+          type="button"
+          onClick={onRefresh}
+          title="Rafraîchir le diagnostic"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "6px 9px",
+            border: "1px solid var(--border)",
+            borderRadius: "var(--radius-sm)",
+            background: "var(--surface)",
+            color: "var(--fg)",
+            fontSize: 12,
+            cursor: "pointer",
+          }}
+        >
+          <Icon name="refresh" size={13} />
+          Rafraîchir
+        </button>
+      </div>
+      <p style={{ fontSize: 12, color: "var(--text-muted)", margin: 0 }}>{state.detail}</p>
+      {status && (
+        <p style={{ fontSize: 11, color: "var(--text-muted)", margin: 0 }}>
+          Codex {status.version ?? "version inconnue"} · {status.path ?? "binaire introuvable"}
+          {provider === "codex-lmstudio"
+            ? ` · LM Studio ${status.lmStudio.baseUrl} · ${status.lmStudio.models.length} modèle(s)`
+            : ""}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function describeAgentReadiness(
+  provider: AgentProvider,
+  status: AgentStatusShape | null,
+  error: string | null
+): { label: string; detail: string; tone: "ready" | "blocked" | "pending" } {
+  if (error) return { label: "Diagnostic indisponible", detail: error, tone: "blocked" };
+  if (!status) return { label: "Diagnostic en attente", detail: "Statut ChatGPT Codex non chargé.", tone: "pending" };
+  if (!status.path) {
+    return {
+      label: "ChatGPT Codex manquant",
+      detail: status.error ?? "Installe Codex CLI puis connecte-le au compte ChatGPT.",
+      tone: "blocked",
+    };
+  }
+  if (provider === "codex-lmstudio") {
+    if (!status.supportsOss) {
+      return {
+        label: "Codex local incompatible",
+        detail: status.error ?? "La version installée ne supporte pas encore le mode OSS local.",
+        tone: "blocked",
+      };
+    }
+    if (!status.lmStudio.available) {
+      return {
+        label: "LM Studio arrêté",
+        detail: status.lmStudio.error ?? "LM Studio ne répond pas sur le port local configuré.",
+        tone: "blocked",
+      };
+    }
+    if (!status.lmStudio.modelAvailable) {
+      return {
+        label: status.lmStudio.models.length ? "Modèle absent" : "Aucun modèle chargé",
+        detail: status.lmStudio.error ?? `Modèle attendu: ${status.lmStudio.configuredModel}.`,
+        tone: "blocked",
+      };
+    }
+    return {
+      label: "Prêt",
+      detail: `Codex local utilisera ${status.lmStudio.configuredModel} via LM Studio.`,
+      tone: "ready",
+    };
+  }
+  if (!status.loggedIn) {
+    return {
+      label: "Connexion ChatGPT Codex requise",
+      detail: status.error ?? "ChatGPT Codex nécessite une session `codex login` valide.",
+      tone: "blocked",
+    };
+  }
+  return {
+    label: "Prêt",
+    detail: "ChatGPT Codex est disponible pour les prochains runs.",
+    tone: "ready",
+  };
+}
+
+function agentProviderLabel(provider: AgentProvider): string {
+  return provider === "codex-lmstudio" ? "Codex local avec LM Studio" : "ChatGPT Codex";
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {

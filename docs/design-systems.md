@@ -30,6 +30,43 @@ Optional files:
 
 The active system is recorded in `design-system.config.json` at the repo root.
 
+## Importing a design system
+
+Use `design:import` for OpenDesign outputs or a customer-owned `DESIGN.md`:
+
+```bash
+npm run design:import -- \
+  --id customer-system \
+  --source /absolute/path/to/DESIGN.md \
+  --apply
+```
+
+For a local `nexu-io/open-design` checkout:
+
+```bash
+npm run design:import -- \
+  --id customer-system \
+  --opendesign-root /Volumes/Docker/code/opendesign \
+  --source-id customer-system \
+  --apply
+```
+
+The importer normalizes the source into:
+
+```text
+design-systems/<id>/
+  DESIGN.md
+  design-system.config.json
+  tokens.css
+  assets/app-mark.svg
+  assets/bridge-mark.svg
+```
+
+It extracts usable colors/fonts from the source document, derives missing app
+and Bridge tokens, and keeps the original `DESIGN.md` auditable. Generated
+tokens are a starting point: high-risk customer systems still need visual
+review and accessibility checks.
+
 ## Applying a design system
 
 Use:
@@ -38,7 +75,7 @@ Use:
 npm run design:apply -- --design-system claude
 ```
 
-For an imported system:
+For an imported yaka-bridge contract:
 
 ```bash
 npm run design:apply -- \
@@ -57,9 +94,9 @@ public/bridge-mark.svg
 design-system.config.json
 ```
 
-`app/layout.tsx` imports `app/design-system.css` after `globals.css`, so the
-active design system overrides template defaults while preserving shared shell
-classes.
+`app/layout.tsx` imports `app/design-system.css` after `globals.css`. Shared
+shell classes stay generic; all visual values come from the active generated
+tokens.
 
 Bridge reads `bridge/design-system.json` in its setup window and the Bridge
 build copies that file into `dist/bridge/`.
@@ -76,8 +113,13 @@ To use an imported source during generation:
 
 ```yaml
 DESIGN_SYSTEM: customer-system
-DESIGN_SYSTEM_SOURCE: /absolute/path/to/customer-system
+DESIGN_SYSTEM_SOURCE: /absolute/path/to/DESIGN.md
 ```
+
+`DESIGN_SYSTEM_SOURCE` can be a raw OpenDesign/customer `DESIGN.md`, a folder
+containing one, or a yaka-bridge design-system folder with
+`design-system.config.json`. Raw sources are imported into the generated app
+before `design:apply` runs.
 
 If absent, the factory uses `claude`.
 
@@ -111,14 +153,10 @@ Recommended option for creating a new customer design system:
 1. Use `nexu-io/open-design` to explore and generate a design direction:
    <https://github.com/nexu-io/open-design>
 2. Export or write a clear `DESIGN.md`.
-3. Convert it to the yaka-bridge contract:
-   - `design-system.config.json`
-   - `tokens.css`
-   - Bridge token subset
-   - app and Bridge marks
-4. Run `npm run design:apply`.
-5. Run the refactor skill.
-6. Verify with build, factory and visual review.
+3. Run `npm run design:import -- --id <id> --source <path> --apply`.
+4. Run the refactor skill if the design changes layout density, typography or
+   component behavior.
+5. Verify with build, factory and visual review.
 
 Do not import an open-design output blindly. The final yaka-bridge contract
 must be auditable, tokenized, accessible, and free of customer secrets.
@@ -130,12 +168,13 @@ Every design system must provide:
 - surfaces: `--bg`, `--surface`, `--subtle`, `--bg-muted`;
 - borders: `--border`, `--border-strong`, `--border-soft`;
 - text: `--fg`, `--fg-strong`, `--muted`, `--soft`, `--faint`;
-- accent: `--accent`, `--accent-strong`, `--accent-soft`, `--accent-tint`;
+- accent: `--accent`, `--accent-strong`, `--accent-soft`, `--accent-tint`, `--on-accent`;
 - status: green, blue, purple, red, amber;
 - elevation: `--shadow-xs`, `--shadow-sm`, `--shadow-md`, `--shadow-lg`;
 - shape: `--radius-sm`, `--radius`, `--radius-lg`, `--radius-pill`;
 - type: `--serif`, `--sans`, `--mono`;
 - motion: `--ease`, `--t-fast`.
+- local UI sizing: `--modal-padding`.
 
 ## Acceptance checklist
 

@@ -1,6 +1,9 @@
 {
   "contractVersion": "1.0.0",
   "active": "claude",
+  "name": "Claude",
+  "sourceKind": "built-in",
+  "sourceMeta": null,
   "source": "design-systems/claude",
   "targets": [
     "app",

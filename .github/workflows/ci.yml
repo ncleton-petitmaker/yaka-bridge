@@ -14,6 +14,19 @@ jobs:
         with:
           node-version: 24
           cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Linux native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev \
+            libevdev-dev \
+            libssl-dev \
+            libx11-dev \
+            libxi-dev \
+            libxkbcommon-dev \
+            libxtst-dev \
+            pkg-config
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
@@ -23,3 +36,25 @@ jobs:
       - run: npm audit --audit-level=high
       - run: npm run security:grep
       - run: npm run factory:check
+
+  bridge-package-assets:
+    name: Bridge assets (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: darwin
+          - os: windows-latest
+            target: win32
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - run: npm ci
+      - run: node scripts/build-bridge.mjs --target ${{ matrix.target }} --require-voice-sidecar
+      - run: node scripts/verify-bridge-package-assets.mjs --target ${{ matrix.target }}

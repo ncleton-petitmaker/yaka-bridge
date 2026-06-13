@@ -3,6 +3,40 @@ import type { AgentEvent, RunStatus } from "../server/types.js";
 export const BRIDGE_PRODUCT_NAME = "Bridge";
 export const BRIDGE_PROTOCOL_VERSION = 2;
 
+export type AgentProvider = "codex-cloud" | "codex-lmstudio";
+export type AgentRoutingPrivacy = "normal" | "sensitive" | "local-only";
+
+export interface AgentRoutingPolicy {
+  mode?: "cloud" | "local";
+  privacy?: AgentRoutingPrivacy;
+  localModel?: string;
+  reason?: string;
+}
+
+export interface BridgeLocalAiPolicy {
+  enabled: boolean;
+  installRequired: boolean;
+  provider: "lmstudio";
+  model: string;
+  allowUserModelOverride: boolean;
+}
+
+export interface BridgeVoicePolicy {
+  enabled: boolean;
+  installRequired: boolean;
+  provider: "bridge-voice";
+  model: string;
+  defaultShortcut: string;
+  allowUserShortcutOverride: boolean;
+  allowUserModelOverride: boolean;
+  insertMode: "bridge-fields" | "system";
+}
+
+export interface BridgeAiPolicy {
+  localAi: BridgeLocalAiPolicy;
+  voice: BridgeVoicePolicy;
+}
+
 export type BridgeServiceStatus =
   | "connected"
   | "paused"
@@ -54,6 +88,7 @@ export interface BridgeServiceAction {
   outputSchema?: Record<string, unknown>;
   requiredScopes?: string[];
   dangerous?: boolean;
+  agentRouting?: AgentRoutingPolicy;
 }
 
 export interface BridgeServiceEvent {
@@ -76,7 +111,16 @@ export interface BridgeServiceManifest {
   iconUrl?: string;
   dataStrategy?: BridgeDataStrategy;
   supabaseProjectRef?: string;
+  designSystem?: {
+    id: string;
+    name?: string;
+    version?: string;
+    sourceKind?: string;
+    appliedAt?: string;
+  };
   requiredScopes?: string[];
+  defaultAgentRouting?: AgentRoutingPolicy;
+  bridgeAiPolicy?: BridgeAiPolicy;
   actions?: BridgeServiceAction[];
   events?: BridgeServiceEvent[];
 }
@@ -149,7 +193,10 @@ export interface BridgeConfig {
   sessionInvalidAt?: string;
   label?: string;
   dataDir: string;
+  defaultAgentProvider?: AgentProvider;
   defaultModel?: string;
+  defaultLocalModel?: string;
+  aiPolicy: BridgeAiPolicy;
   maxConcurrentJobs?: number;
   pollIntervalSeconds?: number;
   services: BridgeServiceInstance[];
@@ -175,6 +222,7 @@ export interface BridgeControlPlaneSyncResponse {
   account?: BridgeAccount;
   services?: BridgeServiceInstance[];
   erpBus?: BridgeErpBusConfig;
+  aiPolicy?: BridgeAiPolicy;
   updateBaseUrl?: string;
   latestVersion?: string;
   minimumVersion?: string;
@@ -198,9 +246,13 @@ export interface CloudBridgeJob {
 
 export interface BridgeJobPayload {
   prompt: string;
+  actionId?: string;
   cwd?: BridgePathRef;
   addDirs?: BridgePathRef[];
+  agentProvider?: AgentProvider;
+  agentRouting?: AgentRoutingPolicy;
   model?: string;
+  localModel?: string;
   maxTurns?: number;
   allowedTools?: string[];
   imageUrls?: string[];
@@ -308,6 +360,7 @@ export interface BridgeRuntimeState {
   controlPlaneConfigured: boolean;
   authenticated: boolean;
   codex?: BridgeCodexStatus;
+  aiPolicy: BridgeAiPolicy;
   update?: {
     latestVersion?: string;
     minimumVersion?: string;

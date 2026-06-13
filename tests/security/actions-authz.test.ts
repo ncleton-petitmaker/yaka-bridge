@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { callAction, type ActionContext } from "../../server/actions";
 
 const baseContext: ActionContext = {
@@ -65,5 +68,28 @@ test("agent run rejects cloud members without codex run scope", async () => {
       prompt: "Do work",
     }),
     /scope-forbidden:codex:run/
+  );
+});
+
+test("app config action does not expose a provider picker contract", async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "yaka-app-config-action-"));
+  const output = await callAction("appConfig.get", { ...baseContext, dataDir }, {});
+  assert.equal(Object.prototype.hasOwnProperty.call(output as Record<string, unknown>, "availableAgentProviders"), false);
+  assert.equal(Array.isArray((output as { availableModels?: unknown }).availableModels), true);
+});
+
+test("app config update is admin-only for organization contexts", async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "yaka-app-config-action-"));
+  await assert.rejects(
+    () => callAction("appConfig.update", {
+      ...baseContext,
+      dataDir,
+      organizationId: "9c3b6f91-2074-4d6e-8c4a-3514da2d986d",
+      membershipRole: "member",
+      entitlements: [],
+    }, {
+      model: "opus",
+    }),
+    /admin-required/
   );
 });

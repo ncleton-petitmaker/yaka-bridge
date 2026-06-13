@@ -67,7 +67,7 @@ artifacts so older clients can still resolve their expected update metadata.
 - Checks at startup, then periodically.
 - Downloads automatically.
 - Installs automatically when no Codex/Bridge job is active.
-- Uses `autoInstallOnAppQuit` as a fallback if the app is closed manually.
+- Uses `autoInstallOnAppQuit` as a backup path if the app is closed manually.
 - Is disabled in development unless `BRIDGE_AUTO_UPDATE_IN_DEV=1`.
 
 ## Production Requirements

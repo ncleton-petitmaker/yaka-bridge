@@ -11,6 +11,7 @@ import {
 } from "./authz.js";
 import { bearerToken } from "./cloud-auth.js";
 import { getSupabaseServerClient } from "./supabase.js";
+import { bridgeAiPolicyFromManifests } from "../bridge/ai-policy.js";
 
 type BridgeAuthKind = "supabase" | "bridge-token";
 
@@ -67,6 +68,10 @@ export function registerBridgeControlPlaneRoutes(app: Hono, dataDir: string): vo
   });
 
   app.all("/bridge/launch-ticket/consume", async (c) => {
+    applyLaunchTicketCors(c);
+    if (c.req.method === "OPTIONS") {
+      return c.body(null, 204);
+    }
     try {
       const supabase = getSupabaseServerClient(dataDir);
       const envelope = await readEnvelope(c);
@@ -127,6 +132,7 @@ export function registerBridgeControlPlaneRoutes(app: Hono, dataDir: string): vo
       ok: true,
       services,
       erpBus,
+      aiPolicy: bridgeAiPolicyFromManifests(services),
       ...bridgeUpdateInfo(),
       serverTime: new Date().toISOString(),
     });
@@ -139,6 +145,7 @@ export function registerBridgeControlPlaneRoutes(app: Hono, dataDir: string): vo
       ok: true,
       services,
       erpBus,
+      aiPolicy: bridgeAiPolicyFromManifests(services),
       ...bridgeUpdateInfo(),
       serverTime: new Date().toISOString(),
     });
@@ -349,6 +356,17 @@ export function registerBridgeControlPlaneRoutes(app: Hono, dataDir: string): vo
       },
     });
   });
+}
+
+function applyLaunchTicketCors(c: Context): void {
+  const origin = c.req.header("origin")?.trim();
+  if (origin) {
+    c.header("Access-Control-Allow-Origin", origin);
+    c.header("Vary", "Origin");
+  }
+  c.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  c.header("Access-Control-Allow-Headers", "content-type");
+  c.header("Access-Control-Allow-Private-Network", "true");
 }
 
 export function createSignedBridgeToken(payload: SignedBridgeTokenPayload, secret: string): string {

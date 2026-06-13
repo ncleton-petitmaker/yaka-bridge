@@ -1,3 +1,5 @@
+import type { AgentRoutingPolicy } from "../bridge/types";
+
 export interface ErpModuleRoute {
   path: string;
   label: {
@@ -32,6 +34,7 @@ export interface ErpModuleManifest {
     id: string;
     label: string;
     requiredScopes: string[];
+    agentRouting?: AgentRoutingPolicy;
   }>;
   events: Array<{
     type: string;

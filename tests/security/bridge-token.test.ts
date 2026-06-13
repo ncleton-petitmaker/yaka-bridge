@@ -1,9 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { Hono } from "hono";
 import {
   bridgeTokenHash,
   createSignedBridgeToken,
   parseSignedBridgeToken,
+  registerBridgeControlPlaneRoutes,
 } from "../../server/bridge-control-plane";
 
 const secret = "test-secret-with-enough-entropy";
@@ -45,4 +47,23 @@ test("signed bridge tokens reject expired payloads", () => {
     exp: 1_800_000_000,
   }, secret);
   assert.throws(() => parseSignedBridgeToken(token, secret, 1_800_000_001_000), /expired-bridge-token/);
+});
+
+test("launch ticket consume allows browser preflight", async () => {
+  const app = new Hono();
+  registerBridgeControlPlaneRoutes(app, "./data");
+
+  const res = await app.request("/bridge/launch-ticket/consume", {
+    method: "OPTIONS",
+    headers: {
+      origin: "http://localhost:3100",
+      "access-control-request-method": "POST",
+      "access-control-request-headers": "content-type",
+    },
+  });
+
+  assert.equal(res.status, 204);
+  assert.equal(res.headers.get("access-control-allow-origin"), "http://localhost:3100");
+  assert.match(res.headers.get("access-control-allow-methods") ?? "", /POST/);
+  assert.match(res.headers.get("access-control-allow-headers") ?? "", /content-type/);
 });

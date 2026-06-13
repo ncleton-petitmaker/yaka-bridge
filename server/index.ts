@@ -31,11 +31,14 @@ import { existsSync, readdirSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { timingSafeEqual } from "node:crypto";
 import { findClaudeBin } from "./agents.js";
-import { getAgentStatus } from "./agents-status.js";
+import { assertAgentProviderReady, getAgentStatus } from "./agents-status.js";
+import { recommendLocalModel } from "./local-ai-recommendation.js";
 import {
   loadAppConfig,
   saveAppConfig,
   AVAILABLE_MODELS,
+  codexRunModelOptions,
+  type AgentProvider,
   type AppConfig,
 } from "./app-config.js";
 import { setPricingDataDir, getPricingMetadata } from "./pricing.js";
@@ -63,7 +66,7 @@ import {
 } from "./audit-log.js";
 import { callAction, listActions, type ActionContext } from "./actions.js";
 import { allowedRunRoots, assertInsideRoots } from "./path-guard.js";
-import { getSupabasePublicConfig } from "./supabase.js";
+import { getSupabasePublicConfig, getSupabaseServerClient } from "./supabase.js";
 import {
   getCloudAuth,
   isCloudAuthRequired,
@@ -84,13 +87,29 @@ import {
   updateSupportSession,
   upsertSupportSession,
 } from "./observability.js";
+import {
+  applyBridgeAiPolicyManifestPatch,
+  applyAgentRoutingManifestPatch,
+  mapAgentRoutingService,
+  type AgentRoutingServicePatch,
+  type BridgeAiPolicyPatch,
+} from "./agent-routing-admin.js";
+import { bridgeAiPolicyFromManifests } from "../bridge/ai-policy.js";
+import {
+  activeDesignSystemOption,
+  applyServiceDesignSystemManifestPatch,
+  listDesignSystemOptions,
+  mapDesignSystemService,
+  normalizeDesignSystemPatch,
+  type DesignSystemServicePatch,
+} from "./design-systems-admin.js";
 
 // Version pseudo-templating : remplacée au scaffolding ; en attendant `0.0.1`.
 const APP_VERSION = "{{VERSION}}";
 
 /**
  * Nom de la variable d'environnement par laquelle l'hôte (Electron, script
- * `start.js`, etc.) injecte le `dataDir`. Le placeholder est remplacé à
+ * `start.mjs`, etc.) injecte le `dataDir`. Le placeholder est remplacé à
  * scaffolding (cf. `scripts/init-from-template.mjs`).
  */
 const DATA_DIR_ENV_VAR = "{{DATA_DIR_ENV_VAR}}";
@@ -214,6 +233,17 @@ function actionContext(c: { req: { header: (k: string) => string | undefined; ra
   };
 }
 
+function adminOrganizationId(c: { req: { query: (k: string) => string | undefined } }): string | null {
+  const authz = getAuthz(c as any);
+  return (
+    authz?.organizationId ??
+    c.req.query("organizationId")?.trim() ??
+    process.env.BRIDGE_ORGANIZATION_ID ??
+    process.env.APP_ORGANIZATION_ID ??
+    null
+  );
+}
+
 const app = new Hono();
 registerBridgeControlPlaneRoutes(app, DATA_DIR);
 
@@ -321,12 +351,208 @@ app.get("/api/admin/support-sessions", (c) => supportSessionsOverview(DATA_DIR, 
 app.get("/api/admin/support-sessions/:id", (c) => supportSessionDetail(DATA_DIR, c));
 app.post("/api/admin/observability/:id/resolve", (c) => resolveObservabilityEvent(DATA_DIR, c));
 
+app.get("/api/admin/agent-routing", async (c) => {
+  try {
+    const organizationId = adminOrganizationId(c);
+    if (!organizationId) return c.json({ error: "organization-required" }, 400);
+    const supabase = getSupabaseServerClient(DATA_DIR);
+    const { data, error } = await supabase
+      .from("bridge_services")
+      .select("service_id,service_instance_id,name,description,manifest")
+      .eq("organization_id", organizationId)
+      .eq("enabled", true)
+      .order("name", { ascending: true });
+    if (error) throw error;
+    const rows = (data ?? []) as Record<string, unknown>[];
+    return c.json({
+      defaultAgentProvider: "codex-cloud",
+      aiPolicy: bridgeAiPolicyFromManifests(rows.map((row) => row.manifest)),
+      localModelRecommendation: recommendLocalModel(),
+      generatedAt: new Date().toISOString(),
+      services: rows.map((row) => mapAgentRoutingService(row)),
+    });
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+  }
+});
+
+app.put("/api/admin/agent-routing/policy", async (c) => {
+  try {
+    const organizationId = adminOrganizationId(c);
+    if (!organizationId) return c.json({ error: "organization-required" }, 400);
+    const body = (await c.req.json().catch(() => ({}))) as BridgeAiPolicyPatch;
+    const supabase = getSupabaseServerClient(DATA_DIR);
+    const { data: current, error: readError } = await supabase
+      .from("bridge_services")
+      .select("service_id,service_instance_id,name,description,manifest")
+      .eq("organization_id", organizationId)
+      .eq("enabled", true);
+    if (readError) throw readError;
+    const rows = (current ?? []) as Record<string, unknown>[];
+    if (!rows.length) return c.json({ error: "no-active-bridge-service" }, 404);
+
+    const updatedRows: Record<string, unknown>[] = [];
+    const updatedAt = new Date().toISOString();
+    for (const row of rows) {
+      const manifest = row.manifest && typeof row.manifest === "object" && !Array.isArray(row.manifest)
+        ? row.manifest as Record<string, unknown>
+        : {};
+      const nextManifest = applyBridgeAiPolicyManifestPatch(manifest, body);
+      const { data: updated, error: updateError } = await supabase
+        .from("bridge_services")
+        .update({ manifest: nextManifest, updated_at: updatedAt })
+        .eq("organization_id", organizationId)
+        .eq("service_id", row.service_id)
+        .select("service_id,service_instance_id,name,description,manifest")
+        .single();
+      if (updateError) throw updateError;
+      updatedRows.push(updated as Record<string, unknown>);
+    }
+    audit(c, {
+      action: "agent-routing.policy.update",
+      resource_type: "bridge-ai-policy",
+      result: "success",
+      metadata: { serviceCount: updatedRows.length },
+    });
+    return c.json({
+      aiPolicy: bridgeAiPolicyFromManifests(updatedRows.map((row) => row.manifest)),
+      localModelRecommendation: recommendLocalModel(),
+      generatedAt: updatedAt,
+      services: updatedRows.map((row) => mapAgentRoutingService(row)),
+    });
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+  }
+});
+
+app.put("/api/admin/agent-routing/services/:serviceId", async (c) => {
+  try {
+    const organizationId = adminOrganizationId(c);
+    if (!organizationId) return c.json({ error: "organization-required" }, 400);
+    const serviceId = c.req.param("serviceId")?.trim();
+    if (!serviceId) return c.json({ error: "service-required" }, 400);
+    const body = (await c.req.json().catch(() => ({}))) as AgentRoutingServicePatch;
+    const supabase = getSupabaseServerClient(DATA_DIR);
+    const { data: current, error: readError } = await supabase
+      .from("bridge_services")
+      .select("service_id,service_instance_id,name,description,manifest")
+      .eq("organization_id", organizationId)
+      .eq("service_id", serviceId)
+      .eq("enabled", true)
+      .maybeSingle();
+    if (readError) throw readError;
+    if (!current) return c.json({ error: "service-not-found" }, 404);
+
+    const manifest = current.manifest && typeof current.manifest === "object" && !Array.isArray(current.manifest)
+      ? current.manifest as Record<string, unknown>
+      : {};
+    const nextManifest = applyAgentRoutingManifestPatch(manifest, body);
+    const { data: updated, error: updateError } = await supabase
+      .from("bridge_services")
+      .update({ manifest: nextManifest, updated_at: new Date().toISOString() })
+      .eq("organization_id", organizationId)
+      .eq("service_id", serviceId)
+      .select("service_id,service_instance_id,name,description,manifest")
+      .single();
+    if (updateError) throw updateError;
+    audit(c, {
+      action: "agent-routing.update",
+      resource_type: "bridge-service",
+      resource_id: serviceId,
+      result: "success",
+      metadata: { serviceId },
+    });
+    return c.json({ service: mapAgentRoutingService(updated as Record<string, unknown>) });
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+  }
+});
+
+app.get("/api/admin/design-systems", async (c) => {
+  try {
+    const organizationId = adminOrganizationId(c);
+    if (!organizationId) return c.json({ error: "organization-required" }, 400);
+    const options = listDesignSystemOptions();
+    const active = activeDesignSystemOption(process.cwd(), options);
+    const supabase = getSupabaseServerClient(DATA_DIR);
+    const { data, error } = await supabase
+      .from("bridge_services")
+      .select("service_id,service_instance_id,name,description,base_url,admin_url,enabled,manifest")
+      .eq("organization_id", organizationId)
+      .eq("enabled", true)
+      .order("name", { ascending: true });
+    if (error) throw error;
+    return c.json({
+      active,
+      available: options,
+      generatedAt: new Date().toISOString(),
+      services: (data ?? []).map((row: Record<string, unknown>) => mapDesignSystemService(row, active, options)),
+    });
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+  }
+});
+
+app.put("/api/admin/design-systems/services", async (c) => {
+  try {
+    const organizationId = adminOrganizationId(c);
+    if (!organizationId) return c.json({ error: "organization-required" }, 400);
+    const options = listDesignSystemOptions();
+    const active = activeDesignSystemOption(process.cwd(), options);
+    const body = (await c.req.json().catch(() => ({}))) as DesignSystemServicePatch;
+    const { option, serviceIds } = normalizeDesignSystemPatch(body, options);
+    const supabase = getSupabaseServerClient(DATA_DIR);
+    let query = supabase
+      .from("bridge_services")
+      .select("service_id,service_instance_id,name,description,base_url,admin_url,enabled,manifest")
+      .eq("organization_id", organizationId)
+      .eq("enabled", true);
+    if (serviceIds?.length) query = query.in("service_id", serviceIds);
+    const { data: rows, error: readError } = await query;
+    if (readError) throw readError;
+    const appliedAt = new Date().toISOString();
+    const updatedRows: Record<string, unknown>[] = [];
+    for (const row of rows ?? []) {
+      const manifest = row.manifest && typeof row.manifest === "object" && !Array.isArray(row.manifest)
+        ? row.manifest as Record<string, unknown>
+        : {};
+      const nextManifest = applyServiceDesignSystemManifestPatch(manifest, option, appliedAt);
+      const { data: updated, error: updateError } = await supabase
+        .from("bridge_services")
+        .update({ manifest: nextManifest, updated_at: appliedAt })
+        .eq("organization_id", organizationId)
+        .eq("service_id", row.service_id)
+        .select("service_id,service_instance_id,name,description,base_url,admin_url,enabled,manifest")
+        .single();
+      if (updateError) throw updateError;
+      updatedRows.push(updated as Record<string, unknown>);
+    }
+    audit(c, {
+      action: "design-system.apply",
+      resource_type: "bridge-service",
+      result: "success",
+      metadata: {
+        designSystemId: option.id,
+        serviceIds: updatedRows.map((row) => row.service_id),
+      },
+    });
+    return c.json({
+      active,
+      applied: option,
+      generatedAt: new Date().toISOString(),
+      services: updatedRows.map((row) => mapDesignSystemService(row, active, options)),
+    });
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+  }
+});
+
 // ---------------------------------------------------------------------------
 // /api/agents
 // ---------------------------------------------------------------------------
 app.get("/api/agents", async (c) => {
-  const status = await getAgentStatus();
-  return c.json({ agents: [status] });
+  const status = await getAgentStatus(loadAppConfig(DATA_DIR));
+  return c.json({ agents: [status], localModelRecommendation: recommendLocalModel() });
 });
 
 // ---------------------------------------------------------------------------
@@ -399,6 +625,8 @@ interface StartRunBody {
   prompt: string;
   tag?: string;
   model?: string;
+  agentProvider?: AgentProvider;
+  localModel?: string;
   addDirs?: string[];
   allowedTools?: string[];
   maxTurns?: number;
@@ -435,11 +663,22 @@ app.post("/api/runs", async (c) => {
     return c.json({ error: (err as Error).message }, 400);
   }
   try {
+    const modelOptions = codexRunModelOptions(cfg, {
+      agentProvider: body.agentProvider,
+      model: body.model,
+      localModel: body.localModel,
+    });
+    await assertAgentProviderReady({
+      agentProvider: modelOptions.agentProvider,
+      localModel: modelOptions.localModel ?? cfg.localModel,
+    });
     const run = startRun({
       prompt: body.prompt,
       cwd,
       tag: body.tag,
-      model: body.model ?? cfg.model,
+      agentProvider: modelOptions.agentProvider,
+      model: modelOptions.model,
+      localModel: modelOptions.localModel,
       addDirs,
       allowedTools: body.allowedTools,
       maxTurns: body.maxTurns,
@@ -449,7 +688,11 @@ app.post("/api/runs", async (c) => {
       resource_type: "run",
       resource_id: run.id,
       result: "success",
-      metadata: { tag: body.tag, model: body.model ?? cfg.model },
+      metadata: {
+        tag: body.tag,
+        agentProvider: modelOptions.agentProvider,
+        model: modelOptions.selectedModel,
+      },
     });
     return c.json({ runId: run.id });
   } catch (err) {

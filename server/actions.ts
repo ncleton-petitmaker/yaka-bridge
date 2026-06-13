@@ -1,11 +1,13 @@
 import { z } from "zod";
 import { existsSync } from "node:fs";
 import { findClaudeBin } from "./agents.js";
-import { getAgentStatus } from "./agents-status.js";
+import { assertAgentProviderReady, getAgentStatus } from "./agents-status.js";
 import {
   AVAILABLE_MODELS,
+  codexRunModelOptions,
   loadAppConfig,
   saveAppConfig,
+  type AgentProvider,
   type AppConfig,
 } from "./app-config.js";
 import {
@@ -103,6 +105,8 @@ const StartRunSchema = z.object({
   prompt: z.string().min(1),
   tag: z.string().optional(),
   model: z.string().optional(),
+  agentProvider: z.enum(["codex-cloud", "codex-lmstudio"]).optional(),
+  localModel: z.string().optional(),
   addDirs: z.array(z.string()).optional(),
   allowedTools: z.array(z.string()).optional(),
   maxTurns: z.number().int().min(1).max(100).optional(),
@@ -112,7 +116,9 @@ const StartRunSchema = z.object({
 type StartRunInput = z.infer<typeof StartRunSchema>;
 
 const UpdateAppConfigSchema = z.object({
+  agentProvider: z.enum(["codex-cloud", "codex-lmstudio"]).optional(),
   model: z.string().optional(),
+  localModel: z.string().optional(),
   databaseProvider: z.literal("supabase").optional(),
   supabaseUrl: z.string().url().or(z.literal("")).optional(),
   supabaseAnonKey: z.string().optional(),
@@ -172,10 +178,10 @@ export const appActions = {
   },
   "agents.status": {
     id: "agents.status",
-    description: "Return local Claude Code CLI status.",
+    description: "Return ChatGPT Codex and LM Studio status.",
     inputSchema: EmptySchema,
     inputJsonSchema: objectSchema({}),
-    handler: async () => ({ agents: [await getAgentStatus()] }),
+    handler: async (ctx: ActionContext) => ({ agents: [await getAgentStatus(loadAppConfig(ctx.dataDir))] }),
   },
   "appConfig.get": {
     id: "appConfig.get",
@@ -193,7 +199,9 @@ export const appActions = {
     description: "Update app configuration. Same operation as the settings UI.",
     inputSchema: UpdateAppConfigSchema,
     inputJsonSchema: objectSchema({
+      agentProvider: { type: "string", enum: ["codex-cloud", "codex-lmstudio"] },
       model: { type: "string" },
+      localModel: { type: "string" },
       databaseProvider: { type: "string", enum: ["supabase"] },
       supabaseUrl: { type: "string" },
       supabaseAnonKey: { type: "string" },
@@ -220,7 +228,7 @@ export const appActions = {
         },
       },
     }),
-    audit: { action: "app-config.update", resourceType: "app-config" },
+    audit: { action: "app-config.update", resourceType: "app-config", adminOnly: true },
     handler: (ctx: ActionContext, input: Partial<AppConfig>) => {
       const config = saveAppConfig(ctx.dataDir, input);
       return { config };
@@ -234,6 +242,8 @@ export const appActions = {
       prompt: { type: "string" },
       tag: { type: "string" },
       model: { type: "string" },
+      agentProvider: { type: "string", enum: ["codex-cloud", "codex-lmstudio"] },
+      localModel: { type: "string" },
       addDirs: { type: "array", items: { type: "string" } },
       allowedTools: { type: "array", items: { type: "string" } },
       maxTurns: { type: "number" },
@@ -241,16 +251,27 @@ export const appActions = {
     }, ["prompt"]),
     requiredAnyScopes: ["codex:run"],
     audit: { action: "run.start", resourceType: "run" },
-    handler: (ctx: ActionContext, input: StartRunInput) => {
+    handler: async (ctx: ActionContext, input: StartRunInput) => {
       const cfg = loadAppConfig(ctx.dataDir);
       const roots = allowedRunRoots(ctx.dataDir, cfg);
       const cwd = input.cwd ? assertInsideRoots(input.cwd, roots, input.cwd) : ctx.dataDir;
       const addDirs = input.addDirs?.map((dir) => assertInsideRoots(dir, roots, dir));
+      const modelOptions = codexRunModelOptions(cfg, {
+        agentProvider: input.agentProvider as AgentProvider | undefined,
+        model: input.model,
+        localModel: input.localModel,
+      });
+      await assertAgentProviderReady({
+        agentProvider: modelOptions.agentProvider,
+        localModel: modelOptions.localModel ?? cfg.localModel,
+      });
       const run = startRun({
         prompt: input.prompt,
         cwd,
         tag: input.tag,
-        model: input.model ?? cfg.model,
+        agentProvider: modelOptions.agentProvider,
+        model: modelOptions.model,
+        localModel: modelOptions.localModel,
         addDirs,
         allowedTools: input.allowedTools,
         maxTurns: input.maxTurns,

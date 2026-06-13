@@ -225,6 +225,12 @@ docker run --rm \
   alpine tar -czf /backup/storage-$(date +%Y%m%d-%H%M%S).tar.gz /storage
 ```
 
+Add retention before enabling the cron job. Storage archives can be much larger
+than Postgres dumps, especially when installer/update buckets live in Supabase
+Storage. On small VPS disks, either export storage backups off-host or keep only
+one local `storage-*.tar.gz` before creating the next one; otherwise the backup
+job can fill `/var/lib/docker` and stop Postgres.
+
 Keep backups outside the VPS as well, for example encrypted object storage.
 Document the restore command used for each customer and test it after the
 first deployment and after major migrations.
