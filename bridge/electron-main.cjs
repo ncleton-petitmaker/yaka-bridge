@@ -174,7 +174,7 @@ app.whenReady().then(() => {
     refreshExternalStatuses();
     scheduleLocalAiStatusRefresh();
     scheduleCodexStatusRefresh();
-    void ensureAdminProvisioning(loadConfig(), { silent: true }).finally(() => registerVoiceShortcut());
+    scheduleStartupAdminProvisioning();
     setInterval(refreshExternalStatuses, 15_000);
     setInterval(scheduleLocalAiStatusRefresh, 15_000);
   });
@@ -677,7 +677,7 @@ function showTextInputWindow({ title, label, value, helper }) {
       center: true,
       title,
       backgroundColor: design.bg,
-      show: true,
+      show: false,
       webPreferences: {
         nodeIntegration: true,
         contextIsolation: false,
@@ -701,8 +701,16 @@ function showTextInputWindow({ title, label, value, helper }) {
       if (payload?.action === "cancel") return finish(null);
       if (payload?.action === "submit") return finish(String(payload.value || ""));
     });
+    win.once("ready-to-show", () => {
+      if (!win.isDestroyed()) win.show();
+    });
+    win.webContents.on("did-fail-load", (_event, _code, description) => {
+      bridgeError = `Fenêtre ${title} indisponible: ${description}`;
+      pushActivity(bridgeError);
+      finish(null);
+    });
     win.on("closed", () => finish(null));
-    win.loadURL(`data:text/html;charset=utf-8;base64,${Buffer.from(textInputHtml({ title, label, value, helper, channel, design }), "utf8").toString("base64")}`);
+    win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(textInputHtml({ title, label, value, helper, channel, design }))}`);
   });
 }
 
@@ -2133,14 +2141,27 @@ function startCloudHeartbeat() {
   cloudHeartbeatInterval = setInterval(() => void beat(), intervalMs);
 }
 
+function scheduleStartupAdminProvisioning() {
+  setTimeout(async () => {
+    if (isQuitting) return;
+    try {
+      await syncServices({ silent: true, reason: "startup" });
+      await ensureAdminProvisioning(loadConfig(), { silent: true, reason: "startup" });
+    } finally {
+      registerVoiceShortcut();
+    }
+  }, 1_000);
+}
+
 async function syncServices(options = {}) {
   const silent = options.silent === true;
+  const reason = options.reason || "sync";
   if (runtimeHandle?.syncOnce) {
     await runtimeHandle.syncOnce().catch((err) => {
       bridgeError = err instanceof Error ? err.message : String(err);
     });
     startAutoUpdates({ reconfigure: true });
-    await ensureAdminProvisioning(loadConfig(), { silent });
+    await ensureAdminProvisioning(loadConfig(), { silent, reason });
     registerVoiceShortcut();
     if (!silent) {
       pushActivity("Synchronisation demandée.");
@@ -2377,7 +2398,7 @@ async function syncServicesFromControlPlane(cfg) {
   if (res.macInstallerUrl) cfg.macInstallerUrl = res.macInstallerUrl;
   bridgeError = res.error || null;
   saveConfig(cfg);
-  await ensureAdminProvisioning(cfg, { silent: true });
+  await ensureAdminProvisioning(loadConfig(), { silent: true, reason: "control-plane-sync" });
   registerVoiceShortcut();
   if (cfg.updateBaseUrl && (cfg.updateBaseUrl !== previousUpdateBaseUrl || bridgeUpdateRequired(cfg))) startAutoUpdates({ reconfigure: true });
   void flushPendingBrowserSession();

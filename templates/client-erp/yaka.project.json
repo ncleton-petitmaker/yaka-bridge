@@ -8,9 +8,9 @@
     "repository": "github.com/ncleton-petitmaker/yaka-bridge",
     "channel": "stable",
     "packages": {
-      "@ncleton-petitmaker/yaka-bridge-desktop": "0.0.46",
-      "@ncleton-petitmaker/yaka-erp-shell": "0.0.46",
-      "@ncleton-petitmaker/yaka-module-sdk": "0.0.46"
+      "@ncleton-petitmaker/yaka-bridge-desktop": "0.0.48",
+      "@ncleton-petitmaker/yaka-erp-shell": "0.0.48",
+      "@ncleton-petitmaker/yaka-module-sdk": "0.0.48"
     }
   },
   "bridge": {

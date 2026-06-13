@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
+import os from "node:os";
+import { join } from "node:path";
 
 const DEFAULT_MODEL = "ibm/granite-4-micro";
 const BASE_URL = "http://127.0.0.1:1234/v1";
@@ -106,9 +108,31 @@ function requireBin(name) {
 }
 
 function findBin(name) {
+  for (const candidate of binCandidates(name)) {
+    const probe = run(candidate, ["--version"], 4_000, { quiet: true });
+    if (probe.status === 0) return candidate;
+  }
   const probe = run(process.platform === "win32" ? "where.exe" : "which", [name], 4_000, { quiet: true });
   if (probe.status !== 0 || !probe.stdout.trim()) return null;
   return probe.stdout.trim().split(/\r?\n/)[0];
+}
+
+function binCandidates(name) {
+  if (name !== "lms") return [name];
+  if (process.platform === "win32") {
+    return [
+      "lms",
+      "lms.exe",
+      process.env.USERPROFILE ? join(process.env.USERPROFILE, ".lmstudio", "bin", "lms.exe") : null,
+      process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, "Programs", "LM Studio", "lms.exe") : null,
+    ].filter(Boolean);
+  }
+  return [
+    "lms",
+    join(os.homedir(), ".lmstudio", "bin", "lms"),
+    "/opt/homebrew/bin/lms",
+    "/usr/local/bin/lms",
+  ];
 }
 
 function run(command, commandArgs, timeout, options = {}) {

@@ -1,6 +1,6 @@
 {
   "name": "@ncleton-petitmaker/yaka-bridge-desktop",
-  "version": "0.0.46",
+  "version": "0.0.48",
   "private": false,
   "type": "module",
   "description": "Yaka Bridge desktop shell, installers and local agent provisioning.",
