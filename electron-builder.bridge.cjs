@@ -11,6 +11,9 @@ module.exports = {
     output: "release-bridge",
   },
   asar: true,
+  asarUnpack: [
+    "dist/bridge/bridge-voice/**",
+  ],
   files: [
     "dist/bridge/**/*",
     "data-template/**/*",

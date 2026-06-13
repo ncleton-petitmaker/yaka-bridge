@@ -173,8 +173,7 @@ app.whenReady().then(() => {
     refreshExternalStatuses();
     scheduleLocalAiStatusRefresh();
     scheduleCodexStatusRefresh();
-    registerVoiceShortcut();
-    void ensureAdminProvisioning(loadConfig(), { silent: true });
+    void ensureAdminProvisioning(loadConfig(), { silent: true }).finally(() => registerVoiceShortcut());
     setInterval(refreshExternalStatuses, 15_000);
     setInterval(scheduleLocalAiStatusRefresh, 15_000);
   });
@@ -445,6 +444,8 @@ function updateTrayMenu() {
   const state = localStatusPayload();
   const connectedCount = state.services.filter((service) => service.status === "connected" || service.status === "active").length;
   const codexLabel = state.codex?.ready ? "ChatGPT Codex prêt" : `ChatGPT Codex: ${state.codex?.label || "à vérifier"}`;
+  const localAiLabel = state.localAi?.ready ? "Moteur local prêt" : `Préparer le moteur local`;
+  const voiceLabel = state.voice?.ready ? "Push-to-talk prêt" : "Préparer le push-to-talk";
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: "Afficher Bridge", click: () => showStatusWindow({ focus: true }) },
     {
@@ -456,6 +457,10 @@ function updateTrayMenu() {
     { label: updateState.enabled ? `Mises à jour: ${updateState.status}` : "Mises à jour: non configurées", enabled: false },
     { type: "separator" },
     { label: "Synchroniser", click: () => syncServices() },
+    { label: localAiLabel, click: () => prepareLocalAiFromMenu() },
+    { label: voiceLabel, click: () => prepareVoiceFromMenu() },
+    { label: "Changer le raccourci push-to-talk...", enabled: Boolean(state.voice?.allowUserShortcutOverride), click: () => changeVoiceShortcutFromMenu() },
+    { label: state.voice?.recording ? "Arrêter la dictée" : "Démarrer la dictée", enabled: Boolean(state.voice?.enabled), click: () => toggleVoiceDictation() },
     {
       label: "Quitter",
       click: () => {
@@ -504,6 +509,39 @@ function updateApplicationMenu() {
       ],
     },
     {
+      label: "Moteur local",
+      submenu: [
+        { label: state.localAi?.ready ? "LM Studio prêt" : state.localAi?.label || "LM Studio à préparer", enabled: false },
+        { label: `Modèle admin: ${state.localAi?.adminModel || state.localAi?.model || "-"}`, enabled: false },
+        { type: "separator" },
+        { label: "Installer / préparer LM Studio et le modèle", click: () => prepareLocalAiFromMenu() },
+        { label: "Tester le statut LM Studio", click: () => { scheduleLocalAiStatusRefresh(); refreshStatusWindow(); updateTrayMenu(); } },
+        {
+          label: "Changer le modèle local...",
+          enabled: Boolean(state.localAi?.allowUserModelOverride),
+          click: () => changeLocalModelFromMenu(),
+        },
+      ],
+    },
+    {
+      label: "Push-to-talk",
+      submenu: [
+        { label: state.voice?.label || "Push-to-talk à vérifier", enabled: false },
+        { label: `Modèle admin: ${state.voice?.model || "-"}`, enabled: false },
+        { label: `Raccourci: ${state.voice?.shortcut || "-"}`, enabled: false },
+        { type: "separator" },
+        { label: "Installer / préparer la dictée locale", click: () => prepareVoiceFromMenu() },
+        {
+          label: "Changer le raccourci...",
+          enabled: Boolean(state.voice?.allowUserShortcutOverride),
+          click: () => changeVoiceShortcutFromMenu(),
+        },
+        { label: state.voice?.recording ? "Arrêter la dictée" : "Démarrer la dictée", enabled: Boolean(state.voice?.enabled), click: () => toggleVoiceDictation() },
+        { label: "Tester le micro", enabled: Boolean(state.voice?.enabled), click: () => runVoiceSidecar(["status"], 2500) },
+        { label: "Tester l'animation", click: () => showVoiceOverlay() },
+      ],
+    },
+    {
       label: "Activité",
       submenu: activityItems.length ? activityItems : [{ label: "Aucune activité récente", enabled: false }],
     },
@@ -531,6 +569,169 @@ function showAboutBridge() {
     buttons: ["OK"],
     defaultId: 0,
   });
+}
+
+async function prepareLocalAiFromMenu() {
+  const cfg = loadConfig();
+  const policy = normalizeAiPolicy(cfg.aiPolicy).localAi;
+  try {
+    const result = await runLocalAiSetup({
+      ...policy,
+      enabled: true,
+      installRequired: true,
+      model: effectiveLocalAiModel(policy, cfg.defaultLocalModel),
+    });
+    localAiStatusCache = await getLocalAiStatus(loadConfig({ hydrateSecrets: false }));
+    pushActivity(result?.ok ? "Moteur local préparé." : "Préparation du moteur local interrompue.");
+    refreshStatusWindow();
+    updateTrayMenu();
+    return result;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    bridgeError = message;
+    pushActivity(`Préparation du moteur local échouée: ${message}`);
+    refreshStatusWindow();
+    updateTrayMenu();
+    return { ok: false, error: message };
+  }
+}
+
+async function prepareVoiceFromMenu() {
+  const cfg = loadConfig();
+  const policy = normalizeAiPolicy(cfg.aiPolicy).voice;
+  try {
+    const result = await runVoiceSetup({
+      ...policy,
+      enabled: true,
+      installRequired: true,
+    });
+    if (result?.ok) registerVoiceShortcut();
+    pushActivity(result?.ok ? "Push-to-talk local préparé." : "Préparation du push-to-talk interrompue.");
+    refreshStatusWindow();
+    updateTrayMenu();
+    return result;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    bridgeError = message;
+    pushActivity(`Préparation du push-to-talk échouée: ${message}`);
+    refreshStatusWindow();
+    updateTrayMenu();
+    return { ok: false, error: message };
+  }
+}
+
+async function changeVoiceShortcutFromMenu() {
+  const cfg = loadConfig();
+  const voice = getVoiceStatus(cfg);
+  if (!voice.allowUserShortcutOverride) return { ok: false, error: "shortcut-locked-by-admin" };
+  const nextShortcut = await showTextInputWindow({
+    title: "Raccourci push-to-talk",
+    label: "Raccourci",
+    value: voice.shortcut || "CommandOrControl+Shift+Space",
+    helper: "Exemple: CommandOrControl+Shift+Space",
+  });
+  const clean = String(nextShortcut || "").trim().slice(0, 120);
+  if (!clean) return { ok: false, cancelled: true };
+  const prefs = saveVoicePrefs({ shortcut: clean });
+  registerVoiceShortcut();
+  pushActivity(`Raccourci push-to-talk configuré: ${prefs.shortcut}`);
+  refreshStatusWindow();
+  updateTrayMenu();
+  return { ok: true, shortcut: prefs.shortcut };
+}
+
+async function changeLocalModelFromMenu() {
+  const cfg = loadConfig();
+  const localAi = normalizeAiPolicy(cfg.aiPolicy).localAi;
+  if (!localAi.allowUserModelOverride) return { ok: false, error: "model-locked-by-admin" };
+  const current = effectiveLocalAiModel(localAi, cfg.defaultLocalModel);
+  const nextModel = await showTextInputWindow({
+    title: "Modèle local",
+    label: "Modèle LM Studio",
+    value: current,
+    helper: "Ce choix reste discret et n'apparaît que si l'admin autorise l'override.",
+  });
+  const clean = cleanLocalAiModel(nextModel);
+  if (!clean) return { ok: false, cancelled: true };
+  const prefs = saveLocalAiPrefs({ localModel: clean });
+  cfg.defaultLocalModel = clean;
+  saveConfig(cfg);
+  await ensureAdminProvisioning(loadConfig(), { silent: false });
+  localAiStatusCache = await getLocalAiStatus(loadConfig({ hydrateSecrets: false }));
+  restartRuntime();
+  pushActivity(`Modèle local utilisateur configuré: ${prefs.localModel}`);
+  refreshStatusWindow();
+  updateTrayMenu();
+  return { ok: true, localModel: prefs.localModel };
+}
+
+function showTextInputWindow({ title, label, value, helper }) {
+  const design = loadBridgeDesign();
+  return new Promise((resolve) => {
+    const win = new BrowserWindow({
+      width: 460,
+      height: 260,
+      resizable: false,
+      minimizable: false,
+      maximizable: false,
+      center: true,
+      title,
+      backgroundColor: design.bg,
+      show: true,
+      webPreferences: {
+        nodeIntegration: true,
+        contextIsolation: false,
+      },
+    });
+    win.setMenuBarVisibility(false);
+    const channel = `bridge-text-input-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      ipcMain.removeAllListeners(channel);
+      try {
+        if (!win.isDestroyed()) win.close();
+      } catch {
+        // ignore
+      }
+      resolve(result);
+    };
+    ipcMain.on(channel, (_event, payload) => {
+      if (payload?.action === "cancel") return finish(null);
+      if (payload?.action === "submit") return finish(String(payload.value || ""));
+    });
+    win.on("closed", () => finish(null));
+    win.loadURL(`data:text/html;charset=utf-8;base64,${Buffer.from(textInputHtml({ title, label, value, helper, channel, design }), "utf8").toString("base64")}`);
+  });
+}
+
+function textInputHtml({ title, label, value, helper, channel, design }) {
+  return `<!doctype html><html lang="fr"><head><meta charset="utf-8" /><title>${escapeHtml(title)}</title><style>
+  ${bridgeDesignCss(design)}
+  *{box-sizing:border-box}body{margin:0;height:100vh;background:var(--bg);color:var(--text);font-family:var(--font-sans);overflow:hidden}
+  header{height:72px;padding:18px 24px;background:var(--panel);border-bottom:1px solid var(--border)}
+  h1{font-size:17px;line-height:1.2;margin:0}main{padding:22px 24px}
+  label{display:grid;gap:8px;font-size:13px;font-weight:700}
+  input{width:100%;height:38px;border-radius:7px;border:1px solid var(--border);background:var(--panel);color:var(--text);font:inherit;padding:0 10px}
+  .helper{margin-top:8px;color:var(--muted);font-size:12px;line-height:1.45}
+  footer{height:64px;padding:14px 24px;background:var(--panel);border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:10px}
+  button{border:0;border-radius:7px;padding:8px 16px;font:inherit;font-size:13px;font-weight:650;cursor:pointer}
+  .primary{background:var(--accent);color:var(--on-accent)}.secondary{background:var(--secondary);color:var(--text)}
+  </style></head><body>
+  <header><h1>${escapeHtml(title)}</h1></header>
+  <main><label>${escapeHtml(label)}<input id="value" value="${escapeHtml(value || "")}" autofocus /></label><div class="helper">${escapeHtml(helper || "")}</div></main>
+  <footer><button class="secondary" id="cancel">Annuler</button><button class="primary" id="submit">Enregistrer</button></footer>
+  <script>
+    const { ipcRenderer } = require("electron");
+    const channel = ${JSON.stringify(channel)};
+    const input = document.getElementById('value');
+    document.getElementById('cancel').addEventListener('click', () => ipcRenderer.send(channel, { action: 'cancel' }));
+    document.getElementById('submit').addEventListener('click', () => ipcRenderer.send(channel, { action: 'submit', value: input.value }));
+    input.addEventListener('keydown', (event) => { if (event.key === 'Enter') ipcRenderer.send(channel, { action: 'submit', value: input.value }); if (event.key === 'Escape') ipcRenderer.send(channel, { action: 'cancel' }); });
+    input.focus();
+    input.select();
+  </script></body></html>`;
 }
 
 function startRuntimeIfAvailable() {
@@ -796,8 +997,13 @@ function saveLocalAiPrefs(partial) {
 
 function findVoiceSidecar() {
   const exe = process.platform === "win32" ? "bridge-voice.exe" : "bridge-voice";
+  const unpackedDir = __dirname.includes("app.asar")
+    ? __dirname.replace("app.asar", "app.asar.unpacked")
+    : null;
   const candidates = [
     process.resourcesPath ? path.join(process.resourcesPath, "bridge-voice", process.platform, exe) : null,
+    process.resourcesPath ? path.join(process.resourcesPath, "app.asar.unpacked", "dist", "bridge", "bridge-voice", process.platform, exe) : null,
+    unpackedDir ? path.join(unpackedDir, "bridge-voice", process.platform, exe) : null,
     path.join(__dirname, "bridge-voice", process.platform, exe),
     path.join(__dirname, "..", "bridge-voice", process.platform, exe),
     path.join(process.cwd(), "bridge-voice", "target", "release", exe),
@@ -1893,6 +2099,7 @@ async function syncServices(options = {}) {
     });
     startAutoUpdates({ reconfigure: true });
     await ensureAdminProvisioning(loadConfig(), { silent });
+    registerVoiceShortcut();
     if (!silent) {
       pushActivity("Synchronisation demandée.");
       refreshStatusWindow();
@@ -2128,8 +2335,8 @@ async function syncServicesFromControlPlane(cfg) {
   if (res.macInstallerUrl) cfg.macInstallerUrl = res.macInstallerUrl;
   bridgeError = res.error || null;
   saveConfig(cfg);
-  registerVoiceShortcut();
   await ensureAdminProvisioning(cfg, { silent: true });
+  registerVoiceShortcut();
   if (cfg.updateBaseUrl && (cfg.updateBaseUrl !== previousUpdateBaseUrl || bridgeUpdateRequired(cfg))) startAutoUpdates({ reconfigure: true });
   void flushPendingBrowserSession();
   refreshStatusWindow();

@@ -11,7 +11,7 @@ import {
   applyAgentRoutingManifestPatch,
   mapAgentRoutingService,
 } from "../../server/agent-routing-admin";
-import { bridgeAiPolicyFromManifests } from "../../bridge/ai-policy";
+import { bridgeAiPolicyFromManifests, normalizeBridgeAiPolicy } from "../../bridge/ai-policy";
 import { normalizeBridgeConfig } from "../../bridge/config";
 import type { BridgeConfig, BridgeServiceInstance, CloudBridgeJob } from "../../bridge/types";
 
@@ -265,6 +265,19 @@ test("bridge AI policy is normalized and persisted in service manifests", () => 
   assert.equal(policy.voice.enabled, true);
   assert.equal(policy.voice.model, "parakeet-tdt-0.6b-v3-int8");
   assert.equal(policy.voice.allowUserShortcutOverride, true);
+});
+
+test("admin-enabled local AI and voice imply installation on existing Bridge configs", () => {
+  const policy = normalizeBridgeAiPolicy({
+    localAi: { enabled: true, model: "ibm/granite-4-micro" },
+    voice: { enabled: true },
+  });
+  assert.equal(policy.localAi.enabled, true);
+  assert.equal(policy.localAi.installRequired, true);
+  assert.equal(policy.localAi.model, "ibm/granite-4-micro");
+  assert.equal(policy.voice.enabled, true);
+  assert.equal(policy.voice.installRequired, true);
+  assert.equal(policy.voice.model, "parakeet-tdt-0.6b-v3-int8");
 });
 
 test("bridge config preserves local model override only when admin allows it", () => {
