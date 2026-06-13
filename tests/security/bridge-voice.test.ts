@@ -48,6 +48,15 @@ test("bridge-voice builds and exposes bounded JSON diagnostics", (t) => {
   assert.equal(shortcut.ok, true);
   assert.equal(shortcut.event, "shortcut-valid");
 
+  const electronShortcut = runVoice([
+    "validate-shortcut",
+    "--shortcut",
+    "CommandOrControl+Shift+Space",
+  ]);
+  assert.equal(electronShortcut.ok, true);
+  assert.equal(electronShortcut.event, "shortcut-valid");
+  assert.match(String(electronShortcut.shortcut), /^(command|ctrl)\+shift\+space$/);
+
   const devices = runVoice(["devices"]);
   assert.equal(typeof devices.ok, "boolean");
 

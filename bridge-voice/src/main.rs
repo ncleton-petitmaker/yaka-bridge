@@ -674,7 +674,8 @@ fn paste_json() -> Result<String, String> {
 }
 
 fn validate_shortcut_json(shortcut: Option<String>) -> Result<String, String> {
-    let shortcut = shortcut.ok_or_else(|| "--shortcut required".to_string())?;
+    let shortcut =
+        normalize_shortcut_aliases(&shortcut.ok_or_else(|| "--shortcut required".to_string())?);
     let _: Hotkey = shortcut
         .parse()
         .map_err(|e| format!("invalid shortcut '{}': {e}", shortcut))?;
@@ -685,7 +686,8 @@ fn validate_shortcut_json(shortcut: Option<String>) -> Result<String, String> {
 }
 
 fn watch_shortcut(shortcut: Option<String>) -> Result<String, String> {
-    let shortcut = shortcut.ok_or_else(|| "--shortcut required".to_string())?;
+    let shortcut =
+        normalize_shortcut_aliases(&shortcut.ok_or_else(|| "--shortcut required".to_string())?);
     let hotkey: Hotkey = shortcut
         .parse()
         .map_err(|e| format!("invalid shortcut '{}': {e}", shortcut))?;
@@ -714,6 +716,38 @@ fn watch_shortcut(shortcut: Option<String>) -> Result<String, String> {
         }
         thread::sleep(Duration::from_millis(10));
     }
+}
+
+fn normalize_shortcut_aliases(shortcut: &str) -> String {
+    shortcut
+        .split('+')
+        .map(|part| {
+            let trimmed = part.trim();
+            let lower = trimmed.to_ascii_lowercase();
+            match lower.as_str() {
+                "commandorcontrol" | "cmdorctrl" | "cmdorcontrol" | "controlorcommand" => {
+                    if cfg!(target_os = "macos") {
+                        "command".to_string()
+                    } else {
+                        "ctrl".to_string()
+                    }
+                }
+                "control" => "ctrl".to_string(),
+                "option" => {
+                    if cfg!(target_os = "macos") {
+                        "option".to_string()
+                    } else {
+                        "alt".to_string()
+                    }
+                }
+                "return" => "enter".to_string(),
+                "esc" => "escape".to_string(),
+                _ => lower,
+            }
+        })
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("+")
 }
 
 fn send_paste_ctrl_v(enigo: &mut Enigo) -> Result<(), String> {
