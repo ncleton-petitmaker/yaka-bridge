@@ -51,7 +51,9 @@ when a client is stale, lacks its project contract, vendors platform core files
 or has local Bridge artifacts in `release-bridge`.
 
 Bridge artifacts for clients must be produced by CI from the pinned platform
-package versions. Local DMGs are debug outputs only.
+package versions in `yaka-bridge`. Client repos should expose diagnosis and
+upgrade checks, not local `bridge:pack` commands. Local DMGs are debug outputs
+only.
 
 ## Release flow
 
