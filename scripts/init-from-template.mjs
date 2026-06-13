@@ -203,7 +203,7 @@ function walk(dir, rootDir, ignorePaths, out = []) {
   return out;
 }
 
-function applyReplacements(content, values) {
+function applyReplacements(content, values, options = {}) {
   let out = content;
   let count = 0;
   for (const [key, val] of Object.entries(values)) {
@@ -214,7 +214,7 @@ function applyReplacements(content, values) {
     }
   }
   const demoRuntimeDefaults = {
-    "yaka-bridge": values.APP_NAME_KEBAB,
+    ...(options.preservePlatformReferences ? {} : { "yaka-bridge": values.APP_NAME_KEBAB }),
     "Bridge ERP Demo": values.APP_NAME,
     "bridge-erp-demo": values.APP_NAME_KEBAB,
     "Template ERP modulaire cloud/bridge": values.DOMAIN_BRIEF,
@@ -240,7 +240,10 @@ function processFile(path, values, fileExtensions) {
     return null;
   }
   if (!raw.includes("{{")) return null;
-  const { content, count } = applyReplacements(raw, values);
+  const rel = relative(ROOT, path).replace(/\\/g, "/");
+  const { content, count } = applyReplacements(raw, values, {
+    preservePlatformReferences: rel.startsWith("templates/client-erp/"),
+  });
   if (count === 0 || content === raw) return null;
   writeFileSync(path, content, "utf8");
   return count;
