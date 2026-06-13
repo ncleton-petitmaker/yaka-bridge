@@ -1,0 +1,23 @@
+{
+  "name": "@ncleton-petitmaker/yaka-module-sdk",
+  "version": "0.0.46",
+  "private": false,
+  "type": "module",
+  "description": "Yaka module manifest, action and lockfile contract.",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js"
+  },
+  "files": [
+    "index.js",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ncleton-petitmaker/yaka-bridge.git",
+    "directory": "packages/module-sdk"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  }
+}

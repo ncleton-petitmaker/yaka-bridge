@@ -1,4 +1,4 @@
-import { mkdir, copyFile } from "node:fs/promises";
+import { mkdir, copyFile, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -38,8 +38,32 @@ if (existsSync(resolve(root, "THIRD_PARTY_NOTICES.md"))) {
 }
 
 await buildVoiceSidecar();
+await writeBuildMetadata();
 
 console.log(`[bridge] bundle écrit dans ${outdir}`);
+
+async function writeBuildMetadata() {
+  const pkg = JSON.parse(await readFile(resolve(root, "package.json"), "utf8"));
+  const project = JSON.parse(await readFile(resolve(root, "yaka.project.json"), "utf8"));
+  const commit = spawnSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8", timeout: 3000 });
+  const branch = spawnSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: root, encoding: "utf8", timeout: 3000 });
+  const metadata = {
+    schema: "yaka/bridge-build.v1",
+    builtAt: new Date().toISOString(),
+    platform: {
+      repository: project.repository,
+      version: pkg.version,
+      commit: commit.status === 0 ? commit.stdout.trim() : "",
+      branch: branch.status === 0 ? branch.stdout.trim() : "",
+    },
+    target: {
+      platform: targetPlatform,
+      voiceSidecarRequired: requireVoiceSidecar,
+    },
+    packages: Object.fromEntries((project.packages || []).map((name) => [name, pkg.version])),
+  };
+  await writeFile(resolve(outdir, "yaka-build.json"), `${JSON.stringify(metadata, null, 2)}\n`, "utf8");
+}
 
 async function buildVoiceSidecar() {
   const manifest = resolve(root, "bridge-voice", "Cargo.toml");

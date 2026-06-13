@@ -1,0 +1,23 @@
+{
+  "name": "@ncleton-petitmaker/yaka-factory",
+  "version": "0.0.46",
+  "private": false,
+  "type": "module",
+  "description": "Yaka project and module factory contract.",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js"
+  },
+  "files": [
+    "index.js",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ncleton-petitmaker/yaka-bridge.git",
+    "directory": "packages/factory"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  }
+}

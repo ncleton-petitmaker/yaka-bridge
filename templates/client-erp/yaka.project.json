@@ -1,0 +1,23 @@
+{
+  "schema": "yaka/project.v1",
+  "kind": "client-erp",
+  "clientSlug": "{{CLIENT_SLUG}}",
+  "owner": "{{GITHUB_OWNER}}",
+  "repository": "github.com/{{GITHUB_OWNER}}/{{CLIENT_SLUG}}-erp",
+  "platform": {
+    "repository": "github.com/ncleton-petitmaker/yaka-bridge",
+    "channel": "stable",
+    "packages": {
+      "@ncleton-petitmaker/yaka-bridge-desktop": "0.0.46",
+      "@ncleton-petitmaker/yaka-erp-shell": "0.0.46",
+      "@ncleton-petitmaker/yaka-module-sdk": "0.0.46"
+    }
+  },
+  "bridge": {
+    "targets": [
+      "darwin-arm64",
+      "win32-x64"
+    ],
+    "artifactPolicy": "ci-only"
+  }
+}

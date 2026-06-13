@@ -1,0 +1,27 @@
+{
+  "name": "@ncleton-petitmaker/yaka-sync-guardian",
+  "version": "0.0.46",
+  "private": false,
+  "type": "module",
+  "description": "Yaka platform/client drift detection and build guard.",
+  "main": "index.js",
+  "bin": {
+    "yaka": "index.js"
+  },
+  "exports": {
+    ".": "./index.js"
+  },
+  "files": [
+    "index.js",
+    "yaka-sync-guardian.mjs",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ncleton-petitmaker/yaka-bridge.git",
+    "directory": "packages/sync-guardian"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  }
+}

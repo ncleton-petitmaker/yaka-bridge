@@ -1,0 +1,23 @@
+{
+  "name": "@ncleton-petitmaker/yaka-design-system",
+  "version": "0.0.46",
+  "private": false,
+  "type": "module",
+  "description": "Yaka design tokens and shared UI contract.",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js"
+  },
+  "files": [
+    "index.js",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ncleton-petitmaker/yaka-bridge.git",
+    "directory": "packages/design-system"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  }
+}

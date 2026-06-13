@@ -1,0 +1,20 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended"
+  ],
+  "labels": [
+    "yaka-platform",
+    "dependencies"
+  ],
+  "packageRules": [
+    {
+      "matchPackageNames": [
+        "/^@ncleton-petitmaker\\/yaka-/"
+      ],
+      "groupName": "Yaka platform packages",
+      "automerge": false,
+      "dependencyDashboardApproval": false
+    }
+  ]
+}

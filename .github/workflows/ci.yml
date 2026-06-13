@@ -28,6 +28,7 @@ jobs:
             libxtst-dev \
             pkg-config
       - run: npm ci
+      - run: npm run yaka:doctor
       - run: npm run typecheck
       - run: npm test
       - run: npm run skills:check
@@ -56,5 +57,6 @@ jobs:
           cache: npm
       - uses: dtolnay/rust-toolchain@stable
       - run: npm ci
+      - run: npm run yaka:doctor
       - run: node scripts/build-bridge.mjs --target ${{ matrix.target }} --require-voice-sidecar
       - run: node scripts/verify-bridge-package-assets.mjs --target ${{ matrix.target }}
