@@ -971,6 +971,8 @@ function showCodexSetupWindow() {
 
 function showLmStudioSetupWindow(policy = {}) {
   const model = String(policy.model || LMSTUDIO.defaultModel).trim() || LMSTUDIO.defaultModel;
+  const mandatory = policy.mandatory === true;
+  const parentWindow = policy.parentWindow || BrowserWindow.getFocusedWindow() || undefined;
   const needsInstall = !findLmsBin() && !findLmStudioApp();
   const design = loadBridgeDesign();
   return new Promise((resolve) => {
@@ -980,6 +982,10 @@ function showLmStudioSetupWindow(policy = {}) {
       resizable: false,
       minimizable: false,
       maximizable: false,
+      closable: !mandatory,
+      parent: parentWindow,
+      modal: Boolean(mandatory && parentWindow),
+      alwaysOnTop: mandatory,
       center: true,
       title: "Préparation du moteur local",
       backgroundColor: design.bg,
@@ -992,7 +998,7 @@ function showLmStudioSetupWindow(policy = {}) {
     win.setMenuBarVisibility(false);
     const channel = `local-ai-setup-action-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const { ipcMain } = require("electron");
-    win.loadURL(`data:text/html;charset=utf-8;base64,${Buffer.from(lmStudioSetupHtml(needsInstall, model, channel, design), "utf8").toString("base64")}`);
+    win.loadURL(`data:text/html;charset=utf-8;base64,${Buffer.from(lmStudioSetupHtml(needsInstall, model, channel, design, mandatory), "utf8").toString("base64")}`);
 
     const send = (state) => {
       if (win.isDestroyed()) return;
@@ -1003,9 +1009,11 @@ function showLmStudioSetupWindow(policy = {}) {
 
     let settled = false;
     let retryFn = null;
+    let canClose = false;
     const finish = (result) => {
       if (settled) return;
       settled = true;
+      canClose = true;
       ipcMain.removeAllListeners(channel);
       try {
         if (!win.isDestroyed()) win.close();
@@ -1039,7 +1047,10 @@ function showLmStudioSetupWindow(policy = {}) {
     }
 
     ipcMain.on(channel, async (_event, action) => {
-      if (action === "quit") return finish("quit");
+      if (action === "quit") {
+        if (mandatory) return send({ phase: "error", error: "Installation requise par votre organisation." });
+        return finish("quit");
+      }
       if (action === "retry" && retryFn) {
         const fn = retryFn;
         retryFn = null;
@@ -1048,11 +1059,17 @@ function showLmStudioSetupWindow(policy = {}) {
     });
 
     win.webContents.once("did-finish-load", () => setTimeout(runLocalSetup, 250));
+    win.on("close", (event) => {
+      if (mandatory && !canClose) {
+        event.preventDefault();
+        send({ phase: "error", error: "Installation requise par votre organisation." });
+      }
+    });
     win.on("closed", () => finish("quit"));
   });
 }
 
-function lmStudioSetupHtml(needsInstall, model, channel, design) {
+function lmStudioSetupHtml(needsInstall, model, channel, design, mandatory = false) {
   return `<!doctype html>
 <html lang="fr">
 <head>
@@ -1096,7 +1113,7 @@ function lmStudioSetupHtml(needsInstall, model, channel, design) {
       <div class="step"><div class="step-icon pending" id="icon-done">${needsInstall ? "4" : "3"}</div><div class="step-body"><div class="step-title muted" id="title-done">${LMSTUDIO.doneTitle}</div><div class="step-desc" id="desc-done">Finalisation automatique.</div></div></div>
     </div>
   </main>
-  <footer><button class="secondary" onclick="window.bridgeLocalAiSetup.action('quit')">Annuler</button><button class="primary" id="btn-retry" style="display:none" onclick="window.bridgeLocalAiSetup.action('retry')">Réessayer</button></footer>
+  <footer>${mandatory ? '<span class="step-desc" style="margin-right:auto;align-self:center">Installation requise par votre organisation.</span>' : "<button class=\"secondary\" onclick=\"window.bridgeLocalAiSetup.action('quit')\">Annuler</button>"}<button class="primary" id="btn-retry" style="display:none" onclick="window.bridgeLocalAiSetup.action('retry')">Réessayer</button></footer>
   <script>
     const { ipcRenderer } = require("electron");
     window.bridgeLocalAiSetup = { action: (name) => ipcRenderer.send(${JSON.stringify(channel)}, name) };
@@ -1118,6 +1135,8 @@ function lmStudioSetupHtml(needsInstall, model, channel, design) {
 
 function showVoiceSetupWindow(policy = {}) {
   const info = voiceModelInfo(policy.model);
+  const mandatory = policy.mandatory === true;
+  const parentWindow = policy.parentWindow || BrowserWindow.getFocusedWindow() || undefined;
   const design = loadBridgeDesign();
   return new Promise((resolve) => {
     const win = new BrowserWindow({
@@ -1126,6 +1145,10 @@ function showVoiceSetupWindow(policy = {}) {
       resizable: false,
       minimizable: false,
       maximizable: false,
+      closable: !mandatory,
+      parent: parentWindow,
+      modal: Boolean(mandatory && parentWindow),
+      alwaysOnTop: mandatory,
       center: true,
       title: "Préparation de la dictée locale",
       backgroundColor: design.bg,
@@ -1138,7 +1161,7 @@ function showVoiceSetupWindow(policy = {}) {
     win.setMenuBarVisibility(false);
     const channel = `voice-setup-action-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const { ipcMain } = require("electron");
-    win.loadURL(`data:text/html;charset=utf-8;base64,${Buffer.from(voiceSetupHtml(info, channel, design), "utf8").toString("base64")}`);
+    win.loadURL(`data:text/html;charset=utf-8;base64,${Buffer.from(voiceSetupHtml(info, channel, design, mandatory), "utf8").toString("base64")}`);
 
     const send = (state) => {
       if (win.isDestroyed()) return;
@@ -1149,9 +1172,11 @@ function showVoiceSetupWindow(policy = {}) {
 
     let settled = false;
     let retryFn = null;
+    let canClose = false;
     const finish = (result) => {
       if (settled) return;
       settled = true;
+      canClose = true;
       ipcMain.removeAllListeners(channel);
       try {
         if (!win.isDestroyed()) win.close();
@@ -1181,7 +1206,10 @@ function showVoiceSetupWindow(policy = {}) {
     }
 
     ipcMain.on(channel, async (_event, action) => {
-      if (action === "quit") return finish("quit");
+      if (action === "quit") {
+        if (mandatory) return send({ phase: "error", error: "Installation requise par votre organisation." });
+        return finish("quit");
+      }
       if (action === "retry" && retryFn) {
         const fn = retryFn;
         retryFn = null;
@@ -1190,11 +1218,17 @@ function showVoiceSetupWindow(policy = {}) {
     });
 
     win.webContents.once("did-finish-load", () => setTimeout(runVoiceSetup, 250));
+    win.on("close", (event) => {
+      if (mandatory && !canClose) {
+        event.preventDefault();
+        send({ phase: "error", error: "Installation requise par votre organisation." });
+      }
+    });
     win.on("closed", () => finish("quit"));
   });
 }
 
-function voiceSetupHtml(info, channel, design) {
+function voiceSetupHtml(info, channel, design, mandatory = false) {
   return `<!doctype html>
 <html lang="fr">
 <head>
@@ -1242,7 +1276,7 @@ function voiceSetupHtml(info, channel, design) {
       <div class="step"><div class="step-icon pending" id="icon-done">2</div><div class="step-body"><div class="step-title muted" id="title-done">${VOICE.doneTitle}</div><div class="step-desc" id="desc-done">Finalisation automatique.</div></div></div>
     </div>
   </main>
-  <footer><button class="secondary" onclick="window.bridgeVoiceSetup.action('quit')">Annuler</button><button class="primary" id="btn-retry" style="display:none" onclick="window.bridgeVoiceSetup.action('retry')">Réessayer</button></footer>
+  <footer>${mandatory ? '<span class="step-desc" style="margin-right:auto;align-self:center">Installation requise par votre organisation.</span>' : "<button class=\"secondary\" onclick=\"window.bridgeVoiceSetup.action('quit')\">Annuler</button>"}<button class="primary" id="btn-retry" style="display:none" onclick="window.bridgeVoiceSetup.action('retry')">Réessayer</button></footer>
   <script>
     const { ipcRenderer } = require("electron");
     window.bridgeVoiceSetup = { action: (name) => ipcRenderer.send(${JSON.stringify(channel)}, name) };
