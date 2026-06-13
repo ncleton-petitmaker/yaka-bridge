@@ -85,6 +85,9 @@ test("local AI and voice are opt-in until the admin policy enables installation"
   assert.match(source, /Installer \/ préparer LM Studio et le modèle/);
   assert.match(source, /Changer le raccourci push-to-talk/);
   assert.doesNotMatch(source, /data-provisioning-required/);
+  assert.match(source, /scheduleRequiredAdminProvisioning\("runtime-state"\)/);
+  assert.match(source, /scheduleRequiredAdminProvisioning\("runtime-start"\)/);
+  assert.match(source, /function scheduleRequiredAdminProvisioning/);
   assert.match(source, /await ensureAdminProvisioning\(loadConfig\(\), \{ silent \}\);\n\s+registerVoiceShortcut\(\);/);
 });
 

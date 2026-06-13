@@ -104,6 +104,7 @@ let lastConfigSnapshot = null;
 let protocolLaunchHandled = false;
 let lastProtocolLaunchAt = 0;
 let adminProvisioningRunning = false;
+let adminProvisioningScheduled = false;
 let voiceProcess = null;
 let voiceShortcutProcess = null;
 let voiceStdoutBuffer = "";
@@ -751,12 +752,14 @@ function startRuntimeIfAvailable() {
         maybeInstallDownloadedUpdate();
         refreshStatusWindow();
         updateTrayMenu();
+        scheduleRequiredAdminProvisioning("runtime-state");
       },
     }).then((handle) => {
       runtimeHandle = handle;
       runtimeState = handle.state();
       pushActivity("Runtime Codex démarré.");
       refreshStatusWindow();
+      scheduleRequiredAdminProvisioning("runtime-start");
     }).catch((err) => {
       bridgeError = err instanceof Error ? err.message : String(err);
       pushActivity(`Runtime Codex arrêté: ${bridgeError}`);
@@ -2381,6 +2384,21 @@ async function syncServicesFromControlPlane(cfg) {
   refreshStatusWindow();
   updateTrayMenu();
   return res;
+}
+
+function scheduleRequiredAdminProvisioning(reason = "policy") {
+  if (adminProvisioningScheduled || adminProvisioningRunning || isQuitting) return;
+  const policy = normalizeAiPolicy(loadConfig({ hydrateSecrets: false }).aiPolicy);
+  const required =
+    (policy.localAi.enabled && policy.localAi.installRequired) ||
+    (policy.voice.enabled && policy.voice.installRequired);
+  if (!required) return;
+  adminProvisioningScheduled = true;
+  setTimeout(async () => {
+    adminProvisioningScheduled = false;
+    const result = await ensureAdminProvisioning(loadConfig(), { silent: true, reason });
+    if (result?.ok === false) pushActivity(`Installation requise à terminer: ${result.error || "erreur inconnue"}`);
+  }, 0);
 }
 
 async function ensureAdminProvisioning(cfg = loadConfig(), options = {}) {
