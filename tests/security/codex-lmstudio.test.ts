@@ -1,11 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { DEFAULT_BRIDGE_AI_POLICY } from "../../bridge/ai-policy";
 import { buildCodexArgs } from "../../server/agents";
 import { loadAppConfig, saveAppConfig } from "../../server/app-config";
 import { probeLmStudioStatus } from "../../server/agents-status";
+
+const require = createRequire(import.meta.url);
 
 function valueAfter(args: string[], flag: string): string | undefined {
   const idx = args.indexOf(flag);
@@ -68,6 +72,28 @@ test("app config defaults older files to Codex Cloud and persists local fields",
 test("packaged Bridge setup defaults LM Studio to the portable admin model", () => {
   const source = readFileSync(resolve(process.cwd(), "bridge", "electron-main.cjs"), "utf8");
   assert.match(source, /const DEFAULT_AI_POLICY[\s\S]*model: "ibm\/granite-4-micro"/);
+});
+
+test("local AI and voice are opt-in until the admin policy enables installation", () => {
+  assert.equal(DEFAULT_BRIDGE_AI_POLICY.localAi.enabled, false);
+  assert.equal(DEFAULT_BRIDGE_AI_POLICY.localAi.installRequired, false);
+  assert.equal(DEFAULT_BRIDGE_AI_POLICY.localAi.model, "ibm/granite-4-micro");
+  assert.equal(DEFAULT_BRIDGE_AI_POLICY.voice.enabled, false);
+  assert.equal(DEFAULT_BRIDGE_AI_POLICY.voice.installRequired, false);
+
+  const source = readFileSync(resolve(process.cwd(), "bridge", "electron-main.cjs"), "utf8");
+  assert.match(source, /Installer \/ préparer LM Studio et le modèle/);
+  assert.match(source, /Changer le raccourci push-to-talk/);
+  assert.match(source, /await ensureAdminProvisioning\(loadConfig\(\), \{ silent \}\);\n\s+registerVoiceShortcut\(\);/);
+});
+
+test("Bridge packaging unpacks the push-to-talk sidecar executable", () => {
+  const builderConfig = require(resolve(process.cwd(), "electron-builder.bridge.cjs"));
+  assert.ok(Array.isArray(builderConfig.asarUnpack));
+  assert.ok(builderConfig.asarUnpack.includes("dist/bridge/bridge-voice/**"));
+
+  const source = readFileSync(resolve(process.cwd(), "bridge", "electron-main.cjs"), "utf8");
+  assert.match(source, /app\.asar\.unpacked/);
 });
 
 test("LM Studio diagnostic reports offline server", async () => {
