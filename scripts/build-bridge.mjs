@@ -84,14 +84,14 @@ async function buildVoiceSidecar() {
     return;
   }
 
-  const cargo = spawnSync("cargo", ["--version"], { encoding: "utf8", timeout: 5000 });
+  const cargo = spawnCargo(["--version"], { encoding: "utf8", timeout: 5000 });
   if (cargo.status !== 0) {
     const message = "[bridge] cargo indisponible: sidecar push-to-talk non construit.";
     if (requireVoiceSidecar) throw new Error(message);
     console.warn(message);
     return;
   }
-  const build = spawnSync("cargo", ["build", "--release", "--manifest-path", manifest], {
+  const build = spawnCargo(["build", "--release", "--manifest-path", manifest], {
     cwd: root,
     encoding: "utf8",
     stdio: "inherit",
@@ -112,6 +112,13 @@ async function buildVoiceSidecar() {
   const targetDir = resolve(outdir, "bridge-voice", targetPlatform);
   await mkdir(targetDir, { recursive: true });
   await copyFile(source, resolve(targetDir, exe));
+}
+
+function spawnCargo(args, options = {}) {
+  return spawnSync("cargo", args, {
+    ...options,
+    shell: process.platform === "win32",
+  });
 }
 
 function valueAfter(flag) {
