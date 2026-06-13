@@ -1,0 +1,25 @@
+name: Client CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          registry-url: https://npm.pkg.github.com
+          scope: "@ncleton-petitmaker"
+      - run: npm ci
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.YAKA_PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
+      - run: npm run yaka:doctor
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build

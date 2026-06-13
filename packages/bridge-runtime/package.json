@@ -1,0 +1,23 @@
+{
+  "name": "@ncleton-petitmaker/yaka-bridge-runtime",
+  "version": "0.0.46",
+  "private": false,
+  "type": "module",
+  "description": "Yaka Bridge runtime, job leasing, agent routing and MCP integration.",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js"
+  },
+  "files": [
+    "index.js",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ncleton-petitmaker/yaka-bridge.git",
+    "directory": "packages/bridge-runtime"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  }
+}

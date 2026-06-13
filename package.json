@@ -4,6 +4,10 @@
   "private": true,
   "description": "Template yaka-bridge pour ERP cloud modulaire avec Supabase, Bridge local, MCP et workflows agentiques.",
   "license": "MIT",
+  "workspaces": [
+    "packages/*",
+    "templates/*"
+  ],
   "engines": {
     "node": ">=24"
   },
@@ -86,6 +90,11 @@
     "projects:list": "node scripts/projects.mjs list",
     "projects:check": "node scripts/projects.mjs check",
     "projects:init": "node scripts/projects.mjs init",
+    "yaka:doctor": "node scripts/yaka-sync-guardian.mjs doctor --strict",
+    "yaka:status": "node scripts/yaka-sync-guardian.mjs status",
+    "yaka:clients": "node scripts/yaka-sync-guardian.mjs clients",
+    "yaka:pack:packages": "node scripts/publish-yaka-packages.mjs --dry-run",
+    "yaka:publish:packages": "node scripts/publish-yaka-packages.mjs",
     "factory:check": "node scripts/factory-check.mjs",
     "deploy-data": "node scripts/postinstall.mjs",
     "lint": "next lint",
@@ -97,8 +106,8 @@
     "bridge:build": "node scripts/build-bridge.mjs",
     "bridge:verify-assets": "node scripts/verify-bridge-package-assets.mjs",
     "smoke:lmstudio": "node scripts/smoke-lmstudio.mjs",
-    "bridge:pack:mac": "node scripts/build-bridge.mjs --target darwin --require-voice-sidecar && electron-builder --mac --config electron-builder.bridge.cjs",
-    "bridge:pack:win": "node scripts/build-bridge.mjs --target win32 --require-voice-sidecar && electron-builder --win --x64 --config electron-builder.bridge.cjs --config.npmRebuild=false",
+    "bridge:pack:mac": "node scripts/yaka-sync-guardian.mjs doctor --strict --allow-platform-build && node scripts/build-bridge.mjs --target darwin --require-voice-sidecar && electron-builder --mac --config electron-builder.bridge.cjs",
+    "bridge:pack:win": "node scripts/yaka-sync-guardian.mjs doctor --strict --allow-platform-build && node scripts/build-bridge.mjs --target win32 --require-voice-sidecar && electron-builder --win --x64 --config electron-builder.bridge.cjs --config.npmRebuild=false",
     "design:apply": "node scripts/apply-design-system.mjs",
     "design:import": "node scripts/import-design-system.mjs",
     "dev:local": "node scripts/dev.mjs",

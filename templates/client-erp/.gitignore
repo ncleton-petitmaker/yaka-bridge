@@ -1,0 +1,10 @@
+node_modules/
+.next/
+dist/
+release/
+release-bridge/
+.env
+.env*.local
+data/
+*.log
+*.tsbuildinfo
