@@ -2347,38 +2347,17 @@ function resolveServiceDisplayStatus(base, service, codex = getCodexStatus()) {
     };
   }
 
-  if (local === "active" || local === "reconnecting" || service.status === "active") {
+  if (local === "active" || local === "reconnecting" || local === "connected" || local === "ok" || service.status === "active" || service.status === "connected") {
     return {
-      status: local === "reconnecting" ? "reconnecting" : "active",
+      status: local === "reconnecting" ? "reconnecting" : local === "active" || service.status === "active" ? "active" : "connected",
       cloudStatus: cloudFresh ? "fresh" : "stale",
-      siteStatus: local || "",
-      reason: "Bridge travaille sur ce service.",
+      siteStatus: local || "ok",
+      reason: local === "reconnecting" || local === "active" || service.status === "active"
+        ? "Bridge travaille sur ce service."
+        : "Bridge local confirme ce service.",
       lastActivityAt,
       ageSeconds,
     };
-  }
-
-  if (base.controlPlaneConfigured || base.authenticated) {
-    if (!lastActivityAt) {
-      return {
-        status: "cloud_stale",
-        cloudStatus: "missing",
-        siteStatus: local || "",
-        reason: "Aucun heartbeat cloud récent. Clique sur R ou reconnecte le compte Bridge.",
-        lastActivityAt,
-        ageSeconds,
-      };
-    }
-    if (!cloudFresh) {
-      return {
-        status: "cloud_stale",
-        cloudStatus: "stale",
-        siteStatus: local || "",
-        reason: `Dernier heartbeat cloud ${formatRelativeAge(lastActivityAt)}. Le site peut afficher Bridge à connecter.`,
-        lastActivityAt,
-        ageSeconds,
-      };
-    }
   }
 
   if (local === "site_unreachable" || local === "disconnected") {
@@ -2394,9 +2373,9 @@ function resolveServiceDisplayStatus(base, service, codex = getCodexStatus()) {
 
   return {
     status: "connected",
-    cloudStatus: cloudFresh ? "fresh" : "unknown",
+    cloudStatus: cloudFresh ? "fresh" : lastActivityAt ? "stale" : "missing",
     siteStatus: local || "ok",
-    reason: lastActivityAt ? `Bridge vu ${formatRelativeAge(lastActivityAt)}.` : "Bridge local prêt.",
+    reason: lastActivityAt && cloudFresh ? `Bridge vu ${formatRelativeAge(lastActivityAt)}.` : "Bridge local prêt.",
     lastActivityAt,
     ageSeconds,
   };
@@ -2466,7 +2445,7 @@ async function refreshExternalStatuses() {
     if (current === "active" || current === "reconnecting") continue;
     try {
       const ok = await probe(service.healthUrl);
-      if (ok) delete localStatuses[service.serviceId];
+      if (ok) localStatuses[service.serviceId] = "connected";
       else localStatuses[service.serviceId] = "site_unreachable";
     } catch {
       localStatuses[service.serviceId] = "site_unreachable";
@@ -2979,7 +2958,7 @@ async function openService(serviceId) {
     await shell.openExternal(target);
     hideStatusWindowAfterLaunch();
     setTimeout(hideStatusWindowAfterLaunch, 900);
-    delete localStatuses[serviceId];
+    localStatuses[serviceId] = "active";
     pushActivity(`${service.name} ouvert.`);
     return { ok: true, launchUrl: target };
   } catch (err) {

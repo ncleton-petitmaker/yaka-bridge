@@ -1,6 +1,6 @@
 {
   "name": "@ncleton-petitmaker/yaka-bridge-runtime",
-  "version": "0.0.68",
+  "version": "0.0.69",
   "private": false,
   "type": "module",
   "description": "Yaka Bridge runtime, job leasing, agent routing and MCP integration.",
