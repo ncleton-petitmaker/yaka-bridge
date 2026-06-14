@@ -179,6 +179,17 @@ test("voice shortcut saving reports activation state instead of a false success"
   assert.doesNotMatch(source, /#FAA2CA|#ffe5ee|#faa2ca/i);
 });
 
+test("local Bridge service status remains connected after opening a service", () => {
+  const source = readFileSync(resolve(process.cwd(), "bridge", "electron-main.cjs"), "utf8");
+  assert.match(source, /local === "connected"/);
+  assert.match(source, /service\.status === "connected"/);
+  assert.match(source, /localStatuses\[service\.serviceId\] = "connected"/);
+  assert.match(source, /localStatuses\[serviceId\] = "active"/);
+  assert.doesNotMatch(source, /status: "cloud_stale"/);
+  assert.doesNotMatch(source, /if \(ok\) delete localStatuses\[service\.serviceId\]/);
+  assert.doesNotMatch(source, /delete localStatuses\[serviceId\]/);
+});
+
 test("LM Studio diagnostic reports offline server", async () => {
   const offlineFetch: typeof fetch = async () => {
     throw new Error("ECONNREFUSED");
