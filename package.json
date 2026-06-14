@@ -1,6 +1,6 @@
 {
   "name": "yaka-bridge",
-  "version": "0.0.69",
+  "version": "0.0.70",
   "private": true,
   "description": "Template yaka-bridge pour ERP cloud modulaire avec Supabase, Bridge local, MCP et workflows agentiques.",
   "license": "MIT",

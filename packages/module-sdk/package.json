@@ -1,6 +1,6 @@
 {
   "name": "@ncleton-petitmaker/yaka-module-sdk",
-  "version": "0.0.69",
+  "version": "0.0.70",
   "private": false,
   "type": "module",
   "description": "Yaka module manifest, action and lockfile contract.",

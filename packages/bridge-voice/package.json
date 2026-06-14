@@ -1,6 +1,6 @@
 {
   "name": "@ncleton-petitmaker/yaka-bridge-voice",
-  "version": "0.0.69",
+  "version": "0.0.70",
   "private": false,
   "type": "module",
   "description": "Yaka local push-to-talk sidecar and voice model contract.",

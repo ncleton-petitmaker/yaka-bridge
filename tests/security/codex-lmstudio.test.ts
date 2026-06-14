@@ -190,6 +190,16 @@ test("local Bridge service status remains connected after opening a service", ()
   assert.doesNotMatch(source, /delete localStatuses\[serviceId\]/);
 });
 
+test("bridge protocol open reconnects the matching service", () => {
+  const source = readFileSync(resolve(process.cwd(), "bridge", "electron-main.cjs"), "utf8");
+  assert.match(source, /function serviceIdFromProtocolUrl/);
+  assert.match(source, /serviceUrl\.hostname === target\.hostname/);
+  assert.match(source, /void openService\(requestedServiceId, \{ browserSessionId, returnUrl, fromProtocol: true \}\)/);
+  assert.match(source, /const browserSessionId = String\(options\.browserSessionId \|\| ""\)/);
+  assert.match(source, /returnUrl: protocolReturnUrl \|\| target/);
+  assert.match(source, /returnTo: protocolReturnUrl \|\| target/);
+});
+
 test("LM Studio diagnostic reports offline server", async () => {
   const offlineFetch: typeof fetch = async () => {
     throw new Error("ECONNREFUSED");
