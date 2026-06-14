@@ -49,7 +49,9 @@ interface BridgeState {
 
 const BridgeContext = createContext<BridgeState | null>(null);
 const POLL_MS = 15_000;
+const ACTIVE_SESSION_TTL_MS = 15 * 60_000;
 const STORAGE_KEY = "app-template:bridge-wizard-seen";
+const ACTIVE_SESSION_STORAGE_KEY = "app-template:bridge-active-session";
 
 export function BridgeStatusProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname();
@@ -68,11 +70,14 @@ export function BridgeStatusProvider({ children }: { children: ReactNode }) {
       const nextConfig = await loadBridgeConfig();
       setConfig(nextConfig);
       const probe = await probeBridge(nextConfig);
-      setStatus(probe.connected ? "connected" : "disconnected");
-      setError(probe.error);
+      const visibleConnected = probe.connected || shouldKeepBridgeActiveFromSession();
+      if (probe.connected) markBridgeSessionActive();
+      setStatus(visibleConnected ? "connected" : "disconnected");
+      setError(visibleConnected ? null : probe.error);
     } catch (err) {
-      setStatus("disconnected");
-      setError(err instanceof Error ? err.message : String(err));
+      const visibleConnected = shouldKeepBridgeActiveFromSession();
+      setStatus(visibleConnected ? "connected" : "disconnected");
+      setError(visibleConnected ? null : err instanceof Error ? err.message : String(err));
     } finally {
       setLastCheckedAt(new Date().toISOString());
     }
@@ -107,7 +112,10 @@ export function BridgeStatusProvider({ children }: { children: ReactNode }) {
   }, [lastCheckedAt, suppressBridgeSetupUi]);
 
   useEffect(() => {
-    if (status === "connected") setToastDismissed(false);
+    if (status === "connected") {
+      markBridgeSessionActive();
+      setToastDismissed(false);
+    }
   }, [status]);
 
   const openSetup = useCallback(() => {
@@ -147,6 +155,24 @@ export function useBridgeStatus(): BridgeState {
   const ctx = useContext(BridgeContext);
   if (!ctx) throw new Error("useBridgeStatus doit être utilisé dans <BridgeStatusProvider>.");
   return ctx;
+}
+
+function markBridgeSessionActive(): void {
+  try {
+    sessionStorage.setItem(ACTIVE_SESSION_STORAGE_KEY, String(Date.now()));
+  } catch {
+    // no-op
+  }
+}
+
+function shouldKeepBridgeActiveFromSession(): boolean {
+  try {
+    const raw = sessionStorage.getItem(ACTIVE_SESSION_STORAGE_KEY);
+    const ts = raw ? Number(raw) : 0;
+    return Number.isFinite(ts) && ts > 0 && Date.now() - ts <= ACTIVE_SESSION_TTL_MS;
+  } catch {
+    return false;
+  }
 }
 
 export function BridgeIndicator() {
