@@ -106,13 +106,16 @@ test("Bridge packaging unpacks the push-to-talk sidecar executable", () => {
 test("admin-required local setup windows cannot be cancelled silently", () => {
   const provider = readFileSync(resolve(process.cwd(), "bridge", "provider-setup.cjs"), "utf8");
   assert.match(provider, /const mandatory = policy\.mandatory === true/);
-  assert.match(provider, /closable: !mandatory/);
-  assert.match(provider, /modal: Boolean\(mandatory && parentWindow\)/);
+  assert.match(provider, /closable: true/);
+  assert.match(provider, /alwaysOnTop: false/);
+  assert.match(provider, /showInactive\(\)/);
   assert.match(provider, /Installation requise par votre organisation/);
   assert.match(provider, /if \(mandatory\) return send\(\{ phase: "error"/);
 
   const main = readFileSync(resolve(process.cwd(), "bridge", "electron-main.cjs"), "utf8");
   assert.match(main, /mandatory: true/);
+  assert.match(main, /focus: !options\.silent/);
+  assert.match(main, /lastAdminProvisioningPromptAt/);
   assert.match(main, /parentWindow/);
 });
 
@@ -161,6 +164,19 @@ test("voice shortcut saving reports activation state instead of a false success"
   assert.match(source, /function voiceShortcutSaveResult/);
   assert.match(source, /warning: voice\.shortcutError/);
   assert.match(source, /Raccourci enregistré, activation à terminer/);
+  assert.match(source, /shortcut-recorder/);
+  assert.match(source, /activeModifiers/);
+  assert.match(source, /code === "Space"/);
+  assert.match(source, /overflow:hidden;display:grid;grid-template-rows/);
+  assert.match(source, /registerElectronVoiceShortcutMirror/);
+  assert.match(source, /showVoiceOverlay\(\{ mode: "error", message \}\)/);
+  assert.match(source, /event === "mic-level"/);
+  assert.match(source, /__bridgeSetLevels/);
+  assert.match(source, /\.recording-overlay\{height:36px;width:172px/);
+  assert.match(source, /\.bar\{width:6px;background:var\(--accent\)/);
+  assert.match(source, /fill="currentColor"/);
+  assert.doesNotMatch(source, /handy-level/);
+  assert.doesNotMatch(source, /#FAA2CA|#ffe5ee|#faa2ca/i);
 });
 
 test("LM Studio diagnostic reports offline server", async () => {

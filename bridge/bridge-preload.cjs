@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld("bridge", {
   setLocalAiModel: (model) => ipcRenderer.invoke("bridge:local-ai-set-model", model),
   voiceStatus: () => ipcRenderer.invoke("bridge:voice-status"),
   setVoiceShortcut: (shortcut) => ipcRenderer.invoke("bridge:voice-set-shortcut", shortcut),
+  changeVoiceShortcut: () => ipcRenderer.invoke("bridge:voice-change-shortcut"),
   testVoiceOverlay: () => ipcRenderer.invoke("bridge:voice-test-overlay"),
   toggleVoice: () => ipcRenderer.invoke("bridge:voice-toggle"),
   testVoiceMicrophone: () => ipcRenderer.invoke("bridge:voice-test-microphone"),

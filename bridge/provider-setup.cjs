@@ -1210,11 +1210,13 @@ function showCodexSetupWindow() {
 function showLmStudioSetupWindow(policy = {}) {
   const model = String(policy.model || LMSTUDIO.defaultModel).trim() || LMSTUDIO.defaultModel;
   const mandatory = policy.mandatory === true;
+  const focusWindow = policy.focus !== false;
   const parentWindow = policy.parentWindow || BrowserWindow.getFocusedWindow() || undefined;
   const lmsBin = findLmsBin();
   const lmStudioApp = findLmStudioApp();
-  const needsInstall = !lmsBin && !lmStudioApp;
-  const needsCliActivation = !lmsBin && Boolean(lmStudioApp);
+  const needsAppInstall = mandatory && process.platform === "darwin" && !lmStudioApp;
+  const needsInstall = needsAppInstall || (!lmsBin && !lmStudioApp);
+  const needsCliActivation = !needsInstall && !lmsBin && Boolean(lmStudioApp);
   const design = loadBridgeDesign();
   return new Promise((resolve) => {
     const win = new BrowserWindow({
@@ -1223,18 +1225,23 @@ function showLmStudioSetupWindow(policy = {}) {
       resizable: false,
       minimizable: false,
       maximizable: false,
-      closable: !mandatory,
+      closable: true,
       parent: parentWindow,
-      modal: Boolean(mandatory && parentWindow),
-      alwaysOnTop: mandatory,
+      modal: false,
+      alwaysOnTop: false,
       center: true,
       title: "Préparation du moteur local",
       backgroundColor: design.bg,
-      show: true,
+      show: false,
       webPreferences: {
         nodeIntegration: true,
         contextIsolation: false,
       },
+    });
+    win.once("ready-to-show", () => {
+      if (win.isDestroyed()) return;
+      if (focusWindow) win.show();
+      else win.showInactive();
     });
     win.setMenuBarVisibility(false);
     const channel = `local-ai-setup-action-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -1304,7 +1311,6 @@ function showLmStudioSetupWindow(policy = {}) {
     win.webContents.once("did-finish-load", () => setTimeout(runLocalSetup, 250));
     win.on("close", (event) => {
       if (mandatory && !canClose) {
-        event.preventDefault();
         send({ phase: "error", error: "Installation requise par votre organisation." });
       }
     });
@@ -1387,6 +1393,7 @@ function lmStudioSetupHtml({ needsInstall, needsCliActivation, model, channel, d
 function showVoiceSetupWindow(policy = {}) {
   const info = voiceModelInfo(policy.model);
   const mandatory = policy.mandatory === true;
+  const focusWindow = policy.focus !== false;
   const parentWindow = policy.parentWindow || BrowserWindow.getFocusedWindow() || undefined;
   const design = loadBridgeDesign();
   return new Promise((resolve) => {
@@ -1396,18 +1403,23 @@ function showVoiceSetupWindow(policy = {}) {
       resizable: false,
       minimizable: false,
       maximizable: false,
-      closable: !mandatory,
+      closable: true,
       parent: parentWindow,
-      modal: Boolean(mandatory && parentWindow),
-      alwaysOnTop: mandatory,
+      modal: false,
+      alwaysOnTop: false,
       center: true,
       title: "Préparation de la dictée locale",
       backgroundColor: design.bg,
-      show: true,
+      show: false,
       webPreferences: {
         nodeIntegration: true,
         contextIsolation: false,
       },
+    });
+    win.once("ready-to-show", () => {
+      if (win.isDestroyed()) return;
+      if (focusWindow) win.show();
+      else win.showInactive();
     });
     win.setMenuBarVisibility(false);
     const channel = `voice-setup-action-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -1471,7 +1483,6 @@ function showVoiceSetupWindow(policy = {}) {
     win.webContents.once("did-finish-load", () => setTimeout(runVoiceSetup, 250));
     win.on("close", (event) => {
       if (mandatory && !canClose) {
-        event.preventDefault();
         send({ phase: "error", error: "Installation requise par votre organisation." });
       }
     });

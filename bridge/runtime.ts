@@ -276,6 +276,8 @@ class BridgeRuntime implements BridgeRuntimeHandle {
         includeMcp: payload.includeMcp ?? Boolean(payload.mcpProxyBaseUrl || service.baseUrl),
         mcpProxyBaseUrl: payload.mcpProxyBaseUrl ?? service.baseUrl,
         mcpProxyAccessToken: payload.mcpProxyAccessToken ?? this.cfg.bridgeToken ?? this.cfg.session?.accessToken,
+        mcpServerName: mcpServerNameForService(service),
+        mcpDataDirEnvVar: mcpDataDirEnvVarForService(service),
         ephemeral: payload.ephemeral ?? true,
       });
       localRunId = run.id;
@@ -915,6 +917,23 @@ function runtimeState(
 
 function serviceForJob(cfg: BridgeConfig, job: CloudBridgeJob): BridgeServiceInstance | undefined {
   return cfg.services.find((service) => service.serviceId === job.serviceId || service.serviceInstanceId === job.serviceInstanceId);
+}
+
+function mcpServerNameForService(service: BridgeServiceInstance): string {
+  const preferred = service.slug || service.serviceId || service.name || "yaka_bridge";
+  const clean = preferred
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return clean || "yaka_bridge";
+}
+
+function mcpDataDirEnvVarForService(service: BridgeServiceInstance): string {
+  const base = mcpServerNameForService(service).toUpperCase().replace(/[^A-Z0-9]+/g, "_");
+  const clean = `${base || "YAKA_BRIDGE"}_DATA_DIR`;
+  return /^[A-Z_][A-Z0-9_]*$/.test(clean) ? clean : "YAKA_BRIDGE_DATA_DIR";
 }
 
 function resolvePathRef(cfg: BridgeConfig, service: BridgeServiceInstance, ref: BridgePathRef | undefined): string | undefined {
