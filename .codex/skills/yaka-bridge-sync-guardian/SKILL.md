@@ -1,13 +1,13 @@
 ---
 name: yaka-bridge-sync-guardian
-description: Détecter et empêcher la dérive entre le repo plateforme yaka-bridge et les repos clients Yaka avant modification, build, packaging ou migration.
+description: Détecter et empêcher la dérive entre le repo plateforme yaka-bridge, les repos clients Yaka et les templates avant modification, build, packaging, migration, commit ou push. Utiliser quand Codex touche `yaka-bridge`, un dossier client sous `Projets/`, un repo client ERP, un module client, Bridge Desktop, un template, ou quand un bug/fix client peut être générique et doit être proposé ou promu vers la source/template avant sauvegarde Git.
 ---
 
 # yaka-bridge-sync-guardian
 
 Utilise cette skill dès qu'un travail touche `yaka-bridge`, un dossier
-`Projets/<Client>/`, un repo client ERP, un module client, un build Bridge ou un
-artefact Desktop.
+`Projets/<Client>/`, un repo client ERP, un module client, un build Bridge, un
+artefact Desktop, un template, ou une sauvegarde Git après changement client.
 
 Objectif : empêcher qu'un agent travaille sur un vieux clone client ou génère un
 DMG/EXE depuis un core Yaka copié.
@@ -53,6 +53,28 @@ Si le check échoue, ne build pas d'artefact et ne prétends pas que le client e
    `yaka-bridge`.
 3. Garder dans le client uniquement le métier, la configuration, le branding, les
    modules privés et le déploiement.
+
+## Avant Commit ou Push Client
+
+Toujours faire un audit source/template avant `git add`, `git commit` ou
+`git push` dans un repo client ou `Projets/<Client>/`.
+
+1. Classer chaque changement client :
+   - **client-only** : données métier, branding, config, secrets, déploiement,
+     modules privés ou adaptation locale ;
+   - **générique** : Bridge, provider de statut, sync, templates, design system
+     partagé, SDK, règles de génération, packaging, sécurité, workflow commun.
+2. Si au moins un changement est générique, ne pas faire une sauvegarde Git
+   client-only sans traiter la source. Promouvoir le changement dans
+   `yaka-bridge` ou le template quand c'est évident.
+3. Si la promotion n'est pas évidente ou si elle peut changer le contrat public,
+   demander explicitement : "Ce fix semble générique, veux-tu aussi que je le
+   remonte dans la source/template avant le commit/push client ?"
+4. Dans le message final d'un commit/push client, mentionner explicitement l'un
+   des résultats :
+   - "source/template mis à jour" ;
+   - "client-only justifié" ;
+   - "promotion source/template demandée à l'utilisateur".
 
 ## Build Desktop
 
