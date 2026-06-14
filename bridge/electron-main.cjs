@@ -363,6 +363,7 @@ function handleProtocolUrl(rawUrl) {
   lastProtocolLaunchAt = Date.now();
   const browserSessionId = parsed.searchParams.get("browserSessionId") || "";
   const returnUrl = parsed.searchParams.get("returnUrl") || "";
+  const requestedServiceId = serviceIdFromProtocolUrl(parsed, returnUrl);
   if (browserSessionId) {
     pendingBrowserSession = {
       browserSessionId: String(browserSessionId).slice(0, 160),
@@ -374,6 +375,10 @@ function handleProtocolUrl(rawUrl) {
     pushActivity("Rendez-vous navigateur reçu.");
     void flushPendingBrowserSession();
   }
+  if (requestedServiceId) {
+    pushActivity(`Ouverture demandée par le navigateur: ${requestedServiceId}.`);
+    void openService(requestedServiceId, { browserSessionId, returnUrl, fromProtocol: true });
+  }
   if (browserSessionId) {
     setTimeout(hideStatusWindowAfterLaunch, 150);
     setTimeout(hideStatusWindowAfterLaunch, 900);
@@ -381,6 +386,27 @@ function handleProtocolUrl(rawUrl) {
     setTimeout(() => showStatusWindow({ focus: false }), 0);
   }
   return true;
+}
+
+function serviceIdFromProtocolUrl(parsed, returnUrl) {
+  const explicit = String(parsed.searchParams.get("serviceId") || "").trim();
+  const cfg = loadConfig({ hydrateSecrets: false });
+  if (explicit && cfg.services.some((service) => service.serviceId === explicit)) return explicit;
+  let target = null;
+  try {
+    target = returnUrl ? new URL(returnUrl) : null;
+  } catch {
+    target = null;
+  }
+  if (!target) return "";
+  return cfg.services.find((service) => {
+    try {
+      const serviceUrl = new URL(service.baseUrl || service.healthUrl || "");
+      return serviceUrl.hostname === target.hostname;
+    } catch {
+      return false;
+    }
+  })?.serviceId || "";
 }
 
 async function flushPendingBrowserSession() {
@@ -2887,7 +2913,7 @@ async function ensureRequiredProvisioningComplete(reason = "action") {
   return { ok: true };
 }
 
-async function openService(serviceId) {
+async function openService(serviceId, options = {}) {
   let cfg = loadConfig();
   let service = cfg.services.find((candidate) => candidate.serviceId === serviceId);
   if (!service) return { ok: false, error: "service-not-found" };
@@ -2896,7 +2922,8 @@ async function openService(serviceId) {
 
   let target = serviceLaunchBaseUrl(service);
   if (!target) return { ok: false, error: "service-url-invalid" };
-  const browserSessionId = createBrowserSessionId();
+  const browserSessionId = String(options.browserSessionId || "").trim().slice(0, 160) || createBrowserSessionId();
+  const protocolReturnUrl = cleanExternalUrl(options.returnUrl);
   let usesLaunchTicket = false;
   try {
     try {
@@ -2918,7 +2945,7 @@ async function openService(serviceId) {
       if (cfg.controlPlaneBaseUrl && (cfg.bridgeToken || cfg.session?.accessToken)) {
         await postControlPlane(cfg, "bridge/browser-session", {
           browserSessionId,
-          returnUrl: target,
+          returnUrl: protocolReturnUrl || target,
           state: localStatusPayload(),
         }, { timeoutMs: 2500 }).catch((err) => {
           bridgeError = err instanceof Error ? err.message : String(err);
@@ -2926,7 +2953,7 @@ async function openService(serviceId) {
         const ticket = await postControlPlane(cfg, "bridge/launch-ticket", {
           serviceId: service.serviceId,
           serviceInstanceId: service.serviceInstanceId,
-          returnTo: target,
+          returnTo: protocolReturnUrl || target,
         }, { timeoutMs: 4000 }).catch((err) => {
           bridgeError = err instanceof Error ? err.message : String(err);
           pushActivity(`Ouverture ${service.name} sans ticket Bridge: ${bridgeError}`);
