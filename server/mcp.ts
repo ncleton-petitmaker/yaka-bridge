@@ -9,9 +9,12 @@ import { createInterface } from "node:readline";
 import { resolve } from "node:path";
 import { callAction, listActions, type ActionContext } from "./actions.js";
 
-const DATA_DIR_ENV_VAR = process.env.BRIDGE_MCP_DATA_DIR_ENV_VAR ?? "{{DATA_DIR_ENV_VAR}}";
-const APP_SLUG = process.env.BRIDGE_MCP_SERVER_NAME ?? "{{APP_NAME_KEBAB}}";
-const APP_VERSION = process.env.BRIDGE_MCP_APP_VERSION ?? process.env["{{APP_NAME_KEBAB_UPPER}}_APP_VERSION"] ?? "{{VERSION}}";
+const DATA_DIR_ENV_VAR = cleanEnvVarName(process.env.BRIDGE_MCP_DATA_DIR_ENV_VAR ?? "{{DATA_DIR_ENV_VAR}}", "YAKA_BRIDGE_DATA_DIR");
+const APP_SLUG = cleanSlug(process.env.BRIDGE_MCP_SERVER_NAME ?? "{{APP_NAME_KEBAB}}", "yaka-bridge");
+const APP_VERSION = cleanVersion(
+  process.env.BRIDGE_MCP_APP_VERSION ?? process.env.YAKA_BRIDGE_APP_VERSION ?? "{{VERSION}}",
+  "0.0.0",
+);
 const MCP_PROXY_BASE_URL = process.env.BRIDGE_MCP_PROXY_BASE_URL?.replace(/\/+$/, "") ?? "";
 const MCP_PROXY_ACCESS_TOKEN = process.env.BRIDGE_MCP_PROXY_ACCESS_TOKEN ?? "";
 
@@ -30,7 +33,7 @@ function toolNameForAction(actionId: string): string {
   return actionId.replace(/\./g, "__");
 }
 
-const TOOL_PREFIX = "{{APP_NAME_SNAKE}}__";
+const TOOL_PREFIX = `${APP_SLUG.replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "")}__`;
 
 function actionIdFromToolName(name: string): string | null {
   const normalized = (name.startsWith(TOOL_PREFIX) ? name.slice(TOOL_PREFIX.length) : name)
@@ -179,3 +182,21 @@ rl.on("line", (line) => {
 });
 
 process.stderr.write(`[${APP_SLUG}:mcp] ready dataDir=${dataDir()} proxy=${MCP_PROXY_BASE_URL || "local"}\n`);
+
+function cleanEnvVarName(value: string | undefined, fallback: string): string {
+  const clean = String(value || "").trim();
+  if (!clean || clean.includes("{{") || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(clean)) return fallback;
+  return clean;
+}
+
+function cleanSlug(value: string | undefined, fallback: string): string {
+  const clean = String(value || "").trim().replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
+  if (!clean || clean.includes("{{")) return fallback;
+  return clean;
+}
+
+function cleanVersion(value: string | undefined, fallback: string): string {
+  const clean = String(value || "").trim();
+  if (!clean || clean.includes("{{")) return fallback;
+  return clean;
+}

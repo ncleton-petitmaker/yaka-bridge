@@ -1,6 +1,6 @@
 {
   "name": "@ncleton-petitmaker/yaka-design-system",
-  "version": "0.0.48",
+  "version": "0.0.68",
   "private": false,
   "type": "module",
   "description": "Yaka design tokens and shared UI contract.",

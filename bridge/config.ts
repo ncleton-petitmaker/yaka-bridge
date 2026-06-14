@@ -253,20 +253,20 @@ function prepareBridgeConfigForDisk(cfg: BridgeConfig): PersistedBridgeConfig {
 }
 
 /**
- * Le chiffrement des secrets au repos (bridgeToken + tokens Supabase) est
- * ACTIVÉ par défaut dès qu'on tourne sous Electron avec un coffre OS disponible
- * (Keychain macOS, DPAPI Windows, libsecret Linux). On ne stocke en clair que
- * sur opt-out explicite `BRIDGE_USE_SAFE_STORAGE=0` (utile en CI/headless où le
- * coffre OS n'existe pas). Hors Electron (bridge CLI pur Node), `safeStorage`
- * n'est pas disponible : les secrets restent en clair faute de coffre lié à l'OS.
+ * Le chiffrement des secrets au repos reste disponible, mais il est opt-in.
+ * Les builds Bridge Rossini sont souvent remplacés pendant les tests ; sur macOS,
+ * safeStorage peut alors rendre les tokens illisibles entre deux versions non
+ * signées. `BRIDGE_USE_SAFE_STORAGE=1` force le chiffrement quand un coffre OS
+ * est disponible. Hors Electron (bridge CLI pur Node), `safeStorage` n'est pas
+ * disponible : les secrets restent en clair faute de coffre lié à l'OS.
  */
-function safeStorageOptOut(): boolean {
-  return process.env.BRIDGE_USE_SAFE_STORAGE === "0";
+function safeStorageEnabled(): boolean {
+  return process.env.BRIDGE_USE_SAFE_STORAGE === "1";
 }
 
 function encryptBridgeSecrets(payload: BridgeSecretPayload): SecureBridgeSecrets | null {
   if (!payload.bridgeToken && !payload.session?.accessToken && !payload.session?.refreshToken) return null;
-  if (safeStorageOptOut()) return null;
+  if (!safeStorageEnabled()) return null;
   const safeStorage = electronSafeStorage();
   if (!safeStorage?.isEncryptionAvailable()) return null;
   const ciphertext = safeStorage.encryptString(JSON.stringify(payload)).toString("base64");

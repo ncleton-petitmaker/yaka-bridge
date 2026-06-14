@@ -95,6 +95,7 @@ dependencies = [
  "enigo",
  "handy-keys",
  "hound",
+ "rustfft",
  "serde_json",
  "transcribe-rs",
 ]

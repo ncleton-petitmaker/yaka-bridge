@@ -212,6 +212,10 @@ export interface BuildArgsOptions {
   mcpProxyBaseUrl?: string;
   /** Jeton Bearer utilisé par le proxy MCP pour appeler le service web. */
   mcpProxyAccessToken?: string;
+  /** Nom du serveur MCP expose a Codex pour ce service. */
+  mcpServerName?: string;
+  /** Nom de variable env qui pointe vers le dataDir du service. */
+  mcpDataDirEnvVar?: string;
   /** Conservé pour compatibilité d'API ; sans équivalent `codex exec`. */
   maxTurns?: number;
 }
@@ -220,8 +224,8 @@ export interface BuildArgsOptions {
  * Nom de la variable d'environnement utilisée pour résoudre le `dataDir` :
  * c'est elle qui contient le path racine d'écriture (skills, audit-log, etc.).
  */
-const DATA_DIR_ENV_VAR = "{{DATA_DIR_ENV_VAR}}";
-const MCP_SERVER_NAME = "{{APP_NAME_SNAKE}}";
+const DATA_DIR_ENV_VAR = cleanEnvVarName("{{DATA_DIR_ENV_VAR}}", "YAKA_BRIDGE_DATA_DIR");
+const MCP_SERVER_NAME = cleanMcpServerName("{{APP_NAME_SNAKE}}", "yaka_bridge");
 const CODEX_AUTH_FILES = ["auth.json", "auth-v2.json", "credentials.json"] as const;
 
 export function prepareIsolatedCodexHome(cwd: string): string {
@@ -263,15 +267,21 @@ export function isolatedUserHomeForCodexHome(codexHome: string): string {
  * TOML valides, les arrays JSON des arrays TOML valides).
  */
 function buildMcpOverrides(opts: BuildArgsOptions = {}): string[] {
+  const dataDirEnvVar = cleanEnvVarName(opts.mcpDataDirEnvVar ?? process.env.BRIDGE_MCP_DATA_DIR_ENV_VAR ?? DATA_DIR_ENV_VAR, DATA_DIR_ENV_VAR);
+  const mcpServerName = cleanMcpServerName(opts.mcpServerName ?? process.env.BRIDGE_MCP_SERVER_NAME ?? MCP_SERVER_NAME, MCP_SERVER_NAME);
   const dataDir =
-    process.env[DATA_DIR_ENV_VAR] ?? path.resolve(process.cwd(), "data");
+    process.env[dataDirEnvVar] ?? path.resolve(process.cwd(), "data");
   const packagedMcp = resolvePackagedMcpPath();
   const devMcp = path.resolve(process.cwd(), "server", "mcp.ts");
   const isPackaged = Boolean(packagedMcp);
 
   const command = isPackaged ? process.execPath : "npx";
   const cmdArgs = isPackaged && packagedMcp ? [packagedMcp] : ["tsx", devMcp];
-  const env: Record<string, string> = { [DATA_DIR_ENV_VAR]: dataDir };
+  const env: Record<string, string> = {
+    [dataDirEnvVar]: dataDir,
+    BRIDGE_MCP_DATA_DIR_ENV_VAR: dataDirEnvVar,
+    BRIDGE_MCP_SERVER_NAME: mcpServerName,
+  };
   if (opts.mcpProxyBaseUrl) {
     env.BRIDGE_MCP_PROXY_BASE_URL = opts.mcpProxyBaseUrl;
   }
@@ -282,23 +292,34 @@ function buildMcpOverrides(opts: BuildArgsOptions = {}): string[] {
     env.ELECTRON_RUN_AS_NODE = process.env.ELECTRON_RUN_AS_NODE ?? "1";
   }
 
-  const envToml = `{${Object.entries(env)
-    .map(([k, v]) => `${k} = ${JSON.stringify(v)}`)
-    .join(", ")}}`;
-
   return [
-    "-c", `mcp_servers.${MCP_SERVER_NAME}.command=${JSON.stringify(command)}`,
-    "-c", `mcp_servers.${MCP_SERVER_NAME}.args=${JSON.stringify(cmdArgs)}`,
-    "-c", `mcp_servers.${MCP_SERVER_NAME}.env=${envToml}`,
+    "-c", `mcp_servers.${mcpServerName}.command=${JSON.stringify(command)}`,
+    "-c", `mcp_servers.${mcpServerName}.args=${JSON.stringify(cmdArgs)}`,
+    ...Object.entries(env).flatMap(([key, value]) => [
+      "-c",
+      `mcp_servers.${mcpServerName}.env.${key}=${JSON.stringify(value)}`,
+    ]),
     ...(opts.allowedTools?.length
-      ? ["-c", `mcp_servers.${MCP_SERVER_NAME}.enabled_tools=${JSON.stringify(opts.allowedTools)}`]
+      ? ["-c", `mcp_servers.${mcpServerName}.enabled_tools=${JSON.stringify(opts.allowedTools)}`]
       : []),
-    "-c", `mcp_servers.${MCP_SERVER_NAME}.enabled=true`,
-    "-c", `mcp_servers.${MCP_SERVER_NAME}.required=true`,
-    "-c", `mcp_servers.${MCP_SERVER_NAME}.startup_timeout_sec=20`,
-    "-c", `mcp_servers.${MCP_SERVER_NAME}.tool_timeout_sec=120`,
-    "-c", `mcp_servers.${MCP_SERVER_NAME}.default_tools_approval_mode="approve"`,
+    "-c", `mcp_servers.${mcpServerName}.enabled=true`,
+    "-c", `mcp_servers.${mcpServerName}.required=true`,
+    "-c", `mcp_servers.${mcpServerName}.startup_timeout_sec=20`,
+    "-c", `mcp_servers.${mcpServerName}.tool_timeout_sec=120`,
+    "-c", `mcp_servers.${mcpServerName}.default_tools_approval_mode="approve"`,
   ];
+}
+
+function cleanEnvVarName(value: string | undefined, fallback: string): string {
+  const clean = String(value || "").trim();
+  if (!clean || clean.includes("{{") || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(clean)) return fallback;
+  return clean;
+}
+
+function cleanMcpServerName(value: string | undefined, fallback: string): string {
+  const clean = String(value || "").trim().replace(/[^A-Za-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
+  if (!clean || clean.includes("{{")) return fallback;
+  return /^[A-Za-z0-9_-]+$/.test(clean) ? clean : fallback;
 }
 
 function resolvePackagedMcpPath(): string | null {

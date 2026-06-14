@@ -1,6 +1,6 @@
 {
   "name": "@ncleton-petitmaker/yaka-template-client-erp",
-  "version": "0.0.48",
+  "version": "0.0.68",
   "private": true,
   "description": "Yaka ERP client project for {{CLIENT_NAME}}.",
   "engines": {
@@ -15,12 +15,12 @@
     "bridge:doctor": "yaka doctor --strict"
   },
   "dependencies": {
-    "@ncleton-petitmaker/yaka-bridge-desktop": "0.0.48",
-    "@ncleton-petitmaker/yaka-erp-shell": "0.0.48",
-    "@ncleton-petitmaker/yaka-module-sdk": "0.0.48"
+    "@ncleton-petitmaker/yaka-bridge-desktop": "0.0.68",
+    "@ncleton-petitmaker/yaka-erp-shell": "0.0.68",
+    "@ncleton-petitmaker/yaka-module-sdk": "0.0.68"
   },
   "devDependencies": {
-    "@ncleton-petitmaker/yaka-sync-guardian": "0.0.48",
+    "@ncleton-petitmaker/yaka-sync-guardian": "0.0.68",
     "tsx": "^4.22.4",
     "typescript": "^5.7.2"
   }

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, nativeImage, shell, Tray, ipcMain, safeStorage, dialog, clipboard } = require("electron");
+const { app, BrowserWindow, Menu, nativeImage, shell, Tray, ipcMain, safeStorage, dialog, clipboard, globalShortcut, screen } = require("electron");
 const { spawn, spawnSync } = require("node:child_process");
 const { createServer } = require("node:http");
 const path = require("node:path");
@@ -105,15 +105,21 @@ let protocolLaunchHandled = false;
 let lastProtocolLaunchAt = 0;
 let adminProvisioningRunning = false;
 let adminProvisioningScheduled = false;
+let lastAdminProvisioningPromptAt = 0;
+let revealStatusAfterProvisioning = false;
 let voiceProcess = null;
 let voiceShortcutProcess = null;
 let voiceStdoutBuffer = "";
 let voiceShortcutStdoutBuffer = "";
+let voiceShortcutRetryTimer = null;
 let voicePending = [];
 let voiceRecording = null;
 let voiceBusy = false;
 let voiceShortcutError = "";
 let voiceShortcutValue = "";
+let voiceShortcutMode = "";
+let voiceShortcutElectronAccelerator = "";
+let lastVoiceShortcutEventAt = 0;
 let updateState = {
   enabled: false,
   status: "idle",
@@ -364,11 +370,16 @@ function handleProtocolUrl(rawUrl) {
       receivedAt: new Date().toISOString(),
       attempts: 0,
     };
+    revealStatusAfterProvisioning = true;
     pushActivity("Rendez-vous navigateur reçu.");
     void flushPendingBrowserSession();
   }
-  setTimeout(hideStatusWindowAfterLaunch, 150);
-  setTimeout(hideStatusWindowAfterLaunch, 900);
+  if (browserSessionId) {
+    setTimeout(hideStatusWindowAfterLaunch, 150);
+    setTimeout(hideStatusWindowAfterLaunch, 900);
+  } else {
+    setTimeout(() => showStatusWindow({ focus: false }), 0);
+  }
   return true;
 }
 
@@ -539,7 +550,7 @@ function updateApplicationMenu() {
         },
         { label: state.voice?.recording ? "Arrêter la dictée" : "Démarrer la dictée", enabled: Boolean(state.voice?.enabled), click: () => toggleVoiceDictation() },
         { label: "Tester le micro", enabled: Boolean(state.voice?.enabled), click: () => runVoiceSidecar(["status"], 2500) },
-        { label: "Tester l'animation", click: () => showVoiceOverlay() },
+        { label: "Tester l'animation", click: () => showVoiceOverlay({ mode: "listening", autoClose: true }) },
       ],
     },
     {
@@ -629,7 +640,8 @@ async function changeVoiceShortcutFromMenu() {
     title: "Raccourci push-to-talk",
     label: "Raccourci",
     value: voice.shortcut || "CommandOrControl+Shift+Space",
-    helper: "Exemple: CommandOrControl+Shift+Space",
+    helper: "Appuie sur la combinaison à utiliser, puis enregistre.",
+    captureShortcut: true,
   });
   const clean = String(nextShortcut || "").trim().slice(0, 120);
   if (!clean) return { ok: false, cancelled: true };
@@ -665,16 +677,22 @@ async function changeLocalModelFromMenu() {
   return { ok: true, localModel: prefs.localModel };
 }
 
-function showTextInputWindow({ title, label, value, helper }) {
+function showTextInputWindow({ title, label, value, helper, captureShortcut = false }) {
   const design = loadBridgeDesign();
   return new Promise((resolve) => {
+    const parentWindow =
+      BrowserWindow.getFocusedWindow() ||
+      (statusWindow && !statusWindow.isDestroyed() && statusWindow.isVisible() ? statusWindow : undefined);
     const win = new BrowserWindow({
-      width: 460,
-      height: 260,
+      width: captureShortcut ? 680 : 520,
+      height: captureShortcut ? 440 : 340,
       resizable: false,
       minimizable: false,
       maximizable: false,
       center: true,
+      parent: parentWindow,
+      modal: false,
+      alwaysOnTop: false,
       title,
       backgroundColor: design.bg,
       show: false,
@@ -702,7 +720,10 @@ function showTextInputWindow({ title, label, value, helper }) {
       if (payload?.action === "submit") return finish(String(payload.value || ""));
     });
     win.once("ready-to-show", () => {
-      if (!win.isDestroyed()) win.show();
+      if (!win.isDestroyed()) {
+        win.show();
+        win.focus();
+      }
     });
     win.webContents.on("did-fail-load", (_event, _code, description) => {
       bridgeError = `Fenêtre ${title} indisponible: ${description}`;
@@ -710,36 +731,158 @@ function showTextInputWindow({ title, label, value, helper }) {
       finish(null);
     });
     win.on("closed", () => finish(null));
-    win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(textInputHtml({ title, label, value, helper, channel, design }))}`);
+    win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(textInputHtml({ title, label, value, helper, channel, design, captureShortcut }))}`);
   });
 }
 
-function textInputHtml({ title, label, value, helper, channel, design }) {
+function textInputHtml({ title, label, value, helper, channel, design, captureShortcut = false }) {
+  const mainMarkup = captureShortcut
+    ? `<main class="shortcut-main">
+        <section class="shortcut-recorder" id="shortcut-recorder" tabindex="0" aria-label="${escapeHtmlAttr(label)}">
+          <div class="shortcut-label">${escapeHtml(label)}</div>
+          <input id="value" type="hidden" value="${escapeHtmlAttr(value || "")}" />
+          <div class="shortcut-display" id="shortcut-display"></div>
+        </section>
+        <div class="helper">${escapeHtml(helper || "Maintiens les touches du raccourci à utiliser.")}</div>
+      </main>`
+    : `<main><label>${escapeHtml(label)}<input id="value" value="${escapeHtmlAttr(value || "")}" autofocus /></label><div class="helper">${escapeHtml(helper || "")}</div></main>`;
+  const footerMarkup = captureShortcut
+    ? `<footer><button class="secondary" id="clear">Effacer</button><span class="footer-spacer"></span><button class="secondary" id="cancel">Annuler</button><button class="primary" id="submit">Enregistrer</button></footer>`
+    : `<footer><button class="secondary" id="cancel">Annuler</button><button class="primary" id="submit">Enregistrer</button></footer>`;
   return `<!doctype html><html lang="fr"><head><meta charset="utf-8" /><title>${escapeHtml(title)}</title><style>
   ${bridgeDesignCss(design)}
-  *{box-sizing:border-box}body{margin:0;height:100vh;background:var(--bg);color:var(--text);font-family:var(--font-sans);overflow:hidden}
-  header{height:72px;padding:18px 24px;background:var(--panel);border-bottom:1px solid var(--border)}
-  h1{font-size:17px;line-height:1.2;margin:0}main{padding:22px 24px}
-  label{display:grid;gap:8px;font-size:13px;font-weight:700}
-  input{width:100%;height:38px;border-radius:7px;border:1px solid var(--border);background:var(--panel);color:var(--text);font:inherit;padding:0 10px}
-  .helper{margin-top:8px;color:var(--muted);font-size:12px;line-height:1.45}
-  footer{height:64px;padding:14px 24px;background:var(--panel);border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:10px}
-  button{border:0;border-radius:7px;padding:8px 16px;font:inherit;font-size:13px;font-weight:650;cursor:pointer}
+  *{box-sizing:border-box}body{margin:0;height:100vh;background:var(--bg);color:var(--text);font-family:var(--font-sans);overflow:hidden;display:grid;grid-template-rows:76px minmax(0,1fr)82px}
+  header{padding:18px 28px;background:var(--panel);border-bottom:1px solid var(--border);display:flex;align-items:center}
+  h1{font-size:18px;line-height:1.2;margin:0}main{min-height:0;padding:28px;overflow:hidden}
+  label{display:grid;gap:10px;font-size:13px;font-weight:700}
+  input{width:100%;min-width:0;height:40px;border-radius:7px;border:1px solid var(--border);background:var(--panel);color:var(--text);font:inherit;padding:0 10px}
+  .helper{margin-top:14px;color:var(--muted);font-size:12px;line-height:1.45}
+  footer{padding:16px 28px;background:var(--panel);border-top:1px solid var(--border);display:flex;align-items:center;justify-content:flex-end;gap:12px}
+  .footer-spacer{flex:1}
+  button{min-width:112px;height:44px;border:0;border-radius:7px;padding:0 18px;font:inherit;font-size:13px;font-weight:700;cursor:pointer}
   .primary{background:var(--accent);color:var(--on-accent)}.secondary{background:var(--secondary);color:var(--text)}
+  .shortcut-main{display:grid;align-content:start}
+  .shortcut-recorder{min-height:156px;border:2px solid var(--accent);border-radius:12px;background:var(--panel);padding:22px 24px;display:grid;align-content:center;gap:18px;outline:none;box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 16%,transparent)}
+  .shortcut-label{font-size:13px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+  .shortcut-display{min-height:48px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .shortcut-empty{color:var(--muted);font-size:14px}
+  .keycap{min-width:46px;height:44px;padding:0 16px;border-radius:8px;border:1px solid var(--border);background:var(--bg);display:inline-flex;align-items:center;justify-content:center;font-weight:800;font-size:15px;box-shadow:0 1px 0 rgba(0,0,0,.06)}
+  .plus{color:var(--muted);font-weight:800}
   </style></head><body>
   <header><h1>${escapeHtml(title)}</h1></header>
-  <main><label>${escapeHtml(label)}<input id="value" value="${escapeHtml(value || "")}" autofocus /></label><div class="helper">${escapeHtml(helper || "")}</div></main>
-  <footer><button class="secondary" id="cancel">Annuler</button><button class="primary" id="submit">Enregistrer</button></footer>
-  <script>
-    const { ipcRenderer } = require("electron");
-    const channel = ${JSON.stringify(channel)};
-    const input = document.getElementById('value');
-    document.getElementById('cancel').addEventListener('click', () => ipcRenderer.send(channel, { action: 'cancel' }));
-    document.getElementById('submit').addEventListener('click', () => ipcRenderer.send(channel, { action: 'submit', value: input.value }));
-    input.addEventListener('keydown', (event) => { if (event.key === 'Enter') ipcRenderer.send(channel, { action: 'submit', value: input.value }); if (event.key === 'Escape') ipcRenderer.send(channel, { action: 'cancel' }); });
-    input.focus();
-    input.select();
-  </script></body></html>`;
+  ${mainMarkup}
+  ${footerMarkup}
+	  <script>
+	    const { ipcRenderer } = require("electron");
+	    const channel = ${JSON.stringify(channel)};
+	    const captureShortcut = ${JSON.stringify(captureShortcut)};
+	    const input = document.getElementById('value');
+	    const recorder = document.getElementById('shortcut-recorder');
+	    const display = document.getElementById('shortcut-display');
+	    const isMac = navigator.platform.toLowerCase().includes("mac");
+	    const activeModifiers = new Set();
+	    document.getElementById('cancel').addEventListener('click', () => ipcRenderer.send(channel, { action: 'cancel' }));
+	    document.getElementById('submit').addEventListener('click', () => ipcRenderer.send(channel, { action: 'submit', value: input.value }));
+	    document.getElementById('clear')?.addEventListener('click', () => {
+	      input.value = "";
+	      activeModifiers.clear();
+	      renderShortcut();
+	      recorder?.focus();
+	    });
+	    function renderShortcut(parts) {
+	      if (!display) return;
+	      const value = Array.isArray(parts) ? parts.join("+") : input.value;
+	      const keys = String(value || "").split("+").map((part) => displayKey(part.trim())).filter(Boolean);
+	      if (!keys.length) {
+	        display.innerHTML = '<span class="shortcut-empty">Appuie sur le raccourci</span>';
+	        return;
+	      }
+	      display.innerHTML = keys.map((key, index) => {
+	        const safe = key.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
+	        return (index ? '<span class="plus">+</span>' : '') + '<span class="keycap">' + safe + '</span>';
+	      }).join("");
+	    }
+	    function displayKey(key) {
+	      const normalized = String(key || "").trim().toLowerCase();
+	      if (!normalized) return "";
+	      if (normalized === "commandorcontrol" || normalized === "cmdorctrl" || normalized === "controlorcommand") return isMac ? "Command" : "Control";
+	      if (normalized === "cmd" || normalized === "meta" || normalized === "super") return isMac ? "Command" : "Super";
+	      if (normalized === "ctrl") return "Control";
+	      if (normalized === "alt") return isMac ? "Option" : "Alt";
+	      if (normalized === "option") return isMac ? "Option" : "Alt";
+	      if (normalized === "esc") return "Escape";
+	      if (normalized === "return") return "Enter";
+	      if (normalized === "space") return "Space";
+	      return key.length === 1 ? key.toUpperCase() : key.slice(0, 1).toUpperCase() + key.slice(1);
+	    }
+	    function modifierLabel(key) {
+	      if (key === "Meta") return "Command";
+	      if (key === "Control") return "Control";
+	      if (key === "Alt") return isMac ? "Option" : "Alt";
+	      if (key === "Shift") return "Shift";
+	      return "";
+	    }
+	    function orderedModifiers(event) {
+	      if (event?.metaKey) activeModifiers.add("Command");
+	      if (event?.ctrlKey) activeModifiers.add("Control");
+	      if (event?.altKey) activeModifiers.add(isMac ? "Option" : "Alt");
+	      if (event?.shiftKey) activeModifiers.add("Shift");
+	      return ["Command", "Control", "Option", "Alt", "Shift"].filter((part) => activeModifiers.has(part));
+	    }
+	    function shortcutKey(event) {
+	      const code = String(event.code || "");
+	      if (code === "Space") return "Space";
+	      if (/^Key[A-Z]$/.test(code)) return code.slice(3);
+	      if (/^Digit[0-9]$/.test(code)) return code.slice(5);
+	      if (/^F\\d{1,2}$/.test(code)) return code;
+	      const key = String(event.key || "");
+	      if (!key || ["Meta", "Control", "Alt", "Shift"].includes(key)) return "";
+	      if (key === " ") return "Space";
+	      if (key === "Esc") return "Escape";
+	      if (key.length === 1) return key.toUpperCase();
+	      return key.slice(0, 1).toUpperCase() + key.slice(1);
+	    }
+	    input.addEventListener('keydown', (event) => {
+	      if (event.key === 'Escape') {
+	        ipcRenderer.send(channel, { action: 'cancel' });
+	        return;
+	      }
+	      if (captureShortcut && event.key === 'Enter' && input.value) {
+	        ipcRenderer.send(channel, { action: 'submit', value: input.value });
+	        return;
+	      }
+	      if (captureShortcut) {
+	        event.preventDefault();
+	        const modifier = modifierLabel(event.key);
+	        if (modifier) {
+	          activeModifiers.add(modifier);
+	          renderShortcut(orderedModifiers(event));
+	          return;
+	        }
+	        const parts = orderedModifiers(event);
+	        const key = shortcutKey(event);
+	        if (key) {
+	          parts.push(key);
+	          input.value = parts.join("+");
+	          renderShortcut(parts);
+	        }
+	        return;
+	      }
+	      if (event.key === 'Enter') ipcRenderer.send(channel, { action: 'submit', value: input.value });
+	    });
+	    document.addEventListener('keyup', (event) => {
+	      if (!captureShortcut) return;
+	      const modifier = modifierLabel(event.key);
+	      if (modifier) activeModifiers.delete(modifier);
+	    });
+	    renderShortcut();
+	    if (captureShortcut) {
+	      recorder?.focus();
+	    } else {
+	      input.focus();
+	      input.select();
+	    }
+	  </script></body></html>`;
 }
 
 function startRuntimeIfAvailable() {
@@ -920,6 +1063,9 @@ function placeholderLocalAiStatus(cfg) {
   const policy = normalizeAiPolicy(cfg.aiPolicy).localAi;
   const prefs = loadLocalAiPrefs();
   const model = effectiveLocalAiModel(policy, cfg.defaultLocalModel);
+  const lmsBin = findLmsBin();
+  const lmStudioApp = findLmStudioApp();
+  const installed = Boolean(lmsBin || lmStudioApp);
   return {
     enabled: policy.enabled,
     installRequired: policy.installRequired,
@@ -929,7 +1075,7 @@ function placeholderLocalAiStatus(cfg) {
     userModel: policy.allowUserModelOverride ? prefs.localModel : undefined,
     allowUserModelOverride: policy.allowUserModelOverride,
     ready: false,
-    installed: Boolean(findLmsBin()),
+    installed,
     serverReady: false,
     modelReady: false,
     models: [],
@@ -948,7 +1094,10 @@ function getVoiceStatus(cfg) {
   const transcriptionReady = sidecar?.transcriptionReady === true;
   const modelPath = voiceModelPath(policy.model);
   const modelInstalled = isVoiceModelInstalled(policy.model);
-  const shortcutReady = Boolean(voiceShortcutProcess && !voiceShortcutProcess.killed && !voiceShortcutError);
+  const shortcutReady = Boolean(
+    (voiceShortcutProcess && !voiceShortcutProcess.killed && !voiceShortcutError) ||
+    (voiceShortcutMode === "electron" && voiceShortcutValue && !voiceShortcutError)
+  );
   return {
     enabled: policy.enabled,
     installRequired: policy.installRequired,
@@ -970,14 +1119,14 @@ function getVoiceStatus(cfg) {
     transcriptionReady,
     installed: Boolean(bin),
     path: bin,
-    error: sidecar?.ok === false ? sidecar.error : undefined,
+    error: sidecar?.ok === false ? sidecar.error : sidecar?.audioError,
     label: policy.enabled
       ? !bin
         ? "Push-to-talk à installer"
         : !modelInstalled
           ? "Modèle vocal à installer"
           : !audioReady
-            ? "Micro à autoriser"
+            ? "Micro indisponible"
             : shortcutReady
               ? "Push-to-talk prêt"
               : voiceShortcutError
@@ -1129,6 +1278,10 @@ function handleVoiceProcessLine(line) {
   } catch {
     return;
   }
+  if (parsed?.event === "mic-level" && Array.isArray(parsed.levels)) {
+    updateVoiceOverlayLevels(parsed.levels);
+    return;
+  }
   const pending = voicePending.shift();
   if (pending) {
     clearTimeout(pending.timer);
@@ -1171,23 +1324,38 @@ function sendVoiceCommand(payload, timeout = 15_000) {
 }
 
 function startVoiceShortcutWatcher() {
-  stopVoiceShortcutWatcher();
   const cfg = loadConfig({ hydrateSecrets: false });
-  const voice = getVoiceStatus(cfg);
-  if (!voice.enabled) return;
+  const policy = normalizeAiPolicy(cfg.aiPolicy).voice;
+  if (!policy.enabled) return;
   const bin = findVoiceSidecar();
   if (!bin) {
     voiceShortcutError = "bridge-voice introuvable";
     return;
   }
-  const shortcut = toHandyShortcut(voice.shortcut);
+  if (policy.installRequired && !isVoiceModelInstalled(policy.model)) {
+    stopVoiceShortcutWatcher();
+    voiceShortcutError = "";
+    return;
+  }
+  const userPrefs = loadVoicePrefs();
+  const shortcut = toHandyShortcut(policy.allowUserShortcutOverride ? userPrefs.shortcut || policy.defaultShortcut : policy.defaultShortcut);
   if (!shortcut) {
     voiceShortcutError = "raccourci vocal invalide";
     return;
   }
+  if (
+    ((voiceShortcutProcess && !voiceShortcutProcess.killed) || voiceShortcutMode === "electron") &&
+    !voiceShortcutError &&
+    voiceShortcutValue === shortcut
+  ) {
+    return;
+  }
+  stopVoiceShortcutWatcher();
   voiceShortcutError = "";
   voiceShortcutValue = shortcut;
+  voiceShortcutMode = "sidecar";
   voiceShortcutStdoutBuffer = "";
+  registerElectronVoiceShortcutMirror(shortcut);
   const proc = spawn(bin, ["watch-shortcut", "--shortcut", shortcut], {
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
@@ -1201,7 +1369,11 @@ function startVoiceShortcutWatcher() {
   });
   proc.stderr.on("data", (chunk) => {
     const message = chunk.toString().trim();
-    if (message) pushActivity(`Raccourci vocal: ${message.slice(0, 180)}`);
+    if (message) {
+      voiceShortcutError = message.slice(0, 220);
+      pushActivity(`Raccourci vocal: ${message.slice(0, 180)}`);
+      refreshStatusWindow();
+    }
   });
   proc.on("error", (err) => {
     if (voiceShortcutProcess !== proc) return;
@@ -1210,13 +1382,68 @@ function startVoiceShortcutWatcher() {
   });
   proc.on("close", (code) => {
     if (voiceShortcutProcess !== proc) return;
-    voiceShortcutError = code === 0 ? "" : voiceShortcutError || `watcher vocal arrêté (${code})`;
     voiceShortcutProcess = null;
+    if (code !== 0 && startElectronVoiceShortcutFallback(shortcut)) {
+      refreshStatusWindow();
+      return;
+    }
+    voiceShortcutError = code === 0 ? "" : voiceShortcutError || `watcher vocal arrêté (${code})`;
+    voiceShortcutMode = "";
+    if (code !== 0) scheduleVoiceShortcutRetry(shortcut);
     refreshStatusWindow();
   });
 }
 
+function startElectronVoiceShortcutFallback(shortcut) {
+  if (!registerElectronVoiceShortcutMirror(shortcut)) return false;
+  voiceShortcutMode = "electron";
+  pushActivity(`Raccourci push-to-talk actif: ${shortcut}.`);
+  return true;
+}
+
+function registerElectronVoiceShortcutMirror(shortcut) {
+  if (!globalShortcut || !shortcut) return false;
+  try {
+    const electronShortcut = toElectronAccelerator(shortcut);
+    if (!electronShortcut) return false;
+    if (voiceShortcutElectronAccelerator && voiceShortcutElectronAccelerator !== electronShortcut) {
+      try {
+        globalShortcut.unregister(voiceShortcutElectronAccelerator);
+      } catch {
+        // no-op
+      }
+      voiceShortcutElectronAccelerator = "";
+    }
+    if (voiceShortcutElectronAccelerator === electronShortcut && globalShortcut.isRegistered(electronShortcut)) return true;
+    const registered = globalShortcut.register(electronShortcut, () => handleElectronVoiceShortcut(shortcut));
+    if (!registered) {
+      voiceShortcutError = `raccourci indisponible: ${electronShortcut}`;
+      return false;
+    }
+    voiceShortcutError = "";
+    voiceShortcutElectronAccelerator = electronShortcut;
+    voiceShortcutValue = shortcut;
+    return true;
+  } catch (err) {
+    voiceShortcutError = err instanceof Error ? err.message : String(err);
+    return false;
+  }
+}
+
+function handleElectronVoiceShortcut(shortcut) {
+  const now = Date.now();
+  if (now - lastVoiceShortcutEventAt < 450) return;
+  lastVoiceShortcutEventAt = now;
+  pushActivity(`Raccourci push-to-talk détecté: ${shortcut}.`);
+  showVoiceOverlay({ mode: "listening", autoClose: false });
+  void toggleVoiceDictation();
+}
+
 function stopVoiceShortcutWatcher() {
+  if (voiceShortcutRetryTimer) {
+    clearTimeout(voiceShortcutRetryTimer);
+    voiceShortcutRetryTimer = null;
+  }
   if (voiceShortcutProcess && !voiceShortcutProcess.killed) {
     try {
       voiceShortcutProcess.kill();
@@ -1224,8 +1451,37 @@ function stopVoiceShortcutWatcher() {
       // no-op
     }
   }
+  if (voiceShortcutMode === "electron" && voiceShortcutValue) {
+    try {
+      globalShortcut.unregister(toElectronAccelerator(voiceShortcutValue));
+    } catch {
+      // no-op
+    }
+  }
+  if (voiceShortcutElectronAccelerator) {
+    try {
+      globalShortcut.unregister(voiceShortcutElectronAccelerator);
+    } catch {
+      // no-op
+    }
+  }
   voiceShortcutProcess = null;
+  voiceShortcutMode = "";
+  voiceShortcutElectronAccelerator = "";
   voiceShortcutStdoutBuffer = "";
+}
+
+function scheduleVoiceShortcutRetry(shortcut) {
+  if (voiceShortcutRetryTimer || isQuitting) return;
+  voiceShortcutRetryTimer = setTimeout(() => {
+    voiceShortcutRetryTimer = null;
+    if (isQuitting) return;
+    const cfg = loadConfig({ hydrateSecrets: false });
+    const policy = normalizeAiPolicy(cfg.aiPolicy).voice;
+    const userPrefs = loadVoicePrefs();
+    const currentShortcut = toHandyShortcut(policy.allowUserShortcutOverride ? userPrefs.shortcut || policy.defaultShortcut : policy.defaultShortcut);
+    if (policy.enabled && currentShortcut === shortcut) startVoiceShortcutWatcher();
+  }, 2_000);
 }
 
 function handleVoiceShortcutLine(line) {
@@ -1244,6 +1500,7 @@ function handleVoiceShortcutLine(line) {
     return;
   }
   if (parsed.event !== "shortcut") return;
+  lastVoiceShortcutEventAt = Date.now();
   void handleVoiceShortcutEvent(parsed.pressed === true);
 }
 
@@ -1277,6 +1534,27 @@ function toHandyShortcut(shortcut) {
     .join("+");
 }
 
+function toElectronAccelerator(shortcut) {
+  const raw = String(shortcut || "").trim();
+  if (!raw) return "";
+  return raw
+    .split("+")
+    .map((part) => part.trim().toLowerCase())
+    .filter(Boolean)
+    .map((part) => {
+      if (part === "command") return "Command";
+      if (part === "ctrl" || part === "control") return "Control";
+      if (part === "option" || part === "alt") return "Alt";
+      if (part === "shift") return "Shift";
+      if (part === "super" || part === "meta" || part === "cmd") return process.platform === "darwin" ? "Command" : "Super";
+      if (part === "space") return "Space";
+      if (part === "enter") return "Enter";
+      if (part === "escape") return "Esc";
+      return part.length === 1 ? part.toUpperCase() : part;
+    })
+    .join("+");
+}
+
 function voiceRecordingsDir() {
   const dir = path.join(app.getPath("userData"), "voice-recordings");
   fs.mkdirSync(dir, { recursive: true });
@@ -1305,11 +1583,12 @@ async function startVoiceDictation() {
       modelPath: voice.modelPath,
       startedAt: Date.now(),
     };
-    showVoiceOverlay();
+    showVoiceOverlay({ mode: "listening", autoClose: false });
     pushActivity("Dictée locale démarrée.");
     return { ok: true, state: "recording", wavPath };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    showVoiceOverlay({ mode: "error", message });
     pushActivity(`Dictée locale indisponible: ${message}`);
     return { ok: false, error: message };
   } finally {
@@ -1324,7 +1603,7 @@ async function stopVoiceDictation() {
   voiceRecording = null;
   try {
     if (!current) return { ok: false, error: "recording-not-active" };
-    showVoiceOverlay();
+    showVoiceOverlay({ mode: "transcribing", autoClose: false });
     const stopped = await sendVoiceCommand({ command: "stop", model: current.modelPath }, 120_000);
     if (!stopped?.ok) throw new Error(stopped?.error || "Arrêt de l'enregistrement refusé.");
     const text = String(stopped.text || "").trim();
@@ -1341,6 +1620,7 @@ async function stopVoiceDictation() {
     pushActivity(`Dictée locale échouée: ${message}`);
     return { ok: false, error: message };
   } finally {
+    hideVoiceOverlay();
     voiceBusy = false;
     refreshStatusWindow();
   }
@@ -1379,21 +1659,34 @@ function registerVoiceShortcut() {
 }
 
 let voiceOverlayWindow = null;
-function showVoiceOverlay() {
+let voiceOverlayCloseTimer = null;
+function showVoiceOverlay(options = {}) {
   const design = loadBridgeDesign();
+  const mode = options.mode === "error" ? "error" : options.mode === "transcribing" ? "transcribing" : "listening";
+  const autoClose = options.autoClose ?? mode !== "listening";
+  if (voiceOverlayCloseTimer) {
+    clearTimeout(voiceOverlayCloseTimer);
+    voiceOverlayCloseTimer = null;
+  }
   if (voiceOverlayWindow && !voiceOverlayWindow.isDestroyed()) {
-    voiceOverlayWindow.focus();
+    voiceOverlayWindow.loadURL(`data:text/html;charset=utf-8;base64,${Buffer.from(voiceOverlayHtml(design, options), "utf8").toString("base64")}`);
+    if (autoClose) scheduleVoiceOverlayClose();
     return;
   }
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const workArea = primaryDisplay?.workArea || { x: 0, y: 0, width: 1440, height: 900 };
+  const overlayWidth = 172;
+  const overlayHeight = 36;
   voiceOverlayWindow = new BrowserWindow({
-    width: 220,
-    height: 220,
+    width: overlayWidth,
+    height: overlayHeight,
+    x: Math.round(workArea.x + (workArea.width - overlayWidth) / 2),
+    y: Math.round(workArea.y + workArea.height - overlayHeight - 15),
     frame: false,
     transparent: true,
     alwaysOnTop: true,
     resizable: false,
     skipTaskbar: true,
-    center: true,
     show: true,
     backgroundColor: "#00000000",
     webPreferences: {
@@ -1401,26 +1694,94 @@ function showVoiceOverlay() {
       contextIsolation: true,
     },
   });
-  voiceOverlayWindow.loadURL(`data:text/html;charset=utf-8;base64,${Buffer.from(voiceOverlayHtml(design), "utf8").toString("base64")}`);
-  setTimeout(() => {
-    try {
-      if (voiceOverlayWindow && !voiceOverlayWindow.isDestroyed()) voiceOverlayWindow.close();
-    } catch {
-      // ignore
-    }
-  }, 1600);
+  voiceOverlayWindow.loadURL(`data:text/html;charset=utf-8;base64,${Buffer.from(voiceOverlayHtml(design, options), "utf8").toString("base64")}`);
+  if (autoClose) scheduleVoiceOverlayClose();
 }
 
-function voiceOverlayHtml(design) {
+function scheduleVoiceOverlayClose(delay = 1600) {
+  voiceOverlayCloseTimer = setTimeout(hideVoiceOverlay, delay);
+}
+
+function hideVoiceOverlay() {
+  if (voiceOverlayCloseTimer) {
+    clearTimeout(voiceOverlayCloseTimer);
+    voiceOverlayCloseTimer = null;
+  }
+  try {
+    if (voiceOverlayWindow && !voiceOverlayWindow.isDestroyed()) voiceOverlayWindow.close();
+  } catch {
+    // ignore
+  } finally {
+    voiceOverlayWindow = null;
+  }
+}
+
+function updateVoiceOverlayLevels(levels) {
+  if (!voiceOverlayWindow || voiceOverlayWindow.isDestroyed()) return;
+  const values = levels
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value))
+    .slice(0, 16);
+  if (!values.length) return;
+  const script = `window.__bridgeSetLevels && window.__bridgeSetLevels(${JSON.stringify(values)})`;
+  voiceOverlayWindow.webContents.executeJavaScript(script).catch(() => {
+    // The overlay can disappear while an audio packet is in flight.
+  });
+}
+
+function voiceOverlayHtml(design, options = {}) {
+  const mode = options.mode === "error" ? "error" : options.mode === "transcribing" ? "transcribing" : "listening";
+  const label = mode === "error" ? "Micro indisponible" : mode === "transcribing" ? "Transcription..." : "";
   return `<!doctype html><html><head><meta charset="utf-8"><style>
   ${bridgeDesignCss(design)}
   html,body{margin:0;width:100%;height:100%;background:transparent;font-family:var(--font-sans);overflow:hidden}
-  .wrap{width:100%;height:100%;display:grid;place-items:center}
-  .pulse{width:126px;height:126px;border-radius:999px;background:var(--accent);display:grid;place-items:center;box-shadow:0 0 0 0 color-mix(in srgb,var(--accent) 34%,transparent);animation:pulse 1.05s ease-out infinite;color:var(--on-accent)}
-  .inner{width:58px;height:58px;border-radius:999px;background:color-mix(in srgb,var(--on-accent) 18%,transparent);display:grid;place-items:center}
-  .bar{width:8px;height:28px;border-radius:999px;background:currentColor;box-shadow:-14px 6px 0 -1px currentColor,14px 6px 0 -1px currentColor}
-  @keyframes pulse{0%{transform:scale(.92);box-shadow:0 0 0 0 color-mix(in srgb,var(--accent) 34%,transparent)}70%{transform:scale(1);box-shadow:0 0 0 28px color-mix(in srgb,var(--accent) 0%,transparent)}100%{transform:scale(.92);box-shadow:0 0 0 0 color-mix(in srgb,var(--accent) 0%,transparent)}}
-  </style></head><body><div class="wrap"><div class="pulse"><div class="inner"><div class="bar"></div></div></div></div></body></html>`;
+  .recording-overlay{height:36px;width:172px;display:grid;grid-template-columns:auto 1fr auto;align-items:center;padding:6px;background:#000000cc;border-radius:18px;opacity:0;transition:opacity 300ms ease-out;box-sizing:border-box}
+  .recording-overlay.fade-in{opacity:1}
+  .overlay-left{display:flex;align-items:center}
+  .overlay-middle{display:flex;align-items:center;justify-content:center;min-width:0}
+  .overlay-right{display:flex;align-items:center;justify-content:flex-end}
+  .bars-container{display:flex;align-items:end;justify-content:center;gap:3px;padding-bottom:0;height:24px;overflow:hidden}
+  .bar{width:6px;background:var(--accent);max-height:20px;border-radius:2px;transition:height 80ms linear;min-height:4px;height:4px;opacity:.2}
+  .transcribing-text{color:var(--paper);font-size:12px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;animation:transcribing-pulse 1.5s infinite ease-in-out;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:112px}
+  .cancel-button{width:24px;height:24px;border-radius:50%;background:transparent;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:background-color 150ms ease-out,transform 100ms ease-out;flex-shrink:0}
+  .cancel-button:hover{background:color-mix(in srgb,var(--accent) 22%,transparent);transform:scale(1.05)}
+  .cancel-button:active{transform:scale(.95)}
+  .overlay-left,.cancel-button{color:var(--accent)}
+  svg{display:block}
+  @keyframes transcribing-pulse{0%,100%{opacity:.6}50%{opacity:1}}
+  </style></head><body><div class="recording-overlay fade-in">
+    <div class="overlay-left">${handyMicrophoneSvg()}</div>
+    <div class="overlay-middle">${
+      mode === "listening"
+        ? '<div class="bars-container">' + Array.from({ length: 9 }, () => '<div class="bar"></div>').join("") + '</div>'
+        : `<div class="transcribing-text">${escapeHtml(label)}</div>`
+    }</div>
+    <div class="overlay-right">${mode === "listening" ? `<div class="cancel-button">${handyCancelSvg()}</div>` : ""}</div>
+  </div><script>
+  const smoothedLevels = Array(16).fill(0);
+  const bars = Array.from(document.querySelectorAll(".bar"));
+  window.__bridgeSetLevels = (levels) => {
+    if (!Array.isArray(levels)) return;
+    for (let i = 0; i < smoothedLevels.length; i += 1) {
+      const target = Number(levels[i] || 0);
+      smoothedLevels[i] = smoothedLevels[i] * 0.7 + Math.max(0, Math.min(1, target)) * 0.3;
+    }
+    bars.forEach((bar, index) => {
+      const value = smoothedLevels[index] || 0;
+      bar.style.height = Math.min(20, 4 + Math.pow(value, 0.7) * 16) + "px";
+      bar.style.transition = "height 60ms ease-out, opacity 120ms ease-out";
+      bar.style.opacity = String(Math.max(0.2, value * 1.7));
+    });
+  };
+  </script></body></html>`;
+}
+
+function handyMicrophoneSvg() {
+  return `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M17.1562 10.2C17.1562 8.83247 16.613 7.52099 15.646 6.554C14.679 5.58702 13.3675 5.04375 12 5.04375C10.6325 5.04375 9.32099 5.58702 8.354 6.554C7.38702 7.52099 6.84375 8.83247 6.84375 10.2C6.84375 11.1586 6.99743 11.7554 7.18689 12.1629C7.37547 12.5685 7.62633 12.848 7.94019 13.1553C8.23392 13.443 8.67357 13.8299 8.99524 14.3488C9.34195 14.9081 9.54381 15.5869 9.54382 16.4999C9.54382 17.1513 9.80245 17.7762 10.2631 18.2369C10.7237 18.6975 11.3486 18.9561 12 18.9561C12.7207 18.9561 13.268 18.6453 13.7494 18.0625C14.0462 17.7033 14.5781 17.6526 14.9374 17.9494C15.2967 18.2461 15.3473 18.7781 15.0505 19.1374C14.3214 20.0201 13.3283 20.6436 12 20.6436C10.901 20.6436 9.84705 20.2071 9.06995 19.43C8.29287 18.6529 7.85632 17.5989 7.85632 16.4999C7.85631 15.8572 7.72032 15.4953 7.56079 15.238C7.37622 14.9402 7.14072 14.7342 6.75952 14.3609C6.39843 14.0073 5.97449 13.5575 5.65686 12.8744C5.34008 12.1931 5.15625 11.3413 5.15625 10.2C5.15625 8.38492 5.87744 6.64434 7.16089 5.36089C8.44434 4.07743 10.1849 3.35625 12 3.35625C13.8151 3.35625 15.5557 4.07743 16.8391 5.36089C18.1226 6.64434 18.8438 8.38492 18.8438 10.2C18.8437 10.666 18.466 11.0437 18 11.0437C17.534 11.0437 17.1563 10.666 17.1562 10.2Z" fill="currentColor"/><path d="M14.1562 10.2C14.1562 9.62812 13.9289 9.07984 13.5245 8.67546C13.1454 8.29636 12.6399 8.07275 12.1069 8.04631L12 8.04375C11.4281 8.04375 10.8798 8.27109 10.4755 8.67546C10.0711 9.07984 9.84375 9.62812 9.84375 10.2C9.84375 10.666 9.46599 11.0437 9 11.0437C8.53401 11.0437 8.15625 10.666 8.15625 10.2C8.15625 9.18057 8.56114 8.20282 9.28198 7.48198C10.0028 6.76114 10.9806 6.35625 12 6.35625L12.1904 6.36101C13.1405 6.4081 14.0422 6.80615 14.718 7.48198C15.4389 8.20282 15.8438 9.18057 15.8438 10.2C15.8438 11.4145 15.2126 12.223 14.7751 12.8063C14.3126 13.423 14.0438 13.8146 14.0438 14.4001C14.0438 14.4785 14.0697 14.555 14.1174 14.6172C14.1652 14.6795 14.2321 14.7244 14.3079 14.7447C14.3836 14.7649 14.4639 14.7597 14.5364 14.7297C14.6088 14.6996 14.6693 14.6464 14.7085 14.5784C14.9413 14.1748 15.4573 14.0363 15.861 14.269C16.2646 14.5018 16.4032 15.0178 16.1704 15.4214C15.9456 15.8113 15.5984 16.1163 15.1827 16.2886C14.767 16.4609 14.3057 16.4911 13.871 16.3747C13.4363 16.2582 13.0521 16.0015 12.7782 15.6445C12.5043 15.2874 12.3562 14.8497 12.3563 14.3997C12.3564 13.1854 12.9875 12.377 13.4249 11.7937C13.8875 11.177 14.1562 10.7855 14.1562 10.2Z" fill="currentColor"/></svg>`;
+}
+
+function handyCancelSvg() {
+  return `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true"><g fill="currentColor"><path d="m14.293 8.29297c.3905-.39052 1.0235-.39052 1.414 0s.3905 1.02354 0 1.41406l-5.99998 5.99997c-.39053.3906-1.02354.3906-1.41407 0-.39052-.3905-.39052-1.0235 0-1.414z"/><path d="m8.29295 8.29297c.39053-.39052 1.02354-.39052 1.41407 0l5.99998 6.00003c.3905.3905.3905 1.0235 0 1.414-.3905.3906-1.0235.3906-1.414 0l-6.00005-5.99997c-.39052-.39052-.39052-1.02354 0-1.41406z"/><path d="m20 12c0-4.41828-3.5817-8-8-8-4.41828 0-8 3.58172-8 8 0 4.4183 3.58172 8 8 8 4.4183 0 8-3.5817 8-8zm2 0c0 5.5228-4.4772 10-10 10-5.52285 0-10-4.4772-10-10 0-5.52285 4.47715-10 10-10 5.5228 0 10 4.47715 10 10z" opacity=".4"/></g></svg>`;
 }
 
 function scheduleLocalAiStatusRefresh() {
@@ -1444,7 +1805,9 @@ async function getLocalAiStatus(cfg) {
   const policy = normalizeAiPolicy(cfg.aiPolicy).localAi;
   const prefs = loadLocalAiPrefs();
   const model = effectiveLocalAiModel(policy, cfg.defaultLocalModel);
-  const installed = Boolean(findLmsBin() || findLmStudioApp());
+  const lmsBin = findLmsBin();
+  const lmStudioApp = findLmStudioApp();
+  const installed = Boolean(lmsBin || lmStudioApp);
   if (!policy.enabled) {
     return {
       ...placeholderLocalAiStatus(cfg),
@@ -1797,9 +2160,10 @@ function prepareBridgeConfigForDisk(cfg) {
 }
 
 function shouldUseElectronSafeStorage() {
-  // Chiffrement par défaut dès qu'un coffre OS est disponible ; opt-out explicite
-  // via BRIDGE_USE_SAFE_STORAGE=0 (CI/headless). Aligné avec bridge/config.ts.
-  return process.env.BRIDGE_USE_SAFE_STORAGE !== "0" && Boolean(safeStorage?.isEncryptionAvailable());
+  // Les builds Bridge Rossini ne sont pas signés/stables pendant les itérations.
+  // Sur macOS, safeStorage peut alors rendre les tokens illisibles après remplacement
+  // de l'app. On garde le déchiffrement compatible, mais le chiffrement devient opt-in.
+  return process.env.BRIDGE_USE_SAFE_STORAGE === "1" && Boolean(safeStorage?.isEncryptionAvailable());
 }
 
 function defaultConfig() {
@@ -2409,6 +2773,7 @@ async function syncServicesFromControlPlane(cfg) {
 
 function scheduleRequiredAdminProvisioning(reason = "policy") {
   if (adminProvisioningScheduled || adminProvisioningRunning || isQuitting) return;
+  if (Date.now() - lastAdminProvisioningPromptAt < 10 * 60 * 1000) return;
   const policy = normalizeAiPolicy(loadConfig({ hydrateSecrets: false }).aiPolicy);
   const required =
     (policy.localAi.enabled && policy.localAi.installRequired) ||
@@ -2434,37 +2799,60 @@ async function ensureAdminProvisioning(cfg = loadConfig(), options = {}) {
 
   adminProvisioningRunning = true;
   try {
-    const parentWindow = showStatusWindow({ focus: true }) || statusWindow;
-    pushActivity("Installation requise par l'organisation.");
     let shouldRunLocalSetup = false;
     let shouldRunVoiceSetup = false;
     if (needsLocal) {
       const localStatus = await getLocalAiStatus(cfg);
+      localAiStatusCache = localStatus;
       if (!localStatus.ready) {
-        if (!options.silent) pushActivity("Préparation du moteur local demandée par l'organisation.");
         shouldRunLocalSetup = true;
-      } else if (!options.silent) {
-        pushActivity("Moteur local déjà prêt.");
       }
     }
     if (needsVoice) {
-      if (!options.silent) pushActivity("Préparation de la dictée locale demandée par l'organisation.");
       shouldRunVoiceSetup = true;
     }
+    if (!shouldRunLocalSetup && !shouldRunVoiceSetup) {
+      return { ok: true, skipped: true, alreadyReady: true };
+    }
+
+    lastAdminProvisioningPromptAt = Date.now();
+    let completedVisibleSetup = false;
+    const shouldHideStatusForSetup = shouldRunLocalSetup || shouldRunVoiceSetup;
+    if (shouldHideStatusForSetup && statusWindow && !statusWindow.isDestroyed()) {
+      try {
+        statusWindow.hide();
+      } catch {
+        // no-op
+      }
+    }
+    const parentWindow = undefined;
+    pushActivity("Installation requise par l'organisation.");
+    if (shouldRunLocalSetup && !options.silent) pushActivity("Préparation du moteur local demandée par l'organisation.");
+    if (shouldRunVoiceSetup && !options.silent) pushActivity("Préparation de la dictée locale demandée par l'organisation.");
     if (shouldRunLocalSetup) {
       const result = await runLocalAiSetup({
         ...policy.localAi,
         model: effectiveLocalAiModel(policy.localAi, cfg.defaultLocalModel),
         mandatory: true,
+        focus: !options.silent,
         parentWindow,
       });
       localAiStatusCache = await getLocalAiStatus(loadConfig({ hydrateSecrets: false }));
       if (!result?.ok) throw new Error("Configuration locale interrompue.");
+      completedVisibleSetup = true;
     }
     if (shouldRunVoiceSetup) {
-      const result = await runVoiceSetup({ ...policy.voice, mandatory: true, parentWindow });
+      const result = await runVoiceSetup({ ...policy.voice, mandatory: true, focus: !options.silent, parentWindow });
       if (!result?.ok) throw new Error("Configuration de la dictée locale interrompue.");
       registerVoiceShortcut();
+      completedVisibleSetup = true;
+    }
+    if (completedVisibleSetup) {
+      void flushPendingBrowserSession();
+      if (revealStatusAfterProvisioning) {
+        revealStatusAfterProvisioning = false;
+        showStatusWindow({ focus: false });
+      }
     }
     refreshStatusWindow();
     updateTrayMenu();
@@ -2489,7 +2877,7 @@ async function ensureRequiredProvisioningComplete(reason = "action") {
     (policy.voice.enabled && policy.voice.installRequired);
   if (!required) return { ok: true, skipped: true };
   if (adminProvisioningRunning) {
-    showStatusWindow({ focus: true });
+    showStatusWindow({ focus: false });
     return {
       ok: false,
       error: "Installation requise en cours. Termine l'installation demandée par votre organisation.",
@@ -2510,7 +2898,7 @@ async function ensureRequiredProvisioningComplete(reason = "action") {
   const voice = getVoiceStatus(refreshed);
   const missing = requiredProvisioningState(localAi, voice);
   if (missing.required) {
-    showStatusWindow({ focus: true });
+    showStatusWindow({ focus: false });
     return {
       ok: false,
       error: missing.label || "Installation requise par votre organisation.",
@@ -2553,19 +2941,26 @@ async function openService(serviceId) {
           browserSessionId,
           returnUrl: target,
           state: localStatusPayload(),
-        }).catch((err) => {
+        }, { timeoutMs: 2500 }).catch((err) => {
           bridgeError = err instanceof Error ? err.message : String(err);
         });
         const ticket = await postControlPlane(cfg, "bridge/launch-ticket", {
           serviceId: service.serviceId,
           serviceInstanceId: service.serviceInstanceId,
           returnTo: target,
+        }, { timeoutMs: 4000 }).catch((err) => {
+          bridgeError = err instanceof Error ? err.message : String(err);
+          pushActivity(`Ouverture ${service.name} sans ticket Bridge: ${bridgeError}`);
+          return null;
         });
-        if (ticket.launchUrl) {
+        if (ticket?.launchUrl) {
           const launchUrl = cleanExternalUrl(ticket.launchUrl);
-          if (!launchUrl) throw new Error("Launch ticket URL invalide.");
-          target = serviceLaunchUrl(service, launchUrl);
-          usesLaunchTicket = true;
+          if (launchUrl) {
+            target = serviceLaunchUrl(service, launchUrl);
+            usesLaunchTicket = true;
+          } else {
+            pushActivity(`Ouverture ${service.name} sans ticket Bridge: URL de ticket invalide.`);
+          }
         }
       }
     } catch (err) {
@@ -2581,7 +2976,6 @@ async function openService(serviceId) {
       target = appendQueryParam(target, "bridgeControlPlaneUrl", cfg.controlPlaneBaseUrl);
     }
     target = appendQueryParam(target, "browserSessionId", browserSessionId);
-    hideStatusWindowAfterLaunch();
     await shell.openExternal(target);
     hideStatusWindowAfterLaunch();
     setTimeout(hideStatusWindowAfterLaunch, 900);
@@ -2644,9 +3038,15 @@ async function postControlPlane(cfg, route, payload, options = {}) {
     "x-bridge-token": cfg.bridgeToken || "",
   };
   if (cfg.session?.accessToken) headers.authorization = `Bearer ${cfg.session.accessToken}`;
+  let timeout = null;
+  const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+  if (controller && Number(options.timeoutMs) > 0) {
+    timeout = setTimeout(() => controller.abort(), Number(options.timeoutMs));
+  }
   const res = await fetch(url, {
     method: "POST",
     headers,
+    signal: controller?.signal,
     body: JSON.stringify({
       organizationId: cfg.organizationId || cfg.account?.organizationId,
       bridgeId: cfg.bridgeId,
@@ -2656,6 +3056,8 @@ async function postControlPlane(cfg, route, payload, options = {}) {
       sentAt: new Date().toISOString(),
       payload,
     }),
+  }).finally(() => {
+    if (timeout) clearTimeout(timeout);
   });
   if (!res.ok) {
     const text = (await res.text()).slice(0, 300);
@@ -2781,6 +3183,7 @@ function showStatusWindow({ focus = false } = {}) {
       return { ok: true, localModel: prefs.localModel, localAi: localAiStatusCache, provisioning };
     });
     ipcMain.handle("bridge:voice-status", () => getVoiceStatus(loadConfig({ hydrateSecrets: false })));
+    ipcMain.handle("bridge:voice-change-shortcut", () => changeVoiceShortcutFromMenu());
     ipcMain.handle("bridge:voice-set-shortcut", (_event, shortcut) => {
       const cfg = loadConfig({ hydrateSecrets: false });
       const voice = normalizeAiPolicy(cfg.aiPolicy).voice;
@@ -2790,12 +3193,12 @@ function showStatusWindow({ focus = false } = {}) {
       return voiceShortcutSaveResult(clean);
     });
     ipcMain.handle("bridge:voice-test-overlay", () => {
-      showVoiceOverlay();
+      showVoiceOverlay({ mode: "listening", autoClose: true });
       return { ok: true };
     });
     ipcMain.handle("bridge:voice-toggle", () => toggleVoiceDictation());
     ipcMain.handle("bridge:voice-test-microphone", () => {
-      showVoiceOverlay();
+      showVoiceOverlay({ mode: "listening", autoClose: true });
       return runVoiceSidecar(["test-microphone", "--duration-ms", "800"], 5000);
     });
     ipcMain.handle("bridge:open-codex-help", () => shell.openExternal("https://help.openai.com/en/articles/11381614-api-codex-cli-and-sign-in-with-chatgpt"));
@@ -2891,6 +3294,11 @@ function statusHtml() {
     .codex-mini.error { color: var(--red); border-color: var(--red-border); background: var(--red-bg); }
     .codex-mini .dot { width: 8px; height: 8px; border-radius: 99px; background: currentColor; box-shadow: none; }
     .services { min-height: calc(100vh - 94px); display: grid; grid-template-columns: repeat(3, 128px); gap: 38px 42px; align-content: center; justify-content: center; align-items: start; }
+    .services.provisioning { grid-template-columns: minmax(0, 520px); gap: 0; align-content: center; justify-content: center; }
+    .provisioning-panel { width: min(520px, calc(100vw - 72px)); border: 1px solid var(--line); background: var(--panel); border-radius: var(--radius); box-shadow: var(--shadow); padding: 22px; display: grid; gap: 12px; }
+    .provisioning-panel h2 { margin: 0; font-size: 22px; line-height: 1.2; letter-spacing: 0; }
+    .provisioning-panel p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.45; }
+    .provisioning-panel button { justify-self: start; }
     .login-hero { min-height: calc(100vh - 94px); display: grid; align-content: center; justify-content: center; }
     .login-hero .login-form { width: min(380px, calc(100vw - 64px)); }
     .login-hero .codex-card { display: none; }
@@ -3006,17 +3414,26 @@ function statusHtml() {
       document.getElementById("error").textContent = state.bridgeError || state.lastError || "";
       document.getElementById("dashboard-overview").innerHTML = state.authenticated ? dashboardOverview(state) : "";
       const services = document.getElementById("services");
+      services.classList.toggle("provisioning", provisioningRequired);
       if (!state.authenticated) {
         ensureLoginHero(state);
       } else if (provisioningRequired) {
         setUiError(state.requiredProvisioning?.label || "Installation requise par votre organisation.");
-        services.innerHTML = '<p class="empty">Installation requise par votre organisation. Le setup d\\'installation est ouvert pour terminer la préparation de ce poste.</p>';
+        services.innerHTML = '<div class="provisioning-panel">' +
+          '<h2>Installation requise</h2>' +
+          '<p>' + esc(state.requiredProvisioning?.items?.map(item => item.label).join(", ") || "Préparation locale") + '</p>' +
+          '<p class="muted">Le setup d\\'installation est ouvert pour terminer la préparation de ce poste.</p>' +
+          '<button type="button" class="primary" data-provisioning-open="1">Ouvrir l\\'installation</button>' +
+        '</div>';
         if (!window.__bridgeProvisioningPrompted) {
           window.__bridgeProvisioningPrompted = true;
           window.bridge.ensureAdminProvisioning().finally(() => {
             window.__bridgeProvisioningPrompted = false;
           });
         }
+        services.querySelector("[data-provisioning-open]")?.addEventListener("click", () => {
+          window.bridge.ensureAdminProvisioning();
+        });
       } else {
         setUiError(state.bridgeError || state.lastError || "");
         services.innerHTML = state.services.length ? state.services.map(service => {
@@ -3214,14 +3631,14 @@ function statusHtml() {
           '<span>État</span><strong>' + esc(voice.label || "-") + '</strong>' +
           '<span>Modèle</span><strong>' + esc(voice.model || "-") + '</strong>' +
           '<span>Fichier modèle</span><strong>' + esc(voice.modelInstalled ? "installé" : "à installer") + '</strong>' +
-          '<span>Micro</span><strong>' + esc(voice.audioReady ? "prêt" : (voice.error || "à autoriser")) + '</strong>' +
+          '<span>Micro</span><strong>' + esc(voice.audioReady ? "prêt" : (voice.error || "aucun micro utilisable")) + '</strong>' +
           '<span>Transcription</span><strong>' + esc(voice.transcriptionReady ? "active" : "moteur à finaliser") + '</strong>' +
           '<span>Raccourci natif</span><strong>' + esc(voice.shortcutNative || "-") + '</strong>' +
           '<span>Commande</span><strong>' + esc(voice.shortcutReady ? "active" : (voice.shortcutError || "préparation")) + '</strong>' +
           '<span>Écoute</span><strong>' + esc(voice.recording ? "en cours" : voice.busy ? "traitement" : "arrêtée") + '</strong>' +
         '</div>' +
         '<label>Raccourci<input name="shortcut" value="' + esc(voice.shortcut || "") + '" ' + (locked ? "disabled" : "") + ' /></label>' +
-        '<div class="codex-actions"><button type="submit" ' + (locked ? "disabled" : "") + '>Enregistrer</button><button type="button" data-voice-toggle="1">' + esc(voice.recording ? "Arrêter" : "Démarrer") + '</button><button type="button" data-voice-test="1">Tester micro</button></div>' +
+        '<div class="codex-actions"><button type="button" data-voice-shortcut="1" ' + (locked ? "disabled" : "") + '>Changer</button><button type="submit" ' + (locked ? "disabled" : "") + '>Enregistrer</button><button type="button" data-voice-toggle="1" ' + (!voice.audioReady || !voice.modelInstalled ? "disabled" : "") + '>' + esc(voice.recording ? "Arrêter" : "Démarrer") + '</button><button type="button" data-voice-test="1">Tester micro</button></div>' +
         '<p class="form-message"></p>' +
       '</form>';
     }
@@ -3272,6 +3689,27 @@ function statusHtml() {
           if (message) message.textContent = "Test du micro...";
           const res = await window.bridge.testVoiceMicrophone();
           if (message) message.textContent = res?.ok ? "Micro détecté." : (res?.error || "Micro indisponible.");
+          btn.disabled = false;
+        });
+      });
+      root.querySelectorAll("[data-voice-shortcut]").forEach((btn) => {
+        if (btn.dataset.bound === "1") return;
+        btn.dataset.bound = "1";
+        btn.addEventListener("click", async () => {
+          const form = btn.closest(".voice-form");
+          const message = form?.querySelector(".form-message");
+          const input = form?.querySelector('[name="shortcut"]');
+          btn.disabled = true;
+          if (message) message.textContent = "Choix du raccourci...";
+          const res = await window.bridge.changeVoiceShortcut();
+          if (input && res?.shortcut) input.value = res.shortcut;
+          if (message) message.textContent = res?.ok
+            ? res.warning
+              ? "Raccourci enregistré, activation à terminer: " + res.warning
+              : "Raccourci enregistré et actif."
+            : res?.cancelled
+              ? ""
+              : (res?.error || "Changement impossible.");
           btn.disabled = false;
         });
       });
@@ -3445,6 +3883,10 @@ function bridgeLogoSvg(className = "") {
     <rect x="614" y="476" width="172" height="172" rx="54" fill="var(--icon-accent)"/>
     <circle cx="500" cy="516" r="58" fill="var(--icon-bg)" stroke="var(--icon-fg)" stroke-width="42"/>
   </svg>`;
+}
+
+function escapeHtml(value) {
+  return escapeHtmlAttr(value);
 }
 
 function escapeHtmlAttr(value) {

@@ -1,13 +1,15 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{Device, SampleFormat, SupportedStreamConfig};
+use cpal::{Device, SampleFormat, SampleRate, SupportedStreamConfig};
 use enigo::{Direction, Enigo, Key, Keyboard, Settings};
 use handy_keys::{Hotkey, HotkeyManager, HotkeyState};
+use rustfft::{num_complex::Complex32, Fft, FftPlanner};
 use std::env;
 use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
-use std::thread;
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use transcribe_rs::onnx::parakeet::ParakeetModel;
 use transcribe_rs::onnx::Quantization;
@@ -36,6 +38,166 @@ struct ActiveRecording {
     sample_rate: u32,
     started_at: Instant,
     wav_path: PathBuf,
+    _level_emitter: LevelEmitter,
+}
+
+const VISUALIZER_DB_MIN: f32 = -55.0;
+const VISUALIZER_DB_MAX: f32 = -8.0;
+const VISUALIZER_GAIN: f32 = 1.3;
+const VISUALIZER_CURVE_POWER: f32 = 0.7;
+
+struct AudioVisualiser {
+    fft: Arc<dyn Fft<f32>>,
+    window: Vec<f32>,
+    bucket_ranges: Vec<(usize, usize)>,
+    fft_input: Vec<Complex32>,
+    noise_floor: Vec<f32>,
+    buffer: Vec<f32>,
+    window_size: usize,
+    buckets: usize,
+}
+
+impl AudioVisualiser {
+    fn new(
+        sample_rate: u32,
+        window_size: usize,
+        buckets: usize,
+        freq_min: f32,
+        freq_max: f32,
+    ) -> Self {
+        let mut planner = FftPlanner::<f32>::new();
+        let fft = planner.plan_fft_forward(window_size);
+        let window = (0..window_size)
+            .map(|i| {
+                0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / window_size as f32).cos())
+            })
+            .collect();
+        let nyquist = sample_rate as f32 / 2.0;
+        let freq_min = freq_min.min(nyquist);
+        let freq_max = freq_max.min(nyquist);
+        let mut bucket_ranges = Vec::with_capacity(buckets);
+        for b in 0..buckets {
+            let log_start = (b as f32 / buckets as f32).powi(2);
+            let log_end = ((b + 1) as f32 / buckets as f32).powi(2);
+            let start_hz = freq_min + (freq_max - freq_min) * log_start;
+            let end_hz = freq_min + (freq_max - freq_min) * log_end;
+            let start_bin = ((start_hz * window_size as f32) / sample_rate as f32) as usize;
+            let mut end_bin = ((end_hz * window_size as f32) / sample_rate as f32) as usize;
+            if end_bin <= start_bin {
+                end_bin = start_bin + 1;
+            }
+            bucket_ranges.push((start_bin.min(window_size / 2), end_bin.min(window_size / 2)));
+        }
+        Self {
+            fft,
+            window,
+            bucket_ranges,
+            fft_input: vec![Complex32::new(0.0, 0.0); window_size],
+            noise_floor: vec![-40.0; buckets],
+            buffer: Vec::with_capacity(window_size * 2),
+            window_size,
+            buckets,
+        }
+    }
+
+    fn feed(&mut self, samples: &[f32]) -> Option<Vec<f32>> {
+        self.buffer.extend_from_slice(samples);
+        if self.buffer.len() < self.window_size {
+            return None;
+        }
+        let window_samples = &self.buffer[..self.window_size];
+        let mean = window_samples.iter().sum::<f32>() / self.window_size as f32;
+        for (i, &sample) in window_samples.iter().enumerate() {
+            self.fft_input[i] = Complex32::new((sample - mean) * self.window[i], 0.0);
+        }
+        self.fft.process(&mut self.fft_input);
+
+        let mut buckets = vec![0.0; self.buckets];
+        for (bucket_idx, &(start_bin, end_bin)) in self.bucket_ranges.iter().enumerate() {
+            if start_bin >= end_bin || end_bin > self.fft_input.len() / 2 {
+                continue;
+            }
+            let power_sum = (start_bin..end_bin)
+                .map(|bin_idx| {
+                    let magnitude = self.fft_input[bin_idx].norm();
+                    magnitude * magnitude
+                })
+                .sum::<f32>();
+            let avg_power = power_sum / (end_bin - start_bin) as f32;
+            let db = if avg_power > 1e-12 {
+                20.0 * (avg_power.sqrt() / self.window_size as f32).log10()
+            } else {
+                -80.0
+            };
+            if db < self.noise_floor[bucket_idx] + 10.0 {
+                const NOISE_ALPHA: f32 = 0.001;
+                self.noise_floor[bucket_idx] =
+                    NOISE_ALPHA * db + (1.0 - NOISE_ALPHA) * self.noise_floor[bucket_idx];
+            }
+            let normalized = ((db - VISUALIZER_DB_MIN) / (VISUALIZER_DB_MAX - VISUALIZER_DB_MIN))
+                .clamp(0.0, 1.0);
+            buckets[bucket_idx] = (normalized * VISUALIZER_GAIN)
+                .powf(VISUALIZER_CURVE_POWER)
+                .clamp(0.0, 1.0);
+        }
+        for i in 1..buckets.len().saturating_sub(1) {
+            buckets[i] = buckets[i] * 0.7 + buckets[i - 1] * 0.15 + buckets[i + 1] * 0.15;
+        }
+        self.buffer.clear();
+        Some(buckets)
+    }
+}
+
+struct LevelEmitter {
+    stop: Arc<AtomicBool>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl LevelEmitter {
+    fn start(sample_rate: u32, samples: Arc<Mutex<Vec<f32>>>) -> Self {
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_for_thread = stop.clone();
+        let thread = thread::spawn(move || {
+            let mut visualizer = AudioVisualiser::new(sample_rate, 1024, 16, 80.0, 8000.0);
+            let mut cursor = 0usize;
+            while !stop_for_thread.load(Ordering::Relaxed) {
+                thread::sleep(Duration::from_millis(60));
+                let chunk = match samples.lock() {
+                    Ok(guard) if cursor < guard.len() => {
+                        let next = guard[cursor..].to_vec();
+                        cursor = guard.len();
+                        next
+                    }
+                    _ => Vec::new(),
+                };
+                if chunk.is_empty() {
+                    continue;
+                }
+                if let Some(levels) = visualizer.feed(&chunk) {
+                    let payload = levels
+                        .iter()
+                        .map(|level| format_float(*level))
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    println!("{{\"ok\":true,\"event\":\"mic-level\",\"levels\":[{payload}]}}");
+                    let _ = io::stdout().flush();
+                }
+            }
+        });
+        Self {
+            stop,
+            thread: Some(thread),
+        }
+    }
+}
+
+impl Drop for LevelEmitter {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
 }
 
 #[derive(Default)]
@@ -151,16 +313,25 @@ fn run_json_lines() {
 fn status_json() -> Result<String, String> {
     let host = cpal::default_host();
     let default_input = host.default_input_device();
-    let ready = default_input.is_some();
+    let audio_probe = default_input
+        .as_ref()
+        .map(input_config_for_device)
+        .transpose();
+    let ready = audio_probe.is_ok() && default_input.is_some();
     let device = default_input
         .as_ref()
         .and_then(|d| d.name().ok())
         .unwrap_or_else(|| "".to_string());
+    let audio_error = audio_probe.err();
     Ok(format!(
-        "{{\"ok\":true,\"ready\":{},\"engine\":\"bridge-voice\",\"version\":\"{}\",\"audioReady\":{},\"transcriptionReady\":true,\"defaultInput\":\"{}\",\"defaultVoiceModel\":\"parakeet-tdt-0.6b-v3-int8\",\"features\":[\"devices\",\"microphone-test\",\"wav-recording\",\"parakeet-transcription\",\"shortcut-config\",\"handy-keys\"]}}",
+        "{{\"ok\":true,\"ready\":{},\"engine\":\"bridge-voice\",\"version\":\"{}\",\"audioReady\":{},\"audioError\":{},\"transcriptionReady\":true,\"defaultInput\":\"{}\",\"defaultVoiceModel\":\"parakeet-tdt-0.6b-v3-int8\",\"features\":[\"devices\",\"microphone-test\",\"wav-recording\",\"parakeet-transcription\",\"shortcut-config\",\"handy-keys\"]}}",
         ready,
         env!("CARGO_PKG_VERSION"),
         ready,
+        audio_error
+            .as_ref()
+            .map(|error| format!("\"{}\"", json_escape(error)))
+            .unwrap_or_else(|| "null".to_string()),
         json_escape(&device)
     ))
 }
@@ -336,6 +507,44 @@ fn devices_json_inner() -> Result<String, String> {
     Ok(out)
 }
 
+fn input_config_for_device(device: &Device) -> Result<SupportedStreamConfig, String> {
+    match device.default_input_config() {
+        Ok(config) => Ok(config),
+        Err(default_err) => {
+            let configs = device.supported_input_configs().map_err(|err| {
+                format!(
+                    "cannot read input configs after default config failed ({default_err}): {err}"
+                )
+            })?;
+            let mut fallback: Option<SupportedStreamConfig> = None;
+            for range in configs {
+                let min = range.min_sample_rate().0;
+                let max = range.max_sample_rate().0;
+                let sample_rate = if min <= 16_000 && 16_000 <= max {
+                    SampleRate(16_000)
+                } else if min <= 48_000 && 48_000 <= max {
+                    SampleRate(48_000)
+                } else {
+                    range.max_sample_rate()
+                };
+                let config = range.with_sample_rate(sample_rate);
+                if matches!(
+                    config.sample_format(),
+                    SampleFormat::F32 | SampleFormat::I16
+                ) {
+                    return Ok(config);
+                }
+                if fallback.is_none() {
+                    fallback = Some(config);
+                }
+            }
+            fallback.ok_or_else(|| {
+                format!("no supported input config after default config failed: {default_err}")
+            })
+        }
+    }
+}
+
 fn capture_json(duration_ms: u64, wav_path: Option<PathBuf>) -> Result<String, String> {
     let summary = capture_default_input(duration_ms, wav_path)?;
     Ok(format!(
@@ -362,9 +571,7 @@ fn capture_default_input(
     let device = host
         .default_input_device()
         .ok_or_else(|| "no default input device".to_string())?;
-    let config = device
-        .default_input_config()
-        .map_err(|e| format!("cannot read default input config: {e}"))?;
+    let config = input_config_for_device(&device)?;
     let sample_rate = config.sample_rate().0;
     let channels = config.channels() as usize;
     let samples = Arc::new(Mutex::new(Vec::<f32>::new()));
@@ -461,9 +668,7 @@ fn start_default_recording(wav_path: PathBuf) -> Result<ActiveRecording, String>
     let device = host
         .default_input_device()
         .ok_or_else(|| "no default input device".to_string())?;
-    let config = device
-        .default_input_config()
-        .map_err(|e| format!("cannot read default input config: {e}"))?;
+    let config = input_config_for_device(&device)?;
     let sample_rate = config.sample_rate().0;
     let channels = config.channels() as usize;
     let samples = Arc::new(Mutex::new(Vec::<f32>::new()));
@@ -471,12 +676,14 @@ fn start_default_recording(wav_path: PathBuf) -> Result<ActiveRecording, String>
     stream
         .play()
         .map_err(|e| format!("cannot start microphone stream: {e}"))?;
+    let level_emitter = LevelEmitter::start(sample_rate, samples.clone());
     Ok(ActiveRecording {
         stream,
         samples,
         sample_rate,
         started_at: Instant::now(),
         wav_path,
+        _level_emitter: level_emitter,
     })
 }
 

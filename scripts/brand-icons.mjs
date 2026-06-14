@@ -7,10 +7,11 @@ import { spawnSync } from "node:child_process";
 const root = resolve(import.meta.dirname, "..");
 const publicDir = resolve(root, "public");
 const svgPath = resolve(publicDir, "app-mark.svg");
+const bridgeMarkPath = resolve(publicDir, "bridge-mark.png");
 const sizes = [16, 32, 64, 128, 256, 512, 1024];
 
-if (!existsSync(svgPath)) {
-  throw new Error(`Logo source introuvable: ${svgPath}`);
+if (!existsSync(bridgeMarkPath) && !existsSync(svgPath)) {
+  throw new Error(`Logo source introuvable: ${bridgeMarkPath} ou ${svgPath}`);
 }
 
 mkdirSync(publicDir, { recursive: true });
@@ -19,7 +20,11 @@ const canUseSips = spawnSync("sips", ["--version"], { stdio: "ignore" }).status 
 
 if (canUseSips) {
   const tmpPng = resolve(publicDir, ".app-mark-1024.png");
-  run("sips", ["-s", "format", "png", svgPath, "--out", tmpPng]);
+  if (existsSync(bridgeMarkPath)) {
+    await copyFile(bridgeMarkPath, tmpPng);
+  } else {
+    run("sips", ["-s", "format", "png", svgPath, "--out", tmpPng]);
+  }
   for (const size of sizes) {
     const out = resolve(publicDir, `icon-${size}.png`);
     await copyFile(tmpPng, out);
@@ -27,14 +32,12 @@ if (canUseSips) {
   }
   rmSync(tmpPng, { force: true });
   await makeIcns();
-  console.log("[brand] icônes générées depuis public/app-mark.svg");
+  console.log(`[brand] icônes générées depuis ${existsSync(bridgeMarkPath) ? "public/bridge-mark.png" : "public/app-mark.svg"}`);
 } else {
-  console.warn("[brand] sips indisponible: public/app-mark.svg a été conservé, PNG/icns non régénérés.");
+  console.warn("[brand] sips indisponible: PNG/icns non régénérés.");
 }
 
 async function makeIcns() {
-  const canUseIconutil = spawnSync("iconutil", ["--help"], { stdio: "ignore" }).status === 0;
-  if (!canUseIconutil) return;
   const iconset = resolve(publicDir, "icon.iconset");
   rmSync(iconset, { recursive: true, force: true });
   mkdirSync(iconset, { recursive: true });
@@ -57,8 +60,12 @@ async function makeIcns() {
     encoding: "utf8",
   });
   rmSync(iconset, { recursive: true, force: true });
+  if (result.error) {
+    throw result.error;
+  }
   if (result.status !== 0) {
     await writeFile(resolve(publicDir, "icon.icns.error.log"), result.stderr || "iconutil failed", "utf8");
+    throw new Error(result.stderr || result.stdout || "iconutil failed");
   }
 }
 
