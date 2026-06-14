@@ -50,6 +50,7 @@ interface BridgeState {
 const BridgeContext = createContext<BridgeState | null>(null);
 const POLL_MS = 15_000;
 const ACTIVE_SESSION_TTL_MS = 15 * 60_000;
+const AUTO_WAKE_COOLDOWN_MS = 60_000;
 const STORAGE_KEY = "app-template:bridge-wizard-seen";
 const ACTIVE_SESSION_STORAGE_KEY = "app-template:bridge-active-session";
 
@@ -62,6 +63,7 @@ export function BridgeStatusProvider({ children }: { children: ReactNode }) {
   const [setupOpen, setSetupOpen] = useState(false);
   const [toastDismissed, setToastDismissed] = useState(false);
   const firstLaunchHandledRef = useRef(false);
+  const lastAutoWakeAtRef = useRef(0);
   const suppressBridgeSetupUi = pathname === "/bridge-mascot";
 
   const refresh = useCallback(async () => {
@@ -100,16 +102,18 @@ export function BridgeStatusProvider({ children }: { children: ReactNode }) {
   }, [refresh, suppressBridgeSetupUi]);
 
   useEffect(() => {
-    if (!lastCheckedAt || firstLaunchHandledRef.current) return;
-    firstLaunchHandledRef.current = true;
-    if (suppressBridgeSetupUi) return;
-    try {
-      if (localStorage.getItem(STORAGE_KEY) === "1") return;
-    } catch {
-      // Le badge reste utilisable si localStorage est indisponible.
+    if (suppressBridgeSetupUi || !lastCheckedAt || status !== "disconnected") return;
+    if (shouldKeepBridgeActiveFromSession()) return;
+    const now = Date.now();
+    if (now - lastAutoWakeAtRef.current >= AUTO_WAKE_COOLDOWN_MS) {
+      lastAutoWakeAtRef.current = now;
+      openBridgeProtocol();
+      return;
     }
+    if (firstLaunchHandledRef.current || hasBridgeWizardBeenSeen()) return;
+    firstLaunchHandledRef.current = true;
     setSetupOpen(true);
-  }, [lastCheckedAt, suppressBridgeSetupUi]);
+  }, [lastCheckedAt, status, suppressBridgeSetupUi]);
 
   useEffect(() => {
     if (status === "connected") {
@@ -170,6 +174,14 @@ function shouldKeepBridgeActiveFromSession(): boolean {
     const raw = sessionStorage.getItem(ACTIVE_SESSION_STORAGE_KEY);
     const ts = raw ? Number(raw) : 0;
     return Number.isFinite(ts) && ts > 0 && Date.now() - ts <= ACTIVE_SESSION_TTL_MS;
+  } catch {
+    return false;
+  }
+}
+
+function hasBridgeWizardBeenSeen(): boolean {
+  try {
+    return localStorage.getItem(STORAGE_KEY) === "1";
   } catch {
     return false;
   }
