@@ -625,25 +625,47 @@ async function downloadLmStudioModel(target, onProgress) {
   }
   const payload = started.payload || {};
   if (payload.status === "already_downloaded" || payload.status === "completed") return payload;
-  if (!payload.job_id) {
-    throw new Error(`Téléchargement du modèle local impossible (${target}). Réponse LM Studio sans job_id.`);
+  const jobId = payload.job_id || payload.jobId || payload.id || "";
+  if (!jobId) {
+    return waitForLmStudioModelDownload(target, null, onProgress, payload);
   }
+  return waitForLmStudioModelDownload(target, jobId, onProgress, payload);
+}
 
+async function waitForLmStudioModelDownload(target, jobId, onProgress, initialPayload = {}) {
   const deadline = Date.now() + 90 * 60 * 1000;
+  const initialStatus = String(initialPayload.status || "").toLowerCase();
+  if (initialStatus === "failed") {
+    throw new Error(`Téléchargement du modèle local échoué (${target}).`);
+  }
+  if (initialStatus === "paused") {
+    throw new Error(`Téléchargement du modèle local en pause (${target}).`);
+  }
+  if (!jobId) {
+    const status = String(initialPayload.status || "en cours");
+    onProgress?.({ stage: "Téléchargement du modèle local...", log: `LM Studio: ${status}` });
+  }
   while (Date.now() < deadline) {
     await sleep(1500);
-    const status = await fetchLmStudioJson(`/models/download/status/${encodeURIComponent(payload.job_id)}`);
-    if (!status.ok) {
-      throw new Error(`Suivi du téléchargement LM Studio impossible (${target}). ${status.error}`);
+    if (isLmStudioModelInstalledExact(target)) {
+      return { status: "completed" };
     }
-    const job = status.payload || {};
-    emitLmStudioDownloadProgress(job, onProgress);
-    if (job.status === "completed") return job;
-    if (job.status === "failed") {
-      throw new Error(`Téléchargement du modèle local échoué (${target}).`);
-    }
-    if (job.status === "paused") {
-      throw new Error(`Téléchargement du modèle local en pause (${target}).`);
+    if (jobId) {
+      const status = await fetchLmStudioJson(`/models/download/status/${encodeURIComponent(jobId)}`);
+      if (!status.ok) {
+        throw new Error(`Suivi du téléchargement LM Studio impossible (${target}). ${status.error}`);
+      }
+      const job = status.payload || {};
+      emitLmStudioDownloadProgress(job, onProgress);
+      if (job.status === "completed") return job;
+      if (job.status === "failed") {
+        throw new Error(`Téléchargement du modèle local échoué (${target}).`);
+      }
+      if (job.status === "paused") {
+        throw new Error(`Téléchargement du modèle local en pause (${target}).`);
+      }
+    } else {
+      onProgress?.({ stage: "Téléchargement du modèle local...", log: `En attente de ${target}` });
     }
   }
   throw new Error(`Téléchargement du modèle local trop long (${target}).`);
@@ -812,6 +834,12 @@ function findLmStudioLocalModelKey(lms, target) {
     if (exact) return exact;
   }
   return null;
+}
+
+function isLmStudioModelInstalledExact(target) {
+  const lms = findLmsBin();
+  if (!lms) return false;
+  return Boolean(findLmStudioLocalModelKey(lms, target));
 }
 
 function lmStudioModelKeyCandidates(item) {

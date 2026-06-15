@@ -57,8 +57,11 @@ Bridge prepares LM Studio in this order:
 6. for the default portable Granite model, the exact download request is
    `https://huggingface.co/lmstudio-community/granite-4.0-micro-GGUF` with
    quantization `Q4_K_M`;
-7. run `lms load <model> --identifier <model> --context-length 32768 --yes`;
-8. verify that `/v1/models` exposes the exact configured model id.
+7. if LM Studio returns a `job_id`, Bridge follows that job; if LM Studio starts
+   a download without a `job_id`, Bridge waits until the exact configured model
+   appears locally;
+8. run `lms load <model> --identifier <model> --context-length 32768 --yes`;
+9. verify that `/v1/models` exposes the exact configured model id.
 
 Bridge never switches to Codex Cloud or to a different local model when the
 admin policy requires local AI. If the configured model cannot be installed,

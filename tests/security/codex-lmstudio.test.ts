@@ -136,10 +136,13 @@ test("LM Studio macOS installer uses /Applications and bootstraps the CLI", () =
   assert.match(provider, /api\/v1/);
   assert.match(provider, /fetchLmStudioJson/);
   assert.match(provider, /models\/download/);
+  assert.match(provider, /waitForLmStudioModelDownload\(target, null/);
+  assert.match(provider, /isLmStudioModelInstalledExact/);
   assert.match(provider, /granite-4\.0-micro-GGUF/);
   assert.doesNotMatch(provider, /lmStudioModelDownloadCandidates/);
   assert.doesNotMatch(provider, /lmStudioModelLookupCandidates/);
   assert.doesNotMatch(provider, /"get", candidate, "--yes"/);
+  assert.doesNotMatch(provider, /Réponse LM Studio sans job_id/);
   assert.doesNotMatch(provider, /includes\(normalizedTarget\)/);
   assert.doesNotMatch(provider, /normalizedTarget\.includes/);
   assert.doesNotMatch(provider, /function findLmStudioBestLocalLlmKey/);
