@@ -105,6 +105,7 @@ let protocolLaunchHandled = false;
 let lastProtocolLaunchAt = 0;
 let adminProvisioningRunning = false;
 let adminProvisioningScheduled = false;
+let requiredProvisioningWindowVisible = false;
 let lastAdminProvisioningPromptAt = 0;
 let revealStatusAfterProvisioning = false;
 let voiceProcess = null;
@@ -2823,6 +2824,7 @@ async function ensureAdminProvisioning(cfg = loadConfig(), options = {}) {
     lastAdminProvisioningPromptAt = Date.now();
     let completedVisibleSetup = false;
     const shouldHideStatusForSetup = shouldRunLocalSetup || shouldRunVoiceSetup;
+    if (shouldHideStatusForSetup) requiredProvisioningWindowVisible = true;
     if (shouldHideStatusForSetup && statusWindow && !statusWindow.isDestroyed()) {
       try {
         statusWindow.hide();
@@ -2854,6 +2856,7 @@ async function ensureAdminProvisioning(cfg = loadConfig(), options = {}) {
     }
     if (completedVisibleSetup) {
       void flushPendingBrowserSession();
+      requiredProvisioningWindowVisible = false;
       if (revealStatusAfterProvisioning) {
         revealStatusAfterProvisioning = false;
         showStatusWindow({ focus: false });
@@ -2882,7 +2885,6 @@ async function ensureRequiredProvisioningComplete(reason = "action") {
     (policy.voice.enabled && policy.voice.installRequired);
   if (!required) return { ok: true, skipped: true };
   if (adminProvisioningRunning) {
-    showStatusWindow({ focus: false });
     return {
       ok: false,
       error: "Installation requise en cours. Termine l'installation demandée par votre organisation.",
@@ -2903,7 +2905,6 @@ async function ensureRequiredProvisioningComplete(reason = "action") {
   const voice = getVoiceStatus(refreshed);
   const missing = requiredProvisioningState(localAi, voice);
   if (missing.required) {
-    showStatusWindow({ focus: false });
     return {
       ok: false,
       error: missing.label || "Installation requise par votre organisation.",
@@ -3114,6 +3115,16 @@ function pushActivity(message) {
 }
 
 function showStatusWindow({ focus = false } = {}) {
+  if (requiredProvisioningWindowVisible) {
+    if (statusWindow && !statusWindow.isDestroyed()) {
+      try {
+        statusWindow.hide();
+      } catch {
+        // no-op
+      }
+    }
+    return statusWindow;
+  }
   if (statusWindow && !statusWindow.isDestroyed()) {
     statusWindow.setAlwaysOnTop(false);
     if (focus) {
@@ -3215,6 +3226,10 @@ function showStatusWindow({ focus = false } = {}) {
   statusWindow.once("ready-to-show", () => {
     if (!statusWindow || statusWindow.isDestroyed()) return;
     statusWindow.setAlwaysOnTop(false);
+    if (requiredProvisioningWindowVisible) {
+      statusWindow.hide();
+      return;
+    }
     if (focus) {
       statusWindow.show();
       statusWindow.focus();
@@ -3228,6 +3243,14 @@ function showStatusWindow({ focus = false } = {}) {
 
 function refreshStatusWindow() {
   if (!statusWindow || statusWindow.isDestroyed()) return;
+  if (requiredProvisioningWindowVisible) {
+    try {
+      statusWindow.hide();
+    } catch {
+      // no-op
+    }
+    return;
+  }
   statusWindow.webContents.send("bridge:status", localStatusPayload());
 }
 

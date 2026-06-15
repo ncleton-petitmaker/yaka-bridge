@@ -7,8 +7,8 @@ Bridge supports two agentic execution modes:
 
 The product rule is cloud by default. Local execution is selected only by an
 admin policy, a service manifest, an action manifest or an explicit job payload.
-There is no cloud fallback when a local route is selected and LM Studio is not
-ready.
+Bridge does not switch to cloud when a local route is selected and LM Studio is
+not ready.
 
 ## Admin policy
 
@@ -46,21 +46,23 @@ Bridge prepares LM Studio in this order:
 1. install the official LM Studio headless runtime first:
    `https://lmstudio.ai/install.sh` on macOS/Linux or
    `https://lmstudio.ai/install.ps1` on Windows;
-2. if the headless runtime is unavailable, fall back to the desktop package,
-   using `/Applications/LM Studio.app` on macOS and launching it hidden only as a
-   last-resort bootstrap path;
+2. if the headless runtime is unavailable, install the desktop package,
+   using `/Applications/LM Studio.app` on macOS and launching it hidden only for
+   CLI bootstrap;
 3. start the local daemon and server with `lms daemon up` and
    `lms server start --port 1234`;
 4. check `/v1/models`;
-5. run `lms get <model> --yes` if the admin model is not installed;
-6. for the default portable Granite model, retry known LM Studio/Hugging Face
-   model keys when the short alias cannot be found by `lms get`;
+5. download the exact admin model through the local LM Studio REST endpoint
+   `POST /api/v1/models/download`;
+6. for the default portable Granite model, the exact download request is
+   `https://huggingface.co/lmstudio-community/granite-4.0-micro-GGUF` with
+   quantization `Q4_K_M`;
 7. run `lms load <model> --identifier <model> --context-length 32768 --yes`;
 8. verify that `/v1/models` exposes the exact configured model id.
 
-Bridge never falls back to Codex Cloud or to a different local model when the
-admin policy requires local AI. If the configured model cannot be installed, the
-setup fails explicitly.
+Bridge never switches to Codex Cloud or to a different local model when the
+admin policy requires local AI. If the configured model cannot be installed,
+the setup fails explicitly.
 
 The v1 target is local-only LM Studio. Remote LM Studio, Ollama, Apple
 Foundation Models and Microsoft Foundry are intentionally outside this runtime
@@ -124,7 +126,9 @@ Manual LM Studio smoke:
 
 ```bash
 lms server start --port 1234
-lms get ibm/granite-4-micro
+curl http://localhost:1234/api/v1/models/download \
+  -H "Content-Type: application/json" \
+  -d '{"model":"https://huggingface.co/lmstudio-community/granite-4.0-micro-GGUF","quantization":"Q4_K_M"}'
 lms load ibm/granite-4-micro --identifier ibm/granite-4-micro
 curl http://127.0.0.1:1234/v1/models
 ```

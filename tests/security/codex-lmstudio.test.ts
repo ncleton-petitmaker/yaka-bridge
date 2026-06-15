@@ -106,7 +106,8 @@ test("Bridge packaging unpacks the push-to-talk sidecar executable", () => {
 test("admin-required local setup windows cannot be cancelled silently", () => {
   const provider = readFileSync(resolve(process.cwd(), "bridge", "provider-setup.cjs"), "utf8");
   assert.match(provider, /const mandatory = policy\.mandatory === true/);
-  assert.match(provider, /closable: true/);
+  assert.match(provider, /closable: !mandatory/);
+  assert.match(provider, /event\.preventDefault\(\)/);
   assert.match(provider, /alwaysOnTop: false/);
   assert.match(provider, /showInactive\(\)/);
   assert.match(provider, /Installation requise par votre organisation/);
@@ -116,7 +117,8 @@ test("admin-required local setup windows cannot be cancelled silently", () => {
   assert.match(main, /mandatory: true/);
   assert.match(main, /focus: !options\.silent/);
   assert.match(main, /lastAdminProvisioningPromptAt/);
-  assert.match(main, /parentWindow/);
+  assert.match(main, /requiredProvisioningWindowVisible/);
+  assert.match(main, /statusWindow\.hide\(\)/);
 });
 
 test("LM Studio macOS installer uses /Applications and bootstraps the CLI", () => {
@@ -130,9 +132,16 @@ test("LM Studio macOS installer uses /Applications and bootstraps the CLI", () =
   assert.match(provider, /with administrator privileges/);
   assert.match(provider, /\.webpack", "lms"/);
   assert.match(provider, /"daemon", "up"/);
-  assert.match(provider, /defaultModelDownloadFallbacks/);
+  assert.match(provider, /defaultModelDownload/);
+  assert.match(provider, /api\/v1/);
+  assert.match(provider, /fetchLmStudioJson/);
+  assert.match(provider, /models\/download/);
   assert.match(provider, /granite-4\.0-micro-GGUF/);
-  assert.match(provider, /"get", candidate, "--yes"/);
+  assert.doesNotMatch(provider, /lmStudioModelDownloadCandidates/);
+  assert.doesNotMatch(provider, /lmStudioModelLookupCandidates/);
+  assert.doesNotMatch(provider, /"get", candidate, "--yes"/);
+  assert.doesNotMatch(provider, /includes\(normalizedTarget\)/);
+  assert.doesNotMatch(provider, /normalizedTarget\.includes/);
   assert.doesNotMatch(provider, /function findLmStudioBestLocalLlmKey/);
   assert.doesNotMatch(provider, /Modèle local alternatif détecté/);
   assert.match(provider, /function launchLmStudioHidden/);
@@ -151,12 +160,12 @@ test("admin-required provisioning blocks Bridge actions until setup is complete"
 
   const openServiceStart = source.indexOf("async function openService");
   const provisioningGate = source.indexOf('const provisioning = await ensureRequiredProvisioningComplete("open-service")', openServiceStart);
-  const noTicketFallback = source.indexOf("Ouverture ${service.name} sans ticket Bridge", openServiceStart);
+  const noTicketPath = source.indexOf("Ouverture ${service.name} sans ticket Bridge", openServiceStart);
   const openExternal = source.indexOf("await shell.openExternal(target)", openServiceStart);
   assert.ok(openServiceStart >= 0, "openService should exist");
   assert.ok(provisioningGate > openServiceStart, "openService should check required provisioning");
-  assert.ok(noTicketFallback > provisioningGate, "provisioning errors must be rethrown before no-ticket fallback");
-  assert.ok(openExternal > noTicketFallback, "service launch happens after the provisioning gate");
+  assert.ok(noTicketPath > provisioningGate, "provisioning errors must be rethrown before no-ticket path");
+  assert.ok(openExternal > noTicketPath, "service launch happens after the provisioning gate");
 
   assert.match(source, /const provisioningRequired = Boolean\(state\.requiredProvisioning\?\.required\)/);
   assert.match(source, /window\.bridge\.ensureAdminProvisioning\(\)/);

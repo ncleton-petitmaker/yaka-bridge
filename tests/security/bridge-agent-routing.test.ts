@@ -157,7 +157,7 @@ test("normal local routing fails when local readiness fails", () => {
   assert.throws(() => selectResolvedBridgeAgentRoute(request, downLocal), /Routage local requis/);
 });
 
-test("sensitive and local-only routing fail instead of falling back to cloud", () => {
+test("sensitive and local-only routing fail instead of switching to cloud", () => {
   const sensitiveRequest = resolveBridgeAgentRouteRequest(
     job({ actionId: "ocr.extract" }),
     service({ actions: [{ id: "ocr.extract", agentRouting: { mode: "local", privacy: "sensitive" } }] }),

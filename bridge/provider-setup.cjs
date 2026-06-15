@@ -20,13 +20,13 @@ const LMSTUDIO = {
   installTitle: "Installation du moteur local",
   doneTitle: "Bridge est prêt avec le moteur local",
   baseUrl: "http://127.0.0.1:1234/v1",
+  apiBaseUrl: "http://127.0.0.1:1234/api/v1",
   defaultModel: "ibm/granite-4-micro",
   defaultContextLength: 32768,
-  defaultModelDownloadFallbacks: [
-    "ibm/granite-4-micro@q4_k_m",
-    "lmstudio-community/granite-4.0-micro-GGUF/granite-4.0-micro-Q4_K_M.gguf",
-    "https://huggingface.co/lmstudio-community/granite-4.0-micro-GGUF/resolve/main/granite-4.0-micro-Q4_K_M.gguf",
-  ],
+  defaultModelDownload: {
+    model: "https://huggingface.co/lmstudio-community/granite-4.0-micro-GGUF",
+    quantization: "Q4_K_M",
+  },
   macArm64DmgUrl: "https://lmstudio.ai/download/latest/darwin/arm64",
 };
 const MAC_LMSTUDIO_APP = "/Applications/LM Studio.app";
@@ -594,24 +594,8 @@ async function ensureLmStudioModel(model, onProgress) {
 
   let localModelKey = findLmStudioLocalModelKey(lms, target);
   if (!localModelKey) {
-    let lastDownloadError = "";
-    for (const candidate of lmStudioModelDownloadCandidates(target)) {
-      onProgress?.({ stage: "Téléchargement du modèle local...", log: candidate });
-      const download = await runLogged(lms, ["get", candidate, "--yes"], onProgress);
-      if (download.code === 0) {
-        localModelKey = findLmStudioLocalModelKey(lms, target);
-        for (const lookup of lmStudioModelLookupCandidates(target)) {
-          localModelKey = localModelKey || findLmStudioLocalModelKey(lms, lookup);
-        }
-        if (localModelKey) break;
-      } else {
-        lastDownloadError = download.stderr.slice(0, 500);
-      }
-    }
-
-    if (!localModelKey) {
-      throw new Error(`Téléchargement du modèle local échoué (${target}). ${lastDownloadError.slice(0, 300)}`);
-    }
+    await downloadLmStudioModel(target, onProgress);
+    localModelKey = findLmStudioLocalModelKey(lms, target) || target;
   }
 
   const loadKey = localModelKey || target;
@@ -627,6 +611,100 @@ async function ensureLmStudioModel(model, onProgress) {
     throw new Error(`Le modèle ${target} n'est pas visible dans LM Studio après chargement.`);
   }
   return { ok: true, model: target, models: status.models };
+}
+
+async function downloadLmStudioModel(target, onProgress) {
+  const request = lmStudioDownloadRequest(target);
+  onProgress?.({ stage: "Téléchargement du modèle local...", log: request.model });
+  const started = await fetchLmStudioJson("/models/download", {
+    method: "POST",
+    body: JSON.stringify(request),
+  });
+  if (!started.ok) {
+    throw new Error(`Téléchargement du modèle local refusé (${target}). ${started.error}`);
+  }
+  const payload = started.payload || {};
+  if (payload.status === "already_downloaded" || payload.status === "completed") return payload;
+  if (!payload.job_id) {
+    throw new Error(`Téléchargement du modèle local impossible (${target}). Réponse LM Studio sans job_id.`);
+  }
+
+  const deadline = Date.now() + 90 * 60 * 1000;
+  while (Date.now() < deadline) {
+    await sleep(1500);
+    const status = await fetchLmStudioJson(`/models/download/status/${encodeURIComponent(payload.job_id)}`);
+    if (!status.ok) {
+      throw new Error(`Suivi du téléchargement LM Studio impossible (${target}). ${status.error}`);
+    }
+    const job = status.payload || {};
+    emitLmStudioDownloadProgress(job, onProgress);
+    if (job.status === "completed") return job;
+    if (job.status === "failed") {
+      throw new Error(`Téléchargement du modèle local échoué (${target}).`);
+    }
+    if (job.status === "paused") {
+      throw new Error(`Téléchargement du modèle local en pause (${target}).`);
+    }
+  }
+  throw new Error(`Téléchargement du modèle local trop long (${target}).`);
+}
+
+function lmStudioDownloadRequest(target) {
+  if (normalizeModelKey(target) === normalizeModelKey(LMSTUDIO.defaultModel)) {
+    return { ...LMSTUDIO.defaultModelDownload };
+  }
+  return { model: target };
+}
+
+function emitLmStudioDownloadProgress(job, onProgress) {
+  const total = Number(job.total_size_bytes || 0);
+  const downloaded = Number(job.downloaded_bytes || 0);
+  const percent = total ? Math.min(99, Math.round((downloaded / total) * 99)) : undefined;
+  const parts = [];
+  if (downloaded) parts.push(`${Math.round(downloaded / 1024 / 1024)} Mo`);
+  if (total) parts.push(`/ ${Math.round(total / 1024 / 1024)} Mo`);
+  if (job.bytes_per_second) parts.push(`${Math.round(Number(job.bytes_per_second) / 1024 / 1024)} Mo/s`);
+  onProgress?.({
+    stage: "Téléchargement du modèle local...",
+    percent,
+    log: parts.join(" "),
+  });
+}
+
+async function fetchLmStudioJson(pathname, options = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), Number(options.timeoutMs || 15_000));
+  try {
+    const { timeoutMs: _timeoutMs, headers: optionHeaders, ...fetchOptions } = options;
+    const headers = {
+      "content-type": "application/json",
+      ...(optionHeaders || {}),
+    };
+    const res = await fetch(`${LMSTUDIO.apiBaseUrl}${pathname}`, {
+      cache: "no-store",
+      ...fetchOptions,
+      headers,
+      signal: controller.signal,
+    });
+    const text = await res.text().catch(() => "");
+    let payload = null;
+    if (text) {
+      try {
+        payload = JSON.parse(text);
+      } catch {
+        payload = { message: text };
+      }
+    }
+    if (!res.ok) {
+      const error = payload?.error || payload?.message || text || `HTTP ${res.status}`;
+      return { ok: false, status: res.status, payload, error };
+    }
+    return { ok: true, status: res.status, payload };
+  } catch (err) {
+    return { ok: false, error: err?.message || String(err) };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function findLmStudioApiModel(target) {
@@ -704,27 +782,6 @@ function findPackagedLmStudioCli() {
   return candidates.find((candidate) => fs.existsSync(candidate)) || null;
 }
 
-function lmStudioModelDownloadCandidates(target) {
-  const candidates = [target];
-  if (normalizeModelKey(target) === normalizeModelKey(LMSTUDIO.defaultModel)) {
-    candidates.push(...LMSTUDIO.defaultModelDownloadFallbacks);
-  }
-  return Array.from(new Set(candidates.filter(Boolean)));
-}
-
-function lmStudioModelLookupCandidates(target) {
-  const candidates = [target];
-  if (normalizeModelKey(target) === normalizeModelKey(LMSTUDIO.defaultModel)) {
-    candidates.push(
-      "ibm/granite-4-micro@q4_k_m",
-      "granite-4.0-micro",
-      "granite-4.0-micro-Q4_K_M",
-      "lmstudio-community/granite-4.0-micro-GGUF/granite-4.0-micro-Q4_K_M.gguf",
-    );
-  }
-  return Array.from(new Set(candidates.filter(Boolean)));
-}
-
 function readLmStudioLocalModels(lms) {
   const res = spawnSync(lms, ["ls", "--json"], {
     timeout: 8000,
@@ -753,14 +810,6 @@ function findLmStudioLocalModelKey(lms, target) {
     const candidates = lmStudioModelKeyCandidates(item);
     const exact = candidates.find((candidate) => normalizeModelKey(candidate) === normalizedTarget);
     if (exact) return exact;
-  }
-  for (const item of items) {
-    const candidates = lmStudioModelKeyCandidates(item);
-    const fuzzy = candidates.find((candidate) => {
-      const normalized = normalizeModelKey(candidate);
-      return normalized.includes(normalizedTarget) || normalizedTarget.includes(normalized);
-    });
-    if (fuzzy) return fuzzy;
   }
   return null;
 }
@@ -1266,7 +1315,7 @@ function showLmStudioSetupWindow(policy = {}) {
       resizable: false,
       minimizable: false,
       maximizable: false,
-      closable: true,
+      closable: !mandatory,
       parent: parentWindow,
       modal: false,
       alwaysOnTop: false,
@@ -1352,6 +1401,7 @@ function showLmStudioSetupWindow(policy = {}) {
     win.webContents.once("did-finish-load", () => setTimeout(runLocalSetup, 250));
     win.on("close", (event) => {
       if (mandatory && !canClose) {
+        event.preventDefault();
         send({ phase: "error", error: "Installation requise par votre organisation." });
       }
     });
