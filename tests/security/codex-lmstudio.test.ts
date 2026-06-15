@@ -130,7 +130,11 @@ test("LM Studio macOS installer uses /Applications and bootstraps the CLI", () =
   assert.match(provider, /with administrator privileges/);
   assert.match(provider, /\.webpack", "lms"/);
   assert.match(provider, /"daemon", "up"/);
-  assert.match(provider, /"get", target, "--yes"/);
+  assert.match(provider, /defaultModelDownloadFallbacks/);
+  assert.match(provider, /granite-4\.0-micro-GGUF/);
+  assert.match(provider, /"get", candidate, "--yes"/);
+  assert.doesNotMatch(provider, /function findLmStudioBestLocalLlmKey/);
+  assert.doesNotMatch(provider, /Modèle local alternatif détecté/);
   assert.match(provider, /function launchLmStudioHidden/);
   assert.match(provider, /"open", \["-gj", appPath\]/);
   assert.match(provider, /defaultContextLength: 32768/);
@@ -156,7 +160,10 @@ test("admin-required provisioning blocks Bridge actions until setup is complete"
 
   assert.match(source, /const provisioningRequired = Boolean\(state\.requiredProvisioning\?\.required\)/);
   assert.match(source, /window\.bridge\.ensureAdminProvisioning\(\)/);
-  assert.match(source, /Le setup d\\\\'installation est ouvert/);
+  assert.match(source, /Installation automatique en cours/);
+  assert.match(source, /sans action utilisateur/);
+  assert.doesNotMatch(source, /data-provisioning-open/);
+  assert.doesNotMatch(source, /Ouvrir l\\\\'installation/);
 });
 
 test("voice shortcut saving reports activation state instead of a false success", () => {

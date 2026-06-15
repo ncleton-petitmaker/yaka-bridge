@@ -32,9 +32,12 @@ AI, Bridge prepares LM Studio after the next sync. If the admin enables local
 push-to-talk, Bridge downloads the configured Parakeet model after the next
 sync.
 
-The user-facing settings page shows diagnostics only. It does not expose the
-provider selector. The desktop Bridge menu/panel may allow the user to change
-the push-to-talk shortcut when the admin permits it.
+The user-facing surface does not ask the user to open the installer. When local
+AI or voice is required by the admin policy, Bridge opens the provisioning
+window automatically and blocks the service launcher until the required runtime
+is ready. The user-facing settings page shows diagnostics only. It does not
+expose the provider selector. The desktop Bridge menu/panel may allow the user
+to change the push-to-talk shortcut when the admin permits it.
 
 ## LM Studio provisioning
 
@@ -50,8 +53,14 @@ Bridge prepares LM Studio in this order:
    `lms server start --port 1234`;
 4. check `/v1/models`;
 5. run `lms get <model> --yes` if the admin model is not installed;
-6. run `lms load <model> --identifier <model> --context-length 32768 --yes`;
-7. verify that `/v1/models` exposes the exact configured model id.
+6. for the default portable Granite model, retry known LM Studio/Hugging Face
+   model keys when the short alias cannot be found by `lms get`;
+7. run `lms load <model> --identifier <model> --context-length 32768 --yes`;
+8. verify that `/v1/models` exposes the exact configured model id.
+
+Bridge never falls back to Codex Cloud or to a different local model when the
+admin policy requires local AI. If the configured model cannot be installed, the
+setup fails explicitly.
 
 The v1 target is local-only LM Studio. Remote LM Studio, Ollama, Apple
 Foundation Models and Microsoft Foundry are intentionally outside this runtime

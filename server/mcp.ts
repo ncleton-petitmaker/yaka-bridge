@@ -183,20 +183,20 @@ rl.on("line", (line) => {
 
 process.stderr.write(`[${APP_SLUG}:mcp] ready dataDir=${dataDir()} proxy=${MCP_PROXY_BASE_URL || "local"}\n`);
 
-function cleanEnvVarName(value: string | undefined, fallback: string): string {
+function cleanEnvVarName(value: string | undefined, defaultValue: string): string {
   const clean = String(value || "").trim();
-  if (!clean || clean.includes("{{") || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(clean)) return fallback;
+  if (!clean || clean.includes("{{") || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(clean)) return defaultValue;
   return clean;
 }
 
-function cleanSlug(value: string | undefined, fallback: string): string {
+function cleanSlug(value: string | undefined, defaultValue: string): string {
   const clean = String(value || "").trim().replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
-  if (!clean || clean.includes("{{")) return fallback;
+  if (!clean || clean.includes("{{")) return defaultValue;
   return clean;
 }
 
-function cleanVersion(value: string | undefined, fallback: string): string {
+function cleanVersion(value: string | undefined, defaultValue: string): string {
   const clean = String(value || "").trim();
-  if (!clean || clean.includes("{{")) return fallback;
+  if (!clean || clean.includes("{{")) return defaultValue;
   return clean;
 }

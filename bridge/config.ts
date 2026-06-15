@@ -254,7 +254,7 @@ function prepareBridgeConfigForDisk(cfg: BridgeConfig): PersistedBridgeConfig {
 
 /**
  * Le chiffrement des secrets au repos reste disponible, mais il est opt-in.
- * Les builds Bridge Rossini sont souvent remplacés pendant les tests ; sur macOS,
+ * Les builds Bridge client sont souvent remplacés pendant les tests ; sur macOS,
  * safeStorage peut alors rendre les tokens illisibles entre deux versions non
  * signées. `BRIDGE_USE_SAFE_STORAGE=1` force le chiffrement quand un coffre OS
  * est disponible. Hors Electron (bridge CLI pur Node), `safeStorage` n'est pas
