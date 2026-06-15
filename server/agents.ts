@@ -310,16 +310,16 @@ function buildMcpOverrides(opts: BuildArgsOptions = {}): string[] {
   ];
 }
 
-function cleanEnvVarName(value: string | undefined, fallback: string): string {
+function cleanEnvVarName(value: string | undefined, defaultValue: string): string {
   const clean = String(value || "").trim();
-  if (!clean || clean.includes("{{") || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(clean)) return fallback;
+  if (!clean || clean.includes("{{") || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(clean)) return defaultValue;
   return clean;
 }
 
-function cleanMcpServerName(value: string | undefined, fallback: string): string {
+function cleanMcpServerName(value: string | undefined, defaultValue: string): string {
   const clean = String(value || "").trim().replace(/[^A-Za-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
-  if (!clean || clean.includes("{{")) return fallback;
-  return /^[A-Za-z0-9_-]+$/.test(clean) ? clean : fallback;
+  if (!clean || clean.includes("{{")) return defaultValue;
+  return /^[A-Za-z0-9_-]+$/.test(clean) ? clean : defaultValue;
 }
 
 function resolvePackagedMcpPath(): string | null {

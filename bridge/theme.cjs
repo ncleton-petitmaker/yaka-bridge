@@ -186,7 +186,7 @@ function bridgeLogoDataUri(designInput) {
       const mime = ext === ".svg" ? "image/svg+xml" : "image/png";
       return `data:${mime};base64,${fs.readFileSync(candidate).toString("base64")}`;
     } catch {
-      // Text fallback keeps the setup UI usable if the optional mark is absent.
+      // Text logo keeps the setup UI usable if the optional mark is absent.
     }
   }
   return null;

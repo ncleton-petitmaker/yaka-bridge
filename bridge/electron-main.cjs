@@ -2186,7 +2186,7 @@ function prepareBridgeConfigForDisk(cfg) {
 }
 
 function shouldUseElectronSafeStorage() {
-  // Les builds Bridge Rossini ne sont pas signés/stables pendant les itérations.
+  // Les builds Bridge client ne sont pas signés/stables pendant les itérations.
   // Sur macOS, safeStorage peut alors rendre les tokens illisibles après remplacement
   // de l'app. On garde le déchiffrement compatible, mais le chiffrement devient opt-in.
   return process.env.BRIDGE_USE_SAFE_STORAGE === "1" && Boolean(safeStorage?.isEncryptionAvailable());
@@ -3426,10 +3426,9 @@ function statusHtml() {
       } else if (provisioningRequired) {
         setUiError(state.requiredProvisioning?.label || "Installation requise par votre organisation.");
         services.innerHTML = '<div class="provisioning-panel">' +
-          '<h2>Installation requise</h2>' +
+          '<h2>Installation automatique en cours</h2>' +
           '<p>' + esc(state.requiredProvisioning?.items?.map(item => item.label).join(", ") || "Préparation locale") + '</p>' +
-          '<p class="muted">Le setup d\\'installation est ouvert pour terminer la préparation de ce poste.</p>' +
-          '<button type="button" class="primary" data-provisioning-open="1">Ouvrir l\\'installation</button>' +
+          '<p class="muted">Bridge installe et configure le nécessaire sans action utilisateur. La fenêtre de préparation peut rester ouverte pendant le téléchargement.</p>' +
         '</div>';
         if (!window.__bridgeProvisioningPrompted) {
           window.__bridgeProvisioningPrompted = true;
@@ -3437,9 +3436,6 @@ function statusHtml() {
             window.__bridgeProvisioningPrompted = false;
           });
         }
-        services.querySelector("[data-provisioning-open]")?.addEventListener("click", () => {
-          window.bridge.ensureAdminProvisioning();
-        });
       } else {
         setUiError(state.bridgeError || state.lastError || "");
         services.innerHTML = state.services.length ? state.services.map(service => {
